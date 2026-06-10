@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-model-router"
+version = "0.1.0"
+description = "Local-first model router: one OpenAI-compatible gateway in front of a local llama.cpp fleet, with explainable routing, health/failover, and a fleet-manager control plane."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Adam Frantz" }]
+keywords = ["llm", "router", "llama.cpp", "openai-compatible", "local-first"]
+dependencies = [
+    "aiohttp>=3.9",
+    "pydantic>=2.5",
+    "starlette>=0.37",
+    "uvicorn>=0.29",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx2"]
+docker = ["docker>=7"]
+
+[project.scripts]
+local-model-router = "local_model_router.service.__main__:main"
+
+[project.urls]
+Source = "https://github.com/adam10890/local-model-router"
+
+[tool.setuptools.packages.find]
+include = ["local_model_router*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

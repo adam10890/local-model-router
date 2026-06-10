@@ -1,0 +1,249 @@
+active_slots:
+
+  # ──────────────────────────────────────────────────────────────
+  # ROUTER MODE — single llama.cpp container with model hot-swap.
+  # This matches docker-compose.lmm.router.yml / a0-llama-router.
+  # One container, all models loaded on demand.
+  # ──────────────────────────────────────────────────────────────
+  - id: slot_router
+    port: 8080
+    role: chat           # default role; clients override via "model" param
+    model_id: router
+    context_size: 65536
+    gpu_layers: -1
+    batch_size: 512
+    threads: 8
+    parallel_slots: 1
+    flash_attention: on
+    enabled: true
+    router_mode: true
+    router_models_dir: ""      # preset-only; do not expose every GGUF under /models
+    router_models_autoload: true
+    router_models_preset: "/etc/llama/preset.ini"
+    router_models_max: 2
+
+  # Optional CPU utility worker for subagents/background work.
+  # Start docker/docker-compose.lmm.cpu-worker.yml and set enabled: true.
+  - id: utility_cpu
+    port: 8089
+    role: utility
+    model_id: utility_cpu
+    context_size: 32768
+    gpu_layers: 0
+    batch_size: 256
+    threads: 16
+    parallel_slots: 1
+    flash_attention: false
+    enabled: false
+    router_mode: false
+
+  # Dedicated GPU slot for the Scribe super-ego (a0_scribe plugin).
+  # Runs gemma-4-E4B on the GPU with 2 parallel sequences. gemma-4-E4B is small
+  # enough to coexist with the chat model (and even a Local Fleet preset) on a
+  # 24 GB RTX 4090, so the scribe never blocks the ego. Start the container with
+  # docker/docker-compose.lmm.scribe.yml. Until it is up, the scribe failover
+  # chain falls back to slot_router (which serves the [scribe] preset alias).
+  - id: scribe_gpu
+    port: 8090
+    role: scribe
+    model_id: scribe
+    context_size: 32768
+    gpu_layers: -1
+    batch_size: 512
+    threads: 8
+    parallel_slots: 2
+    flash_attention: on
+    enabled: true
+    router_mode: false
+
+# Example: slot_chat with MTP enabled per PR #22673
+# https://github.com/ggml-org/llama.cpp/pull/22673
+# Requires an MTP-capable model (Qwen3.6-27B / Qwen3.6-35BA3B / DeepSeek V3/R1).
+# Swap model_id and uncomment spec_type/draft_max to activate.
+#
+#   - id: slot_chat
+#     port: 8080
+#     model_id: qwen36_27b          # Qwen3.6-27B has MTP heads
+#     role: chat
+#     context_size: 65536
+#     gpu_layers: -1
+#     batch_size: 512
+#     flash_attention: on
+#     enabled: true
+#     spec_type: "draft-mtp"        # enable MTP (no extra model needed)
+#     draft_max: 2                  # sweet spot: predict 2 tokens ahead
+
+# -----------------------------------------------------------------
+# Slot defaults applied to every active_slot that doesn't override them
+# -----------------------------------------------------------------
+slot_defaults:
+  gpu_layers: -1
+  batch_size: 512
+  threads: 4
+  parallel_slots: 1
+  flash_attention: true
+  fit: true
+  fit_target_mib: 1024
+  fit_ctx_min: 4096
+  extra_args: []
+  no_mmap: false
+  mlock: false
+  cpu_moe: null
+  cache_type_k: null
+  cache_type_v: null
+
+  # ── Speculative decoding / MTP ────────────────────────────────
+  # Reference: https://github.com/ggml-org/llama.cpp/pull/22673
+  # (merged 2026-05-16, commit 10829dbc)
+  #
+  # spec_type: selects the speculative decoding strategy.
+  #   "draft-mtp"    — Multi-Token Prediction (PR #22673). Uses MTP heads
+  #                    baked into the model weights. No draft model needed.
+  #                    ~1.85x decode speedup on supported models per the PR
+  #                    benchmark. REQUIRES: Qwen3.6-27B, Qwen3.6-35BA3B-MoE,
+  #                    or DeepSeek V3/R1 (any GGUF with embedded MTP weights).
+  #                    NOT supported on Qwen3.5, Gemma, Mistral, Phi.
+  #   "ngram-simple" — n-gram pattern matching. Works on any model, modest gain.
+  #   "ngram-mod"    — recommended for reasoning/MoE models.
+  #   ""             — disabled (default, safe for all models).
+  # draft_max: --spec-draft-n-max. For MTP, 2 is the sweet spot per the PR.
+  # draft_min: --spec-draft-n-min. Usually leave at 0.
+  # draft_p_min: --spec-draft-p-min. 0.0 = server default (accept all drafts).
+  # NOTE: draft-mtp requires a llama.cpp build containing PR #22673; the
+  # published ghcr.io/ggml-org/llama.cpp:server-cuda may not yet have it.
+  spec_type: ""
+  draft_max: 0
+  draft_min: 0
+  draft_p_min: 0.0
+
+  # ── Native Router Mode (llama.cpp --models-dir hot-swap) ──────
+  # When router_mode: true, the slot does NOT load a fixed model.
+  # Instead llama.cpp registers all GGUFs in router_models_dir and
+  # hot-swaps on demand — one model in VRAM at a time (models_max: 1).
+  #
+  # Benefits:
+  #   - One container serves ALL roles; no need to run 3 separate containers
+  #   - Models swap automatically based on the "model" field in API requests
+  #   - New models dropped into the folder are registered without restart
+  #
+  # Usage:
+  #   1. Set router_mode: true on the slot
+  #   2. Set router_models_dir to the GGUF directory path
+  #   3. Optionally point router_models_preset to a .ini file
+  #      (see conf/models_preset_example.ini for format)
+  #   4. Set router_models_max: 1 for hot-swap (saves VRAM)
+  #      or higher to keep multiple models loaded simultaneously
+  router_mode: false
+  router_models_dir: ""
+  router_models_autoload: true
+  router_models_preset: ""
+  router_models_max: 1
+
+# -----------------------------------------------------------------
+# Global settings
+# -----------------------------------------------------------------
+global:
+  auto_start: false
+  backend: remote
+  failover_chains:
+    chat: [slot_router, utility_cpu]
+    utility: [utility_cpu, slot_router]
+    embed: [slot_router]
+    scribe: [scribe_gpu, slot_router, utility_cpu]
+  lmm_hosts:
+    chat: host.docker.internal:8080
+    utility: host.docker.internal:8088
+    embedding: host.docker.internal:8082
+    scribe: host.docker.internal:8090
+  docker_image_gpu: ghcr.io/ggml-org/llama.cpp:server-cuda
+  docker_image_cpu: ghcr.io/ggml-org/llama.cpp:server
+  docker_network: a0-lmm-net
+  gpu_count: all
+  models_dir: ''
+  llama_cpp_path: /usr/local/bin
+  server_binary: llama-server
+  use_wsl: false
+  startup_timeout: 180
+  health_check_interval: 30
+  auto_restart: true
+  max_restart_attempts: 3
+  log_level: info
+  log_dir: logs/llama_cpp
+
+hardware:
+  gpus:
+  - id: gpu_0
+    name: NVIDIA RTX 4090
+    vram_gb: 24
+    cuda_cores: 16384
+    cuda_device: 0
+    enabled: true
+  cpus:
+  - id: cpu_0
+    name: Host CPU
+    cores: 16
+    threads: 32
+    enabled: true
+  ram:
+    total_gb: 63
+    reserved_gb: 8
+    available_gb: 55
+  limits:
+    max_concurrent_gpu_models: 3
+    max_concurrent_cpu_models: 1
+    max_total_models: 4
+
+context_policy:
+  # Role context values are minimums. The Router Mode preset renderer raises
+  # hard_ctx above these values when model metadata and VRAM allow it.
+  effective_ctx_ratio: 0.70
+  vram_safety_margin_gb: 2.5
+  role_min_ctx:
+    chat: 65536
+    utility: 16384
+    embedding: 8192
+    scribe: 32768
+
+# -----------------------------------------------------------------
+# Ephemeral per-conversation containers
+#
+# When enabled, each conversation gets its own dedicated llama.cpp container
+# with a context window sized to the conversation's runtime token budget
+# (chat history + pen_paper workspace + wiki pages retrieved).
+#
+# Mental model: just as each LLM forward pass re-reads all context tokens
+# from scratch, and each terminal session is a fresh process — each
+# conversation gets a fresh, isolated container instance.
+#
+# Context size buckets let the warm pool pre-load containers at common
+# sizes to eliminate cold-start latency. On acquire, the required context
+# is snapped up to the next bucket; a pre-warmed container is handed off
+# instantly and a replacement is replenished asynchronously.
+#
+# Port range 9100-9200 is reserved for ephemeral containers, separate from
+# shared slots (chat:8080, utility:8088, embedding:8082).
+# -----------------------------------------------------------------
+ephemeral:
+  enabled: false                           # set true to activate
+  model_id: null                           # null = inherit from slot_chat model
+  warm_pool_size: 2                        # pre-loaded containers per bucket
+  max_concurrent_conversations: 10         # hard cap on simultaneous active convs
+  ttl_hours: 24                            # destroy idle containers after N hours
+  context_size_buckets:                    # snap required ctx up to next bucket
+    - 8192
+    - 16384
+    - 32768
+    - 65536
+    - 131072
+  port_range_start: 9100
+  port_range_end: 9200
+
+# -----------------------------------------------------------------
+# MCP Server (Streamable HTTP — MCP spec 2025-06-18)
+# Clients connect to:  http://<host>:<port>/mcp
+# -----------------------------------------------------------------
+mcp_server:
+  enabled: true
+  host: 127.0.0.1
+  port: 8095
+  allow_mutating_tools: false
