@@ -19,6 +19,12 @@ Manager control plane (`fleet_manager.py`). Entry point: `__main__.py`
 - `POST /routing/request` is dry-run intent routing.
 - OpenAI-compatible endpoints reuse the routing decision path and forward to
   the selected llama.cpp slot; no duplicate routing policy.
+- Model name contract: recognized aliases (`auto`, `fast`, `coder`, … —
+  defined in `local_model_router/routing/aliases.py`) forward the routing
+  decision's model; unrecognized names are explicit model requests and pass
+  through to the upstream verbatim. Do not silently rewrite explicit ids.
+- `GET /v1/models` lists aliases first; live slot models merge into matching
+  alias entries as `meta.live` instead of duplicating ids.
 - No Docker socket. No container lifecycle. No prompt logging.
 - Public binds without auth must keep refusing to start.
 

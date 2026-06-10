@@ -193,7 +193,8 @@ def test_chat_completions_records_agent_and_adds_fleet_headers(tmp_path, monkeyp
     assert resp.headers["x-hard-ctx"] == "65536"
     assert resp.headers["x-effective-ctx"] == "45875"
     assert calls[0]["args"][0] == "http://localhost:8080/v1/chat/completions"
-    assert calls[0]["kwargs"]["json"]["model"] == "chat-model"
+    # explicit non-alias model id passes through verbatim
+    assert calls[0]["kwargs"]["json"]["model"] == "local-chat"
     assert store.get_agent("hermes-1")["request_count"] == 1
     assert store.request_summary()["by_status"]["completed"] == 1
     manager_cls._instance = None

@@ -159,8 +159,48 @@ def test_chat_completions_forwards_to_selected_chat_slot(tmp_path, monkeypatch):
     assert resp.headers["x-hard-ctx"] == "65536"
     assert calls[0]["args"][0] == "http://localhost:8080/v1/chat/completions"
     assert calls[0]["kwargs"]["json"]["stream"] is False
-    assert calls[0]["kwargs"]["json"]["model"] == "chat-model"
+    # "local-chat" is not a router alias — explicit model ids pass through
+    # verbatim so Router Mode fleets can serve the exact requested model.
+    assert calls[0]["kwargs"]["json"]["model"] == "local-chat"
     assert calls[0]["kwargs"]["json"]["messages"][0]["content"] == "hello"
+    manager_cls._instance = None
+
+
+def test_chat_completions_alias_model_uses_routing_decision(tmp_path, monkeypatch):
+    client, manager_cls = _client(tmp_path, monkeypatch, health_ok=True)
+    calls = _patch_forward(monkeypatch)
+
+    resp = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "auto",
+            "messages": [{"role": "user", "content": "hello"}],
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.headers["x-a0-router-slot-id"] == "chat"
+    # recognized aliases forward whatever model the routing decision picked
+    assert calls[0]["kwargs"]["json"]["model"] == "chat-model"
+    manager_cls._instance = None
+
+
+def test_chat_completions_coder_alias_routes_to_utility(tmp_path, monkeypatch):
+    client, manager_cls = _client(tmp_path, monkeypatch, health_ok=True)
+    calls = _patch_forward(monkeypatch)
+
+    resp = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "coder",
+            "messages": [{"role": "user", "content": "write a function"}],
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.headers["x-a0-router-slot-id"] == "utility"
+    assert calls[0]["args"][0] == "http://localhost:8088/v1/chat/completions"
+    assert calls[0]["kwargs"]["json"]["model"] == "utility-model"
     manager_cls._instance = None
 
 
@@ -181,7 +221,8 @@ def test_chat_completions_routing_metadata_can_prefer_utility_slot(tmp_path, mon
     assert resp.headers["x-a0-router-slot-id"] == "utility"
     assert resp.headers["x-hard-ctx"] == "32768"
     assert calls[0]["args"][0] == "http://localhost:8088/v1/chat/completions"
-    assert calls[0]["kwargs"]["json"]["model"] == "utility-model"
+    # explicit non-alias model id passes through verbatim
+    assert calls[0]["kwargs"]["json"]["model"] == "local-utility"
     assert "routing" not in calls[0]["kwargs"]["json"]
     manager_cls._instance = None
 

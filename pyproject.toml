@@ -24,7 +24,7 @@ dev = ["pytest>=8", "httpx2"]
 docker = ["docker>=7"]
 
 [project.scripts]
-local-model-router = "local_model_router.service.__main__:main"
+local-model-router = "local_model_router.cli:main"
 
 [project.urls]
 Source = "https://github.com/adam10890/local-model-router"

@@ -34,13 +34,20 @@ Agent Zero is client #1, not the owner.
 | Slots | `GET /slots`, `GET /health/slots` | fleet view + live probes |
 | Routing (dry-run) | `POST /routing/request` | explainable intent routing |
 | Routing preview | `GET /routing/preview` | which slot a role would get |
-| OpenAI-compatible | `POST /v1/chat/completions` | streaming + non-streaming forwarding to the selected slot |
+| OpenAI-compatible | `GET /v1/models`, `POST /v1/chat/completions` | aliases + live models; streaming + non-streaming forwarding |
 | Fleet Manager | `GET /fleet/status`, `GET /fleet/agents`, `POST /fleet/agents/register` | agent identity, bounded queueing, SQLite telemetry |
 | Config preview | `GET /config/preview` | secrets redacted |
 
-Roadmap (see `AGENTS.md`): `GET /v1/models`, model aliases (`auto`, `fast`,
-`coder`, …), multi-backend adapters (Ollama, generic OpenAI, vLLM, AirLLM
-experimental), app profiles, standalone dashboard, MCP server, A2A agent card.
+**Model names:** send an alias — `auto` (routes by task type), `chat`/`deep`,
+`fast`/`utility`, `coder`, `embedding`, `scribe` — and the router picks the
+slot and model. Send any other model id and it passes through verbatim to the
+selected slot (Router Mode fleets can hot-swap to it).
+
+**CLI:** `python -m local_model_router [serve|doctor|list-models|test-route|config-check]`
+
+Roadmap (see `AGENTS.md`): multi-backend adapters (Ollama, generic OpenAI,
+vLLM, AirLLM experimental), app profiles, standalone dashboard, MCP server,
+A2A agent card.
 
 ## Quickstart
 
@@ -73,7 +80,7 @@ from openai import OpenAI
 client = OpenAI(base_url="http://127.0.0.1:9000/v1", api_key="local")
 
 resp = client.chat.completions.create(
-    model="chat",  # router alias; "auto" routing lands in a later phase
+    model="auto",  # or: chat, deep, fast, coder, embedding — or an exact model id
     messages=[{"role": "user", "content": "Write a short Python function."}],
 )
 print(resp.choices[0].message.content)

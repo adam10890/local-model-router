@@ -21,6 +21,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
+from local_model_router.routing.aliases import resolve_alias
+
 from .fleet_manager import (
     AgentIdentity,
     FleetQueue,
@@ -32,6 +34,7 @@ from .fleet_manager import (
     slots_model_snapshot,
     vram_unknown_summary,
 )
+from .models_listing import FetchFn, list_models
 from .observer import ObserverBackend
 from .routing_intent import RoutingIntentHandler, RoutingIntentRequest
 
@@ -140,10 +143,14 @@ def _role_from_chat_body(body: Dict[str, Any], routing: Dict[str, Any], metadata
     if explicit_role:
         return str(explicit_role)
 
+    task_type = str(_pick_routing_value(body, routing, metadata, "task_type", "") or "").lower()
+    resolution = resolve_alias(body.get("model"), task_type=task_type or "chat")
+    if resolution.recognized and resolution.role:
+        return resolution.role
+
     model = str(body.get("model", "") or "").lower()
     if "utility" in model or model in {"util", "coding", "debugging"}:
         return "utility"
-    task_type = str(_pick_routing_value(body, routing, metadata, "task_type", "") or "").lower()
     if task_type in {
         "background_worker",
         "coding",
@@ -201,6 +208,20 @@ def _forward_payload(body: Dict[str, Any], selected_model: Optional[str], *, str
     payload["stream"] = stream
     payload["model"] = selected_model or payload.get("model") or "local"
     return payload
+
+
+def _forward_model_for(body: Dict[str, Any], task_type: str, decision_model: Optional[str]) -> Optional[str]:
+    """Model id to send upstream.
+
+    Recognized aliases (``auto``, ``fast``, ``coder``, …) forward the routing
+    decision's model. Unrecognized names are explicit model requests — they
+    pass through untouched so a Router Mode fleet (or upstream backend) can
+    serve the exact id the client asked for.
+    """
+    resolution = resolve_alias(body.get("model"), task_type=task_type or "chat")
+    if resolution.recognized:
+        return decision_model
+    return resolution.requested or decision_model
 
 
 def _estimate_prompt_tokens(body: Dict[str, Any]) -> int:
@@ -284,6 +305,7 @@ def create_app(
     *,
     fleet_store: Optional[FleetStore] = None,
     fleet_queue: Optional[FleetQueue] = None,
+    models_fetch: Optional[FetchFn] = None,
 ) -> Starlette:
     """Return a configured Starlette app.  Safe to call multiple times (no side-effects)."""
     observer = ObserverBackend(config_path)
@@ -374,6 +396,10 @@ def create_app(
 
         registered = store.register_agent(agent, metadata=_dict_or_empty(body.get("metadata")))
         return JSONResponse({"ok": True, "agent": registered})
+
+    async def v1_models(request: Request) -> JSONResponse:
+        listing = await list_models(observer, fetch=models_fetch)
+        return JSONResponse(listing)
 
     async def routing_request(request: Request) -> JSONResponse:
         try:
@@ -512,7 +538,8 @@ def create_app(
 
         url = decision.selected_url.rstrip("/") + "/chat/completions"
         wants_stream = body.get("stream") is True
-        payload = _forward_payload(body, decision.selected_model, stream=wants_stream)
+        forward_model = _forward_model_for(body, intent.task_type, decision.selected_model)
+        payload = _forward_payload(body, forward_model, stream=wants_stream)
         selected_context = _context_for_slot(
             observer.get_slots(),
             decision.selected_slot_id,
@@ -692,6 +719,7 @@ def create_app(
         Route("/fleet/agents", protected(fleet_agents)),
         Route("/fleet/agents/register", protected(fleet_agents_register), methods=["POST"]),
         Route("/routing/request", protected(routing_request), methods=["POST"]),
+        Route("/v1/models", protected(v1_models)),
         Route("/v1/chat/completions", protected(chat_completions), methods=["POST"]),
     ]
 
