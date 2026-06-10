@@ -12,6 +12,7 @@ from __future__ import annotations
 import hmac
 import os
 import time
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 import aiohttp
@@ -21,7 +22,13 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
+from local_model_router.apps.profiles import AppProfiles
 from local_model_router.routing.aliases import resolve_alias
+from local_model_router.upstreams.registry import (
+    UpstreamConfig,
+    load_upstreams,
+    match_upstream_model,
+)
 
 from .fleet_manager import (
     AgentIdentity,
@@ -34,7 +41,7 @@ from .fleet_manager import (
     slots_model_snapshot,
     vram_unknown_summary,
 )
-from .models_listing import FetchFn, list_models
+from .models_listing import FetchFn, _default_fetch as _models_default_fetch, list_models
 from .observer import ObserverBackend
 from .routing_intent import RoutingIntentHandler, RoutingIntentRequest
 
@@ -49,6 +56,7 @@ _ROUTING_ONLY_KEYS = {
     "role",
     "agent_id",
     "agent_type",
+    "app_id",
     "task_type",
     "privacy_mode",
     "local_only",
@@ -210,6 +218,17 @@ def _forward_payload(body: Dict[str, Any], selected_model: Optional[str], *, str
     return payload
 
 
+def _app_id_from(headers: Any, body: Dict[str, Any], agent: Optional[AgentIdentity]) -> str:
+    """Client app id: X-App-Id header > body app_id > agent type."""
+    header = str(headers.get("x-app-id", "") or "").strip()
+    if header:
+        return header
+    body_app = body.get("app_id")
+    if isinstance(body_app, str) and body_app.strip():
+        return body_app.strip()
+    return getattr(agent, "agent_type", "") or ""
+
+
 def _forward_model_for(body: Dict[str, Any], task_type: str, decision_model: Optional[str]) -> Optional[str]:
     """Model id to send upstream.
 
@@ -306,6 +325,8 @@ def create_app(
     fleet_store: Optional[FleetStore] = None,
     fleet_queue: Optional[FleetQueue] = None,
     models_fetch: Optional[FetchFn] = None,
+    upstreams_path: Optional[str] = None,
+    apps_path: Optional[str] = None,
 ) -> Starlette:
     """Return a configured Starlette app.  Safe to call multiple times (no side-effects)."""
     observer = ObserverBackend(config_path)
@@ -313,6 +334,10 @@ def create_app(
     api_key = _configured_api_key()
     store = fleet_store or FleetStore()
     queue = fleet_queue or FleetQueue()
+
+    conf_dir = Path(observer.config_path).resolve().parent
+    upstreams = load_upstreams(upstreams_path or conf_dir / "upstreams.yaml")
+    app_profiles = AppProfiles.load(apps_path or conf_dir / "apps.yaml")
 
     def protected(handler: Callable[[Request], Awaitable[Response]]) -> Callable[[Request], Awaitable[Response]]:
         async def wrapper(request: Request) -> Response:
@@ -399,7 +424,120 @@ def create_app(
 
     async def v1_models(request: Request) -> JSONResponse:
         listing = await list_models(observer, fetch=models_fetch)
+        fetch_fn = models_fetch or _models_default_fetch
+        existing_ids = {row["id"] for row in listing["data"]}
+        for upstream in upstreams:
+            if not upstream.serves_inference:
+                continue
+            rows = await fetch_fn(upstream.base_url) or []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                bare_id = str(row.get("id") or "").strip()
+                if not bare_id:
+                    continue
+                namespaced = f"{upstream.name}/{bare_id}"
+                if namespaced in existing_ids:
+                    continue
+                existing_ids.add(namespaced)
+                listing["data"].append({
+                    "id": namespaced,
+                    "object": "model",
+                    "created": row.get("created") or 0,
+                    "owned_by": upstream.name,
+                    "meta": {"kind": "upstream_model", "upstream": upstream.name},
+                })
         return JSONResponse(listing)
+
+    async def backends(request: Request) -> JSONResponse:
+        fleet_entry = {
+            "name": "local_fleet",
+            "type": "llama_cpp_fleet",
+            "enabled": True,
+            "serves_inference": True,
+            "slots": observer.get_slots(),
+        }
+        return JSONResponse({
+            "backends": [fleet_entry] + [upstream.describe() for upstream in upstreams],
+        })
+
+    async def apps_list(request: Request) -> JSONResponse:
+        return JSONResponse({"apps": app_profiles.list_profiles()})
+
+    async def forward_to_upstream(
+        upstream: UpstreamConfig, bare_model: str, body: Dict[str, Any]
+    ) -> Response:
+        wants_stream = body.get("stream") is True
+        payload = _forward_payload(body, bare_model, stream=wants_stream)
+        url = upstream.base_url + "/chat/completions"
+        out_headers = {
+            "x-a0-router-upstream": upstream.name,
+            "x-a0-router-model": bare_model,
+        }
+        try:
+            if wants_stream:
+                session = aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=_FORWARD_TIMEOUT_SECONDS)
+                )
+                try:
+                    resp = await session.post(url, json=payload, headers=upstream.headers())
+                except Exception:
+                    await session.close()
+                    raise
+                if resp.status >= 400:
+                    try:
+                        upstream_json = await resp.json(content_type=None)
+                    except Exception:
+                        upstream_json = await resp.text()
+                    resp.release()
+                    await session.close()
+                    return _openai_error(
+                        f"upstream {upstream.name} stream request failed",
+                        "upstream_error",
+                        resp.status,
+                        error_type="server_error",
+                        extra={"upstream": upstream_json},
+                    )
+                return StreamingResponse(
+                    _stream_upstream_response(resp, session),
+                    status_code=resp.status,
+                    media_type="text/event-stream",
+                    headers={**out_headers, "cache-control": "no-cache", "x-accel-buffering": "no"},
+                )
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url,
+                    json=payload,
+                    headers=upstream.headers(),
+                    timeout=aiohttp.ClientTimeout(total=_FORWARD_TIMEOUT_SECONDS),
+                ) as resp:
+                    try:
+                        upstream_json = await resp.json(content_type=None)
+                    except Exception:
+                        upstream_text = await resp.text()
+                        return _openai_error(
+                            f"upstream {upstream.name} response was not valid JSON",
+                            "upstream_invalid_json",
+                            502,
+                            error_type="server_error",
+                            extra={"upstream_status": resp.status, "upstream_body": upstream_text[:1000]},
+                        )
+                    return JSONResponse(upstream_json, status_code=resp.status, headers=out_headers)
+        except aiohttp.ClientError as exc:
+            return _openai_error(
+                f"could not reach upstream {upstream.name}: {exc}",
+                "upstream_unreachable",
+                502,
+                error_type="server_error",
+            )
+        except TimeoutError:
+            return _openai_error(
+                f"upstream {upstream.name} timed out",
+                "upstream_timeout",
+                504,
+                error_type="server_error",
+            )
 
     async def routing_request(request: Request) -> JSONResponse:
         try:
@@ -430,6 +568,17 @@ def create_app(
 
         try:
             agent = identity_from_headers(request.headers, body)
+            app_id = _app_id_from(request.headers, body, agent)
+            effective_model, policy_error = app_profiles.apply(app_id, body.get("model"))
+            if policy_error:
+                return _openai_error(
+                    f"model '{effective_model}' is not allowed for app '{app_id}'",
+                    policy_error,
+                    403,
+                    param="model",
+                    extra={"app_id": app_id},
+                )
+            body["model"] = effective_model
             intent = _intent_from_chat_body(body, agent=agent)
         except ValidationError as exc:
             import json as _json
@@ -447,6 +596,10 @@ def create_app(
                 param="X-Priority",
                 extra={"detail": str(exc)},
             )
+
+        upstream_match = match_upstream_model(effective_model, upstreams)
+        if upstream_match is not None:
+            return await forward_to_upstream(upstream_match[0], upstream_match[1], body)
 
         request_id = store.create_request(agent)
         started = time.monotonic()
@@ -719,6 +872,8 @@ def create_app(
         Route("/fleet/agents", protected(fleet_agents)),
         Route("/fleet/agents/register", protected(fleet_agents_register), methods=["POST"]),
         Route("/routing/request", protected(routing_request), methods=["POST"]),
+        Route("/backends", protected(backends)),
+        Route("/apps", protected(apps_list)),
         Route("/v1/models", protected(v1_models)),
         Route("/v1/chat/completions", protected(chat_completions), methods=["POST"]),
     ]

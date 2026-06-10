@@ -1,0 +1,37 @@
+# Upstream backend providers beyond the local llama.cpp fleet.
+#
+# One adapter type — openai_compatible — covers Ollama, vLLM, LocalAI,
+# LM Studio, llama-swap, LiteLLM, and any other server exposing /v1.
+# Reference models as "<name>/<model-id>", e.g. model: "ollama/llama3.3:70b".
+#
+# API keys are read from the environment variable named in api_key_env.
+# Never put key material in this file.
+
+upstreams:
+  - name: ollama
+    type: openai_compatible
+    base_url: http://localhost:11434/v1
+    enabled: false
+    notes: "Ollama's OpenAI-compatible endpoint. Enable when Ollama runs locally."
+
+  - name: vllm
+    type: openai_compatible
+    base_url: http://localhost:8000/v1
+    enabled: false
+    notes: "vLLM OpenAI server. High-throughput serving for one pinned model."
+
+  - name: lmstudio
+    type: openai_compatible
+    base_url: http://localhost:1234/v1
+    enabled: false
+    notes: "LM Studio local server."
+
+  - name: airllm
+    type: airllm
+    enabled: false
+    experimental: true
+    notes: >-
+      Layer-wise loading of very large HF models under limited VRAM.
+      Recognized and listed for planning, but no serving adapter is
+      implemented yet — enabling it does not route inference. Recommended
+      only for offline experiments, never for fast chat or agents.

@@ -36,12 +36,22 @@ Agent Zero is client #1, not the owner.
 | Routing preview | `GET /routing/preview` | which slot a role would get |
 | OpenAI-compatible | `GET /v1/models`, `POST /v1/chat/completions` | aliases + live models; streaming + non-streaming forwarding |
 | Fleet Manager | `GET /fleet/status`, `GET /fleet/agents`, `POST /fleet/agents/register` | agent identity, bounded queueing, SQLite telemetry |
+| Backends | `GET /backends` | local fleet + configured upstreams with capabilities |
+| App profiles | `GET /apps` | per-client routing policy |
 | Config preview | `GET /config/preview` | secrets redacted |
 
 **Model names:** send an alias — `auto` (routes by task type), `chat`/`deep`,
 `fast`/`utility`, `coder`, `embedding`, `scribe` — and the router picks the
 slot and model. Send any other model id and it passes through verbatim to the
-selected slot (Router Mode fleets can hot-swap to it).
+selected slot (Router Mode fleets can hot-swap to it). Send
+`<upstream>/<model>` (e.g. `ollama/llama3.3:70b`) to target an upstream
+backend configured in `conf/upstreams.yaml` — one `openai_compatible`
+adapter covers Ollama, vLLM, LocalAI, and LM Studio. AirLLM is recognized as
+an experimental, non-serving entry.
+
+**App profiles:** identify your client with the `X-App-Id` header and
+`conf/apps.yaml` controls its default model and allowed models. Unknown apps
+get the permissive default profile.
 
 **CLI:** `python -m local_model_router [serve|doctor|list-models|test-route|config-check]`
 

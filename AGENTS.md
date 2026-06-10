@@ -17,8 +17,15 @@ codebase.
 - `local_model_router/service/` — HTTP surface and control plane.
 - `local_model_router/helpers/` — config resolution, context planning, slot
   orchestration, failover, health.
+- `local_model_router/routing/` — model aliases and routing policy.
+- `local_model_router/upstreams/` — upstream backend adapters
+  (`openai_compatible` covers Ollama/vLLM/LocalAI/LM Studio; `airllm` is
+  recognized but experimental and non-serving). Keys via env only.
+- `local_model_router/apps/` — app/client profiles (`conf/apps.yaml`):
+  default model, allowed models, auto-route policy per `X-App-Id`.
 - `conf/` — fleet description. `llama_cpp_servers.yaml` is local-only
   (gitignored); the `.example` variant is the committed reference.
+  `upstreams.yaml` and `apps.yaml` are committed defaults (no secrets).
 - `tests/` — hermetic pytest suite; no live fleet or GPU required.
 - The service must remain Docker-socket-free: it routes to running slots; it
   does not start or stop containers.
@@ -38,12 +45,11 @@ codebase.
 
 - Keep increments small and behavior-preserving; this codebase is trusted by
   a live setup.
-- Phase roadmap: (1) `GET /v1/models` + model aliases (`auto`, `fast`,
-  `coder`, `deep`, `embedding`); (2) backend adapters beyond llama.cpp
-  (Ollama, generic OpenAI, vLLM; AirLLM experimental, off by default);
-  (3) app profiles (`apps.yaml`: per-client default model, allowed models,
-  rate limits, privacy); (4) standalone dashboard; (5) MCP server + A2A agent
-  card. Keep each phase a separate branch and PR.
+- Phase roadmap: (1) ✅ `GET /v1/models` + model aliases; (2) ✅ upstream
+  adapters (`conf/upstreams.yaml`, `<name>/<model>` namespacing); (3) ✅ app
+  profiles (`conf/apps.yaml`); (4) standalone dashboard; (5) MCP server + A2A
+  agent card. Future: per-app API keys, rate limits, AirLLM serving adapter,
+  upstream-aware auto-routing (today auto-routing covers the fleet only).
 - Renaming modules toward a layered layout (`api/`, `routing/`, `backends/`,
   `telemetry/`) is allowed once tests cover the seam being moved — never as a
   big-bang rewrite.

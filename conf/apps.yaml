@@ -1,0 +1,43 @@
+# App (client) profiles. Clients identify with the X-App-Id header;
+# unknown or missing ids get the permissive "default" profile.
+#
+# Per profile:
+#   default_model:  used when the request omits "model"
+#   allowed_models: list of aliases/model ids, or ["*"] for everything
+#   allow_auto_route: whether model "auto" is permitted
+#   notes: free text
+
+apps:
+  default:
+    default_model: auto
+    allowed_models: ["*"]
+    allow_auto_route: true
+    notes: "Fallback profile for unidentified clients."
+
+  agent_zero:
+    default_model: chat
+    allowed_models: ["*"]
+    allow_auto_route: true
+    notes: "Agent Zero main/utility/embedding roles via the lmm_router provider."
+
+  hermes:
+    default_model: auto
+    allowed_models: ["*"]
+    allow_auto_route: true
+
+  n8n:
+    default_model: fast
+    allowed_models: ["auto", "fast", "utility", "chat", "coder", "embedding"]
+    allow_auto_route: true
+    notes: "Workflow automation — prefer the fast lane by default."
+
+  open_webui:
+    default_model: auto
+    allowed_models: ["*"]
+    allow_auto_route: true
+
+  aider:
+    default_model: coder
+    allowed_models: ["coder", "fast", "chat", "deep"]
+    allow_auto_route: true
+    notes: "Coding assistant — defaults to the coder lane."
