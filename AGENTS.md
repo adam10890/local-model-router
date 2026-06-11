@@ -47,9 +47,12 @@ codebase.
   a live setup.
 - Phase roadmap: (1) ✅ `GET /v1/models` + model aliases; (2) ✅ upstream
   adapters (`conf/upstreams.yaml`, `<name>/<model>` namespacing); (3) ✅ app
-  profiles (`conf/apps.yaml`); (4) standalone dashboard; (5) MCP server + A2A
-  agent card. Future: per-app API keys, rate limits, AirLLM serving adapter,
-  upstream-aware auto-routing (today auto-routing covers the fleet only).
+  profiles (`conf/apps.yaml`); (4) ✅ standalone dashboard at `/ui`;
+  (5) ✅ MCP server (`local_model_router/mcp`, `[mcp]` extra) + A2A agent
+  card (`/.well-known/agent-card.json`, `POST /a2a`). Future: per-app API
+  keys, rate limits, `/v1/embeddings` passthrough, `/metrics`,
+  `/routing/history`, AirLLM serving adapter, upstream-aware auto-routing,
+  Cookbook/Compare dashboard pages, integration docs set.
 - Renaming modules toward a layered layout (`api/`, `routing/`, `backends/`,
   `telemetry/`) is allowed once tests cover the seam being moved — never as a
   big-bang rewrite.
@@ -66,3 +69,9 @@ codebase.
 - `local_model_router/service/AGENTS.md` — HTTP surface, auth, forwarding.
 - `local_model_router/helpers/AGENTS.md` — orchestration and routing helpers.
 - `tests/AGENTS.md` — test conventions (hermetic, no live fleet).
+
+Smaller areas without child contracts yet: `routing/` (aliases),
+`upstreams/`, `apps/`, `mcp/` (ported from the plugin; mutating tools gated
+by `MCP_ALLOW_MUTATING_TOOLS`), `a2a/` (card + skills; card is public, skills
+honor the API key), `dashboard/` (single static page at `/ui`; data calls
+carry the user-entered key).

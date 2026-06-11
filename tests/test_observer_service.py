@@ -16,8 +16,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_ROOT = Path(__file__).resolve().parents[1] / "local_model_router"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-if str(PLUGIN_ROOT) not in sys.path:
-    sys.path.insert(0, str(PLUGIN_ROOT))
 
 from starlette.testclient import TestClient  # noqa: E402
 

@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "httpx2"]
 docker = ["docker>=7"]
+mcp = ["mcp>=1.22.0"]
 
 [project.scripts]
 local-model-router = "local_model_router.cli:main"
@@ -31,6 +32,9 @@ Source = "https://github.com/adam10890/local-model-router"
 
 [tool.setuptools.packages.find]
 include = ["local_model_router*"]
+
+[tool.setuptools.package-data]
+local_model_router = ["dashboard/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

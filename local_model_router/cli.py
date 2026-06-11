@@ -28,6 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("serve", help="start the router HTTP service (default)")
+    sub.add_parser("mcp", help="start the MCP server (Streamable HTTP, requires the 'mcp' extra)")
     sub.add_parser("doctor", help="check python, config, dependencies, and slot reachability")
     sub.add_parser("list-models", help="print router aliases and live slot models")
     sub.add_parser("config-check", help="parse and sanity-check the fleet config")
@@ -58,6 +59,17 @@ def cmd_serve(_args: argparse.Namespace) -> int:
     from local_model_router.service.__main__ import main as serve_main
 
     serve_main()
+    return 0
+
+
+def cmd_mcp(_args: argparse.Namespace) -> int:
+    try:
+        from local_model_router.mcp.server import main as mcp_main
+    except ImportError as exc:
+        print(f"MCP support is not installed: {exc}")
+        print('Install it with: pip install -e ".[mcp]"')
+        return 1
+    mcp_main()
     return 0
 
 
@@ -192,6 +204,7 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
 
 _COMMANDS = {
     "serve": cmd_serve,
+    "mcp": cmd_mcp,
     "doctor": cmd_doctor,
     "list-models": cmd_list_models,
     "test-route": cmd_test_route,

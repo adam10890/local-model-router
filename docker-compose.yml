@@ -1,0 +1,31 @@
+# local-model-router — container deployment.
+#
+# The router routes to an already-running llama.cpp fleet; it does not start
+# one. Point conf/llama_cpp_servers.yaml at your fleet (host.docker.internal
+# reaches host-published slot ports from inside the container).
+#
+#   docker compose up -d
+#   curl http://localhost:9000/health
+
+services:
+  router:
+    build: .
+    container_name: local-model-router
+    ports:
+      - "127.0.0.1:9000:9000"   # localhost only — never expose to LAN here
+    environment:
+      OBSERVER_HOST: 0.0.0.0
+      OBSERVER_PORT: "9000"
+      A0_LMM_ROUTER_CONFIG: /app/conf/llama_cpp_servers.yaml
+      A0_LMM_ROUTER_API_KEY: ${A0_LMM_ROUTER_API_KEY:?set an API key in .env}
+      A0_FLEET_MAX_ACTIVE: ${A0_FLEET_MAX_ACTIVE:-1}
+      A0_FLEET_MAX_QUEUE: ${A0_FLEET_MAX_QUEUE:-32}
+    volumes:
+      - ./conf:/app/conf:ro
+      - router-data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  router-data:

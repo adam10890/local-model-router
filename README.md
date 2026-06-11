@@ -39,6 +39,13 @@ Agent Zero is client #1, not the owner.
 | Backends | `GET /backends` | local fleet + configured upstreams with capabilities |
 | App profiles | `GET /apps` | per-client routing policy |
 | Config preview | `GET /config/preview` | secrets redacted |
+| Dashboard | `GET /ui` | standalone Alpine.js panel: slots, backends, models, queue, routing test |
+| A2A | `GET /.well-known/agent-card.json`, `POST /a2a` | agent card + skills for agent-to-agent use |
+| MCP | `python -m local_model_router mcp` | Streamable HTTP MCP server (port 8095, `[mcp]` extra) |
+
+**Three surfaces, one rule:** the OpenAI-compatible API is for model clients;
+MCP is for tool-using agents; A2A is for agent-to-agent collaboration. All
+three reuse the same routing engine — no duplicate policy.
 
 **Model names:** send an alias — `auto` (routes by task type), `chat`/`deep`,
 `fast`/`utility`, `coder`, `embedding`, `scribe` — and the router picks the
@@ -117,6 +124,31 @@ routing telemetry, and the fleet-manager queue:
 ```text
 api_base: http://host.docker.internal:9000/v1
 ```
+
+## Docker
+
+```bash
+echo "A0_LMM_ROUTER_API_KEY=change-me" > .env
+docker compose up -d
+curl http://localhost:9000/health
+```
+
+The container binds to localhost only and refuses to start without an API
+key. The fleet config is mounted read-only from `./conf`;
+`host.docker.internal` reaches host-published llama.cpp ports.
+
+## MCP server
+
+```powershell
+.venv\Scripts\pip install -e ".[mcp]"
+.venv\Scripts\python -m local_model_router mcp     # Streamable HTTP on :8095/mcp
+```
+
+Tools: `chat_completion`, `utility_completion`, `route_completion`,
+`get_embeddings`, `fleet_status`, `list_slots` — plus admin tools
+(`start_fleet`, `start_slot`, `stop_slot`) **only** when
+`MCP_ALLOW_MUTATING_TOOLS=1`. Bearer auth is on by default; inspect with
+`npx @modelcontextprotocol/inspector http://127.0.0.1:8095/mcp`.
 
 ## Development
 

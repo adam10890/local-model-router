@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>local-model-router</title>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --line:#262a33; --text:#e6e8ee; --dim:#8b93a3;
+          --ok:#3fb950; --warn:#d29922; --err:#f85149; --accent:#58a6ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:14px/1.5 system-ui, "Segoe UI", sans-serif; padding:1.2rem; }
+  h1 { font-size:1.15rem; margin:0 0 1rem; display:flex; align-items:center; gap:.6rem; }
+  h2 { font-size:.8rem; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); margin:0 0 .6rem; }
+  .grid { display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(330px,1fr)); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:1rem; }
+  .row { display:flex; justify-content:space-between; gap:.5rem; padding:.25rem 0;
+         border-bottom:1px dashed var(--line); }
+  .row:last-child { border-bottom:none; }
+  .dim { color:var(--dim); }
+  .badge { display:inline-block; padding:.05rem .55rem; border-radius:99px; font-size:.75rem; }
+  .ok   { background:rgba(63,185,80,.15);  color:var(--ok); }
+  .warn { background:rgba(210,153,34,.15); color:var(--warn); }
+  .err  { background:rgba(248,81,73,.15);  color:var(--err); }
+  input, select, textarea { background:#0d1016; color:var(--text); border:1px solid var(--line);
+          border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
+  button { background:var(--accent); color:#08111f; border:0; border-radius:6px;
+           padding:.45rem 1rem; font:inherit; font-weight:600; cursor:pointer; }
+  button:hover { filter:brightness(1.1); }
+  pre { background:#0d1016; border:1px solid var(--line); border-radius:6px; padding:.7rem;
+        overflow:auto; font-size:.78rem; max-height:300px; white-space:pre-wrap; }
+  .key-bar { display:flex; gap:.5rem; align-items:center; margin-bottom:1rem; max-width:560px; }
+  .pulse { width:.6rem; height:.6rem; border-radius:50%; background:var(--err); }
+  .pulse.up { background:var(--ok); }
+  table { width:100%; border-collapse:collapse; font-size:.82rem; }
+  td, th { text-align:left; padding:.3rem .4rem; border-bottom:1px solid var(--line); }
+  th { color:var(--dim); font-weight:500; }
+</style>
+</head>
+<body x-data="dashboard()" x-init="boot()">
+
+<h1><span class="pulse" :class="health.status === 'ok' ? 'up' : ''"></span>
+    local-model-router
+    <span class="dim" x-text="health.version ? 'v' + health.version : ''"></span></h1>
+
+<div class="key-bar">
+  <input type="password" placeholder="API key (only if configured)" x-model="apiKey"
+         @change="saveKey(); refresh()">
+  <button @click="refresh()">Refresh</button>
+</div>
+
+<div class="grid">
+
+  <div class="card">
+    <h2>Slots</h2>
+    <template x-for="slot in slots" :key="slot.id">
+      <div class="row">
+        <span>
+          <strong x-text="slot.id"></strong>
+          <span class="dim" x-text="' · ' + (slot.role || '?') + ' · :' + (slot.port || '?')"></span>
+        </span>
+        <span class="badge"
+              :class="slot.health === 'healthy' ? 'ok' : (slot.health === 'disabled' ? 'warn' : 'err')"
+              x-text="slot.health || 'unknown'"></span>
+      </div>
+    </template>
+    <div class="dim" x-show="!slots.length">no slots</div>
+  </div>
+
+  <div class="card">
+    <h2>Backends</h2>
+    <template x-for="b in backends" :key="b.name">
+      <div class="row">
+        <span>
+          <strong x-text="b.name"></strong>
+          <span class="dim" x-text="' · ' + b.type"></span>
+          <span class="badge warn" x-show="b.experimental">experimental</span>
+        </span>
+        <span class="badge" :class="b.serves_inference ? 'ok' : 'warn'"
+              x-text="b.serves_inference ? 'serving' : (b.enabled ? 'no-serve' : 'disabled')"></span>
+      </div>
+    </template>
+  </div>
+
+  <div class="card">
+    <h2>Fleet queue</h2>
+    <div class="row"><span class="dim">active</span><span x-text="fleet.queue?.active ?? '—'"></span></div>
+    <div class="row"><span class="dim">queued</span><span x-text="fleet.queue?.queued ?? '—'"></span></div>
+    <div class="row"><span class="dim">max active</span><span x-text="fleet.queue?.max_active ?? '—'"></span></div>
+    <div class="row"><span class="dim">agents seen</span><span x-text="fleet.agents?.count ?? '—'"></span></div>
+    <div class="row"><span class="dim">requests completed</span>
+      <span x-text="fleet.requests?.by_status?.completed ?? 0"></span></div>
+    <div class="row"><span class="dim">requests failed</span>
+      <span x-text="fleet.requests?.by_status?.failed ?? 0"></span></div>
+  </div>
+
+  <div class="card">
+    <h2>App profiles</h2>
+    <template x-for="a in apps" :key="a.app_id">
+      <div class="row">
+        <span><strong x-text="a.app_id"></strong></span>
+        <span class="dim" x-text="'default: ' + a.default_model"></span>
+      </div>
+    </template>
+    <div class="dim" x-show="!apps.length">permissive default only</div>
+  </div>
+
+  <div class="card" style="grid-column:1/-1">
+    <h2>Models</h2>
+    <table>
+      <thead><tr><th>id</th><th>kind</th><th>role</th><th>live slot</th><th>n_ctx</th></tr></thead>
+      <tbody>
+        <template x-for="m in models" :key="m.id">
+          <tr>
+            <td x-text="m.id"></td>
+            <td class="dim" x-text="m.meta?.kind"></td>
+            <td x-text="m.meta?.maps_to_role || m.meta?.role || ''"></td>
+            <td x-text="m.meta?.live?.slot_id || m.meta?.slot_id || ''"></td>
+            <td x-text="m.meta?.live?.n_ctx || m.meta?.n_ctx || ''"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="grid-column:1/-1">
+    <h2>Routing test panel</h2>
+    <div style="display:flex; gap:.6rem; flex-wrap:wrap; margin-bottom:.6rem;">
+      <select x-model="route.task_type" style="max-width:220px">
+        <template x-for="t in taskTypes"><option :value="t" x-text="t"></option></template>
+      </select>
+      <input x-model="route.role" placeholder="role (optional: chat/utility/embed/scribe)" style="max-width:320px">
+      <button @click="testRoute()">Route (dry-run)</button>
+    </div>
+    <pre x-text="route.result || 'routing decision will appear here'"></pre>
+  </div>
+
+</div>
+
+<script>
+function dashboard() {
+  return {
+    apiKey: localStorage.getItem("lmr_key") || "",
+    health: {}, slots: [], backends: [], apps: [], models: [], fleet: {},
+    taskTypes: ["chat","coding","planning","research","summarization","embedding",
+                "tool_calling","sub_agent_task","background_worker","documentation"],
+    route: { task_type: "chat", role: "", result: "" },
+
+    saveKey() { localStorage.setItem("lmr_key", this.apiKey); },
+    headers() {
+      const h = { "Content-Type": "application/json" };
+      if (this.apiKey) h["Authorization"] = "Bearer " + this.apiKey;
+      return h;
+    },
+    async get(path) {
+      const resp = await fetch(path, { headers: this.headers() });
+      if (!resp.ok) throw new Error(path + " -> " + resp.status);
+      return resp.json();
+    },
+    async refresh() {
+      try { this.health = await this.get("/health"); } catch { this.health = {}; }
+      try { this.slots = await this.get("/health/slots"); } catch { this.slots = []; }
+      try { this.backends = (await this.get("/backends")).backends || []; } catch { this.backends = []; }
+      try { this.apps = (await this.get("/apps")).apps || []; } catch { this.apps = []; }
+      try { this.models = (await this.get("/v1/models")).data || []; } catch { this.models = []; }
+      try { this.fleet = await this.get("/fleet/status"); } catch { this.fleet = {}; }
+    },
+    async testRoute() {
+      this.route.result = "routing...";
+      try {
+        const body = { agent_id: "dashboard", agent_type: "custom", task_type: this.route.task_type };
+        if (this.route.role.trim()) body.role = this.route.role.trim();
+        const resp = await fetch("/routing/request", {
+          method: "POST", headers: this.headers(), body: JSON.stringify(body),
+        });
+        this.route.result = JSON.stringify(await resp.json(), null, 2);
+      } catch (err) { this.route.result = String(err); }
+    },
+    boot() { this.refresh(); setInterval(() => this.refresh(), 7000); },
+  };
+}
+</script>
+</body>
+</html>

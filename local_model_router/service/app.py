@@ -19,9 +19,10 @@ import aiohttp
 from pydantic import ValidationError
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
+from local_model_router.a2a.card import agent_card, skill_ids
 from local_model_router.apps.profiles import AppProfiles
 from local_model_router.routing.aliases import resolve_alias
 from local_model_router.upstreams.registry import (
@@ -539,6 +540,69 @@ def create_app(
                 error_type="server_error",
             )
 
+    async def dashboard_page(request: Request) -> HTMLResponse:
+        from local_model_router.dashboard import dashboard_html
+
+        return HTMLResponse(dashboard_html())
+
+    async def well_known_agent_card(request: Request) -> JSONResponse:
+        base_url = str(request.base_url).rstrip("/")
+        return JSONResponse(agent_card(base_url))
+
+    async def a2a_skills(request: Request) -> JSONResponse:
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid_json"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "invalid_request_body"}, status_code=400)
+
+        skill = str(body.get("skill") or "").strip()
+        skill_input = _dict_or_empty(body.get("input"))
+        if skill not in skill_ids():
+            return JSONResponse(
+                {"error": "unknown_skill", "known_skills": sorted(skill_ids())},
+                status_code=404,
+            )
+
+        if skill == "route_llm_task":
+            try:
+                intent = RoutingIntentRequest.model_validate({
+                    "agent_id": str(skill_input.get("agent_id") or "a2a_client"),
+                    "agent_type": str(skill_input.get("agent_type") or "custom"),
+                    "role": skill_input.get("role"),
+                    "task_type": str(skill_input.get("task_type") or "chat"),
+                    "privacy_mode": str(skill_input.get("privacy_mode") or "unknown"),
+                    "local_only": bool(skill_input.get("local_only", False)),
+                    "requires_long_context": bool(skill_input.get("requires_long_context", False)),
+                    "requires_tools": bool(skill_input.get("requires_tools", False)),
+                    "estimated_tokens": skill_input.get("estimated_tokens"),
+                    "preferred_slot": skill_input.get("preferred_slot"),
+                })
+            except ValidationError as exc:
+                import json as _json
+
+                return JSONResponse(
+                    {"error": "validation_error", "detail": _json.loads(exc.json())},
+                    status_code=422,
+                )
+            decision = await intent_handler.handle(intent)
+            return JSONResponse({"skill": skill, "result": decision.model_dump()})
+
+        if skill == "check_backend_health":
+            slots_health = await observer.get_slots_health()
+            return JSONResponse({
+                "skill": skill,
+                "result": {
+                    "fleet_slots": slots_health,
+                    "upstreams": [upstream.describe() for upstream in upstreams],
+                },
+            })
+
+        # list_models
+        listing = await list_models(observer, fetch=models_fetch)
+        return JSONResponse({"skill": skill, "result": listing})
+
     async def routing_request(request: Request) -> JSONResponse:
         try:
             body = await request.json()
@@ -874,6 +938,9 @@ def create_app(
         Route("/routing/request", protected(routing_request), methods=["POST"]),
         Route("/backends", protected(backends)),
         Route("/apps", protected(apps_list)),
+        Route("/.well-known/agent-card.json", well_known_agent_card),
+        Route("/a2a", protected(a2a_skills), methods=["POST"]),
+        Route("/ui", dashboard_page),
         Route("/v1/models", protected(v1_models)),
         Route("/v1/chat/completions", protected(chat_completions), methods=["POST"]),
     ]
