@@ -31,6 +31,12 @@ from local_model_router.upstreams.registry import (
     match_upstream_model,
 )
 
+from .fleet_control import (
+    FleetControlError,
+    FleetControlHandler,
+    configured_backend,
+    fleet_control_enabled,
+)
 from .fleet_manager import (
     AgentIdentity,
     FleetQueue,
@@ -340,6 +346,10 @@ def create_app(
     upstreams = load_upstreams(upstreams_path or conf_dir / "upstreams.yaml")
     app_profiles = AppProfiles.load(apps_path or conf_dir / "apps.yaml")
 
+    control_enabled = fleet_control_enabled()
+    fleet_control = FleetControlHandler(observer.config_path)
+    fleet_backend = configured_backend(observer.config_path)
+
     def protected(handler: Callable[[Request], Awaitable[Response]]) -> Callable[[Request], Awaitable[Response]]:
         async def wrapper(request: Request) -> Response:
             if not _authorized(request, api_key):
@@ -393,9 +403,62 @@ def create_app(
                 "slots": slots,
                 "model_residency": snapshot,
                 "context_windows": context_windows,
-                "docker_socket_enabled": False,
+                "docker_socket_enabled": control_enabled and fleet_backend == "docker",
+                "fleet_control": {
+                    "enabled": control_enabled,
+                    "backend": fleet_backend,
+                },
             }
         )
+
+    def control_gated(
+        handler: Callable[[Request], Awaitable[Response]],
+    ) -> Callable[[Request], Awaitable[Response]]:
+        async def wrapper(request: Request) -> Response:
+            if not control_enabled:
+                return _openai_error(
+                    "fleet control is disabled on this router; "
+                    "set A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1 and restart to enable slot start/stop",
+                    "fleet_control_disabled",
+                    403,
+                )
+            return await handler(request)
+
+        return wrapper
+
+    async def _run_control(request: Request, action: str) -> Response:
+        slot_id = request.path_params.get("slot_id", "")
+        try:
+            if action == "start":
+                payload = await fleet_control.start_slot(slot_id)
+            elif action == "stop":
+                payload = await fleet_control.stop_slot(slot_id)
+            elif action == "start_all":
+                payload = await fleet_control.start_all()
+            else:
+                payload = await fleet_control.stop_all()
+        except FleetControlError as exc:
+            return _openai_error(exc.message, exc.code, exc.status_code, error_type="server_error")
+        except Exception as exc:  # pragma: no cover - defensive
+            return _openai_error(
+                f"fleet control action failed: {exc}",
+                "fleet_control_failed",
+                502,
+                error_type="server_error",
+            )
+        return JSONResponse(payload)
+
+    async def fleet_slot_start(request: Request) -> Response:
+        return await _run_control(request, "start")
+
+    async def fleet_slot_stop(request: Request) -> Response:
+        return await _run_control(request, "stop")
+
+    async def fleet_start_all(request: Request) -> Response:
+        return await _run_control(request, "start_all")
+
+    async def fleet_stop_all(request: Request) -> Response:
+        return await _run_control(request, "stop_all")
 
     async def fleet_agents(request: Request) -> JSONResponse:
         return JSONResponse({"ok": True, "agents": store.list_agents()})
@@ -935,6 +998,10 @@ def create_app(
         Route("/fleet/status", protected(fleet_status)),
         Route("/fleet/agents", protected(fleet_agents)),
         Route("/fleet/agents/register", protected(fleet_agents_register), methods=["POST"]),
+        Route("/fleet/start", protected(control_gated(fleet_start_all)), methods=["POST"]),
+        Route("/fleet/stop", protected(control_gated(fleet_stop_all)), methods=["POST"]),
+        Route("/fleet/slots/{slot_id}/start", protected(control_gated(fleet_slot_start)), methods=["POST"]),
+        Route("/fleet/slots/{slot_id}/stop", protected(control_gated(fleet_slot_stop)), methods=["POST"]),
         Route("/routing/request", protected(routing_request), methods=["POST"]),
         Route("/backends", protected(backends)),
         Route("/apps", protected(apps_list)),

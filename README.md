@@ -36,6 +36,7 @@ Agent Zero is client #1, not the owner.
 | Routing preview | `GET /routing/preview` | which slot a role would get |
 | OpenAI-compatible | `GET /v1/models`, `POST /v1/chat/completions` | aliases + live models; streaming + non-streaming forwarding |
 | Fleet Manager | `GET /fleet/status`, `GET /fleet/agents`, `POST /fleet/agents/register` | agent identity, bounded queueing, SQLite telemetry |
+| Fleet control (opt-in) | `POST /fleet/start`, `POST /fleet/stop`, `POST /fleet/slots/{id}/start` + `/stop` | start/stop slots; off unless `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1` |
 | Backends | `GET /backends` | local fleet + configured upstreams with capabilities |
 | App profiles | `GET /apps` | per-client routing policy |
 | Config preview | `GET /config/preview` | secrets redacted |
@@ -102,6 +103,29 @@ resp = client.chat.completions.create(
 )
 print(resp.choices[0].message.content)
 ```
+
+## Fleet control (optional)
+
+By default the router only **routes** — your llama.cpp fleet is started by
+you (compose files, scripts). Set this in `.env` to let the router also
+start and stop slots, from the API or the dashboard buttons:
+
+```text
+A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1
+```
+
+What "start" does follows `global.backend` in `conf/llama_cpp_servers.yaml`:
+
+- `docker` — the router starts real llama.cpp containers, rendering the full
+  flag set from the slot config (GPU layers, context, flash attention,
+  router mode, MTP). Requires `pip install -e ".[docker]"` and a running
+  Docker daemon.
+- `subprocess` — spawns local `llama-server` processes.
+- `remote` — registers and health-checks servers you started yourself
+  (no process control).
+
+The endpoints honor the API key like everything else, and the dashboard
+shows start/stop buttons per slot only when the flag is on.
 
 ## Security
 

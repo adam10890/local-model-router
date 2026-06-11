@@ -28,6 +28,8 @@
   button { background:var(--accent); color:#08111f; border:0; border-radius:6px;
            padding:.45rem 1rem; font:inherit; font-weight:600; cursor:pointer; }
   button:hover { filter:brightness(1.1); }
+  .btn-sm { padding:.12rem .55rem; font-size:.72rem; font-weight:600; text-transform:none; letter-spacing:0; }
+  .btn-stop { background:rgba(248,81,73,.85); color:#fff; }
   pre { background:#0d1016; border:1px solid var(--line); border-radius:6px; padding:.7rem;
         overflow:auto; font-size:.78rem; max-height:300px; white-space:pre-wrap; }
   .key-bar { display:flex; gap:.5rem; align-items:center; margin-bottom:1rem; max-width:560px; }
@@ -53,19 +55,42 @@
 <div class="grid">
 
   <div class="card">
-    <h2>Slots</h2>
+    <h2 style="display:flex; justify-content:space-between; align-items:center;">
+      <span>Slots</span>
+      <span x-show="fleet.fleet_control?.enabled" style="display:flex; gap:.35rem;">
+        <button class="btn-sm" @click="control('/fleet/start')">start all</button>
+        <button class="btn-sm btn-stop" @click="control('/fleet/stop')">stop all</button>
+      </span>
+    </h2>
     <template x-for="slot in slots" :key="slot.id">
       <div class="row">
         <span>
           <strong x-text="slot.id"></strong>
           <span class="dim" x-text="' · ' + (slot.role || '?') + ' · :' + (slot.port || '?')"></span>
         </span>
-        <span class="badge"
-              :class="slot.health === 'healthy' ? 'ok' : (slot.health === 'disabled' ? 'warn' : 'err')"
-              x-text="slot.health || 'unknown'"></span>
+        <span style="display:flex; gap:.35rem; align-items:center;">
+          <template x-if="fleet.fleet_control?.enabled">
+            <span style="display:flex; gap:.3rem;">
+              <button class="btn-sm" title="start slot"
+                      @click="control('/fleet/slots/' + slot.id + '/start')">start</button>
+              <button class="btn-sm btn-stop" title="stop slot"
+                      @click="control('/fleet/slots/' + slot.id + '/stop')">stop</button>
+            </span>
+          </template>
+          <span class="badge"
+                :class="slot.health === 'healthy' ? 'ok' : (slot.health === 'disabled' ? 'warn' : 'err')"
+                x-text="slot.health || 'unknown'"></span>
+        </span>
       </div>
     </template>
     <div class="dim" x-show="!slots.length">no slots</div>
+    <div class="dim" x-show="controlMsg" x-text="controlMsg"
+         style="margin-top:.5rem; font-size:.78rem;"></div>
+    <div class="dim" x-show="fleet.fleet_control && !fleet.fleet_control.enabled"
+         style="margin-top:.5rem; font-size:.72rem;">
+      start/stop is off — set A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1 and restart
+      (backend: <span x-text="fleet.fleet_control?.backend || '?'"></span>)
+    </div>
   </div>
 
   <div class="card">
@@ -146,6 +171,7 @@ function dashboard() {
     taskTypes: ["chat","coding","planning","research","summarization","embedding",
                 "tool_calling","sub_agent_task","background_worker","documentation"],
     route: { task_type: "chat", role: "", result: "" },
+    controlMsg: "",
 
     saveKey() { localStorage.setItem("lmr_key", this.apiKey); },
     headers() {
@@ -165,6 +191,17 @@ function dashboard() {
       try { this.apps = (await this.get("/apps")).apps || []; } catch { this.apps = []; }
       try { this.models = (await this.get("/v1/models")).data || []; } catch { this.models = []; }
       try { this.fleet = await this.get("/fleet/status"); } catch { this.fleet = {}; }
+    },
+    async control(path) {
+      this.controlMsg = path + " ...";
+      try {
+        const resp = await fetch(path, { method: "POST", headers: this.headers() });
+        const data = await resp.json().catch(() => ({}));
+        this.controlMsg = resp.ok
+          ? path + " → ok (" + (data.backend || "?") + ")"
+          : path + " → " + (data.error?.message || ("HTTP " + resp.status));
+      } catch (err) { this.controlMsg = String(err); }
+      await this.refresh();
     },
     async testRoute() {
       this.route.result = "routing...";

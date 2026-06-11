@@ -3,8 +3,9 @@
 ## Purpose
 
 The HTTP surface: Starlette app (`app.py`), dry-run routing intent
-(`routing_intent.py`), read-only fleet observer (`observer.py`), and Fleet
-Manager control plane (`fleet_manager.py`). Entry point: `__main__.py`
+(`routing_intent.py`), read-only fleet observer (`observer.py`), Fleet
+Manager control plane (`fleet_manager.py`), and opt-in fleet lifecycle
+control (`fleet_control.py`). Entry point: `__main__.py`
 (`python -m local_model_router`).
 
 ## Ownership
@@ -13,6 +14,8 @@ Manager control plane (`fleet_manager.py`). Entry point: `__main__.py`
 - `routing_intent.py` owns the Agent Client Contract schema and policy.
 - `observer.py` owns read-only fleet views; it never mutates state.
 - `fleet_manager.py` owns agent identity, bounded admission, SQLite state.
+- `fleet_control.py` owns the opt-in start/stop facade over
+  `helpers/llama_cpp_manager.BackendManager`.
 
 ## Local Contracts
 
@@ -30,7 +33,14 @@ Manager control plane (`fleet_manager.py`). Entry point: `__main__.py`
   the profile default; disallowed models return 403 with a policy code.
 - `GET /v1/models` lists aliases first; live slot models merge into matching
   alias entries as `meta.live` instead of duplicating ids.
-- No Docker socket. No container lifecycle. No prompt logging.
+- Lifecycle is opt-in: `/fleet/start`, `/fleet/stop`, and
+  `/fleet/slots/{id}/start|stop` return 403 `fleet_control_disabled` unless
+  `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1` is set at startup. With the flag on,
+  what "start" does follows `global.backend` in the fleet config (`docker` /
+  `subprocess` / `remote`). The docker backend needs the `[docker]` extra.
+  These endpoints always honor the bearer API key like everything else.
+- Default posture stays: no Docker socket, no container lifecycle.
+  No prompt logging ever.
 - Public binds without auth must keep refusing to start.
 
 ## Work Guidance
@@ -41,7 +51,7 @@ Manager control plane (`fleet_manager.py`). Entry point: `__main__.py`
 
 ## Verification
 
-- `python -m pytest tests/test_routing_intent.py tests/test_observer_service.py tests/test_openai_chat_completions.py tests/test_fleet_manager.py -q`
+- `python -m pytest tests/test_routing_intent.py tests/test_observer_service.py tests/test_openai_chat_completions.py tests/test_fleet_manager.py tests/test_fleet_control.py -q`
 
 ## Child DOX Index
 

@@ -27,8 +27,11 @@ codebase.
   (gitignored); the `.example` variant is the committed reference.
   `upstreams.yaml` and `apps.yaml` are committed defaults (no secrets).
 - `tests/` — hermetic pytest suite; no live fleet or GPU required.
-- The service must remain Docker-socket-free: it routes to running slots; it
-  does not start or stop containers.
+- The service is lifecycle-free **by default**: it routes to running slots.
+  Fleet control (start/stop slots via `BackendManager` — docker, subprocess,
+  or remote per `global.backend`) is opt-in behind
+  `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1`; the docker backend additionally
+  requires the `[docker]` extra. Without the flag, no Docker socket access.
 
 ## Local Contracts
 
@@ -49,10 +52,12 @@ codebase.
   adapters (`conf/upstreams.yaml`, `<name>/<model>` namespacing); (3) ✅ app
   profiles (`conf/apps.yaml`); (4) ✅ standalone dashboard at `/ui`;
   (5) ✅ MCP server (`local_model_router/mcp`, `[mcp]` extra) + A2A agent
-  card (`/.well-known/agent-card.json`, `POST /a2a`). Future: per-app API
-  keys, rate limits, `/v1/embeddings` passthrough, `/metrics`,
-  `/routing/history`, AirLLM serving adapter, upstream-aware auto-routing,
-  Cookbook/Compare dashboard pages, integration docs set.
+  card (`/.well-known/agent-card.json`, `POST /a2a`); (6) ✅ opt-in fleet
+  lifecycle control (`/fleet/start|stop`, `/fleet/slots/{id}/start|stop`,
+  dashboard buttons; gated by `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1`).
+  Future: per-app API keys, rate limits, `/v1/embeddings` passthrough,
+  `/metrics`, `/routing/history`, AirLLM serving adapter, upstream-aware
+  auto-routing, Cookbook/Compare dashboard pages, integration docs set.
 - Renaming modules toward a layered layout (`api/`, `routing/`, `backends/`,
   `telemetry/`) is allowed once tests cover the seam being moved — never as a
   big-bang rewrite.
