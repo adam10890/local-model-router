@@ -448,6 +448,55 @@ def create_app(
             )
         return JSONResponse(payload)
 
+    _cookbook_cache: Dict[str, Any] = {"key": None, "at": 0.0, "report": None}
+
+    async def cookbook(request: Request) -> JSONResponse:
+        import yaml
+
+        from local_model_router.cookbook.engine import build_report
+
+        try:
+            with open(observer.config_path, encoding="utf-8") as fh:
+                fleet_conf = yaml.safe_load(fh) or {}
+        except Exception:
+            fleet_conf = {}
+
+        models_dir = (
+            os.environ.get("LLAMA_MODELS_DIR", "").strip()
+            or str((fleet_conf.get("global") or {}).get("models_dir", "") or "").strip()
+        )
+        if not models_dir or not os.path.isdir(models_dir):
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": "models_dir_not_configured",
+                    "detail": (
+                        "Point the cookbook at your GGUF folder: set LLAMA_MODELS_DIR "
+                        "in .env or global.models_dir in conf/llama_cpp_servers.yaml."
+                    ),
+                    "models_dir": models_dir or None,
+                }
+            )
+
+        now = time.time()
+        force = request.query_params.get("refresh") == "1"
+        if (
+            not force
+            and _cookbook_cache["report"] is not None
+            and _cookbook_cache["key"] == models_dir
+            and now - _cookbook_cache["at"] < 60
+        ):
+            return JSONResponse(_cookbook_cache["report"])
+
+        report = build_report(
+            models_dir,
+            fleet_conf.get("hardware") or {},
+            fleet_conf.get("context_policy") or {},
+        )
+        report["ok"] = True
+        _cookbook_cache.update({"key": models_dir, "at": now, "report": report})
+        return JSONResponse(report)
+
     async def fleet_slot_start(request: Request) -> Response:
         return await _run_control(request, "start")
 
@@ -1005,6 +1054,7 @@ def create_app(
         Route("/routing/request", protected(routing_request), methods=["POST"]),
         Route("/backends", protected(backends)),
         Route("/apps", protected(apps_list)),
+        Route("/cookbook", protected(cookbook)),
         Route("/.well-known/agent-card.json", well_known_agent_card),
         Route("/a2a", protected(a2a_skills), methods=["POST"]),
         Route("/ui", dashboard_page),

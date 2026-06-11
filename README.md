@@ -40,7 +40,8 @@ Agent Zero is client #1, not the owner.
 | Backends | `GET /backends` | local fleet + configured upstreams with capabilities |
 | App profiles | `GET /apps` | per-client routing policy |
 | Config preview | `GET /config/preview` | secrets redacted |
-| Dashboard | `GET /ui` | standalone Alpine.js panel: slots, backends, models, queue, routing test |
+| Dashboard | `GET /ui` | three tabs: Overview (slots, backends, models, queue, routing test), Connect an agent (copy-paste setup per client), Cookbook |
+| Cookbook | `GET /cookbook` | scans your GGUF folder, VRAM fit math, per-role model recommendations with confidence grades |
 | A2A | `GET /.well-known/agent-card.json`, `POST /a2a` | agent card + skills for agent-to-agent use |
 | MCP | `python -m local_model_router mcp` | Streamable HTTP MCP server (port 8095, `[mcp]` extra) |
 

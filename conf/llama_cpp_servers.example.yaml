@@ -159,6 +159,11 @@ global:
   docker_image_cpu: ghcr.io/ggml-org/llama.cpp:server
   docker_network: a0-lmm-net
   gpu_count: all
+  # Path to your GGUF folder. Used for model_id -> path resolution by the
+  # docker/subprocess backends, and by the Cookbook page (/cookbook) which
+  # scans it to recommend models per role. Role subfolders (chat/, utility/,
+  # embedding/, scribe/, subagents/) act as role hints for recommendations.
+  # Can also be set via the LLAMA_MODELS_DIR env var.
   models_dir: ''
   llama_cpp_path: /usr/local/bin
   server_binary: llama-server
