@@ -54,10 +54,14 @@ codebase.
   (5) ✅ MCP server (`local_model_router/mcp`, `[mcp]` extra) + A2A agent
   card (`/.well-known/agent-card.json`, `POST /a2a`); (6) ✅ opt-in fleet
   lifecycle control (`/fleet/start|stop`, `/fleet/slots/{id}/start|stop`,
-  dashboard buttons; gated by `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1`).
+  dashboard buttons; gated by `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1`);
+  (7) ✅ dashboard v2: tabs (Overview / Connect an agent / Cookbook) +
+  `GET /cookbook` (`local_model_router/cookbook/` — GGUF header parsing,
+  VRAM fit math, per-role recommendations).
   Future: per-app API keys, rate limits, `/v1/embeddings` passthrough,
   `/metrics`, `/routing/history`, AirLLM serving adapter, upstream-aware
-  auto-routing, Cookbook/Compare dashboard pages, integration docs set.
+  auto-routing, one-click "apply recommendation" (cookbook → fleet
+  control), Compare dashboard page, integration docs set.
 - Renaming modules toward a layered layout (`api/`, `routing/`, `backends/`,
   `telemetry/`) is allowed once tests cover the seam being moved — never as a
   big-bang rewrite.
@@ -75,8 +79,12 @@ codebase.
 - `local_model_router/helpers/AGENTS.md` — orchestration and routing helpers.
 - `tests/AGENTS.md` — test conventions (hermetic, no live fleet).
 
+- `local_model_router/cookbook/AGENTS.md` — GGUF parsing + fit math +
+  recommendations.
+
 Smaller areas without child contracts yet: `routing/` (aliases),
 `upstreams/`, `apps/`, `mcp/` (ported from the plugin; mutating tools gated
 by `MCP_ALLOW_MUTATING_TOOLS`), `a2a/` (card + skills; card is public, skills
-honor the API key), `dashboard/` (single static page at `/ui`; data calls
-carry the user-entered key).
+honor the API key), `dashboard/` (single static page at `/ui`, three tabs:
+Overview / Connect an agent / Cookbook; data calls carry the user-entered
+key).

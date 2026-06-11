@@ -30,6 +30,7 @@
   button:hover { filter:brightness(1.1); }
   .btn-sm { padding:.12rem .55rem; font-size:.72rem; font-weight:600; text-transform:none; letter-spacing:0; }
   .btn-stop { background:rgba(248,81,73,.85); color:#fff; }
+  .btn-ghost { background:transparent; color:var(--accent); border:1px solid var(--line); }
   pre { background:#0d1016; border:1px solid var(--line); border-radius:6px; padding:.7rem;
         overflow:auto; font-size:.78rem; max-height:300px; white-space:pre-wrap; }
   .key-bar { display:flex; gap:.5rem; align-items:center; margin-bottom:1rem; max-width:560px; }
@@ -38,6 +39,12 @@
   table { width:100%; border-collapse:collapse; font-size:.82rem; }
   td, th { text-align:left; padding:.3rem .4rem; border-bottom:1px solid var(--line); }
   th { color:var(--dim); font-weight:500; }
+  .tabs { display:flex; gap:.4rem; margin-bottom:1rem; border-bottom:1px solid var(--line); }
+  .tab { background:transparent; color:var(--dim); border:0; border-bottom:2px solid transparent;
+         border-radius:0; padding:.45rem .9rem; font-weight:600; }
+  .tab.active { color:var(--text); border-bottom-color:var(--accent); }
+  .snippet-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:.4rem; }
+  .reasons { font-size:.76rem; color:var(--dim); padding:.3rem .4rem .5rem; }
 </style>
 </head>
 <body x-data="dashboard()" x-init="boot()">
@@ -52,7 +59,14 @@
   <button @click="refresh()">Refresh</button>
 </div>
 
-<div class="grid">
+<nav class="tabs">
+  <button class="tab" :class="tab==='overview' && 'active'" @click="openTab('overview')">Overview</button>
+  <button class="tab" :class="tab==='connect' && 'active'" @click="openTab('connect')">Connect an agent</button>
+  <button class="tab" :class="tab==='cookbook' && 'active'" @click="openTab('cookbook')">Cookbook</button>
+</nav>
+
+<!-- ════════════════════ OVERVIEW ════════════════════ -->
+<div class="grid" x-show="tab==='overview'">
 
   <div class="card">
     <h2 style="display:flex; justify-content:space-between; align-items:center;">
@@ -163,6 +177,127 @@
 
 </div>
 
+<!-- ════════════════════ CONNECT ════════════════════ -->
+<div class="grid" x-show="tab==='connect'" x-cloak>
+
+  <div class="card" style="grid-column:1/-1">
+    <h2>One address for every agent</h2>
+    <p style="margin:.2rem 0 .6rem">
+      Point any OpenAI-compatible tool at this base URL. Send an alias as the
+      model name (<code>auto</code>, <code>chat</code>, <code>coder</code>,
+      <code>fast</code>, <code>deep</code>, <code>embedding</code>) and the
+      router picks the slot; any other model id passes through verbatim.
+      If no API key is configured, any key value (e.g. <code>local</code>) works.
+    </p>
+    <div class="row"><span class="dim">from this machine</span>
+      <strong x-text="base + '/v1'"></strong></div>
+    <div class="row"><span class="dim">from inside Docker (Agent Zero, Open WebUI…)</span>
+      <strong x-text="dockerBase + '/v1'"></strong></div>
+    <div class="row"><span class="dim">identify your client (optional, enables per-app policy)</span>
+      <strong>X-App-Id: &lt;name&gt;</strong></div>
+  </div>
+
+  <template x-for="s in snippets" :key="s.id">
+    <div class="card">
+      <div class="snippet-head">
+        <h2 style="margin:0" x-text="s.title"></h2>
+        <button class="btn-sm btn-ghost"
+                @click="copy(s.id)"
+                x-text="copied === s.id ? 'copied!' : 'copy'"></button>
+      </div>
+      <pre x-text="snippetText(s.id)"></pre>
+    </div>
+  </template>
+
+</div>
+
+<!-- ════════════════════ COOKBOOK ════════════════════ -->
+<div class="grid" x-show="tab==='cookbook'" x-cloak>
+
+  <div class="card" style="grid-column:1/-1; display:flex; justify-content:space-between; align-items:center;">
+    <span>
+      <strong>Which model should serve each role?</strong>
+      <span class="dim"> — scans your GGUF folder, checks what fits the GPU, ranks per role.</span>
+    </span>
+    <button class="btn-sm" @click="loadCookbook(true)"
+            x-text="cookbookBusy ? 'scanning…' : 'rescan'"></button>
+  </div>
+
+  <template x-if="cookbook && !cookbook.ok">
+    <div class="card" style="grid-column:1/-1">
+      <h2>Not configured yet</h2>
+      <p x-text="cookbook.detail || cookbook.error"></p>
+    </div>
+  </template>
+
+  <template x-if="cookbook && cookbook.ok">
+    <div class="card">
+      <h2>Hardware budget</h2>
+      <div class="row"><span class="dim">GPU</span><span x-text="cookbook.hardware.gpu || 'unknown'"></span></div>
+      <div class="row"><span class="dim">VRAM</span><span x-text="cookbook.hardware.vram_gb + ' GB'"></span></div>
+      <div class="row"><span class="dim">budget (after safety margin)</span>
+        <span x-text="cookbook.hardware.vram_budget_gb + ' GB'"></span></div>
+      <div class="row"><span class="dim">RAM available</span>
+        <span x-text="cookbook.hardware.ram_available_gb + ' GB'"></span></div>
+      <div class="row"><span class="dim">models found</span><span x-text="cookbook.model_count"></span></div>
+    </div>
+  </template>
+
+  <template x-if="cookbook && cookbook.ok">
+    <div class="card">
+      <h2>Recommended per role</h2>
+      <template x-for="role in Object.keys(cookbook.recommendations || {})" :key="role">
+        <div class="row">
+          <span><strong x-text="role"></strong>
+            <span class="badge warn" x-show="cookbook.recommendations[role].warnings?.length"
+                  :title="(cookbook.recommendations[role].warnings || []).join('; ')">⚠</span>
+          </span>
+          <span>
+            <span x-text="cookbook.recommendations[role].file"></span>
+            <span class="dim" x-text="' · ' + cookbook.recommendations[role].score
+                  + ' · ' + cookbook.recommendations[role].confidence"></span>
+          </span>
+        </div>
+      </template>
+      <div class="dim" x-show="!Object.keys(cookbook.recommendations || {}).length">
+        no runnable candidates found</div>
+    </div>
+  </template>
+
+  <template x-if="cookbook && cookbook.ok">
+    <div class="card" style="grid-column:1/-1">
+      <h2>All scanned models <span class="dim">(click a row for the why)</span></h2>
+      <table>
+        <thead><tr>
+          <th>file</th><th>role hint</th><th>size</th><th>params</th><th>quant</th>
+          <th>fit</th><th>max ctx</th><th>best score</th><th>confidence</th>
+        </tr></thead>
+        <template x-for="m in cookbook.models" :key="m.path">
+          <tbody>
+            <tr @click="expanded = expanded === m.path ? '' : m.path" style="cursor:pointer">
+              <td x-text="m.file"></td>
+              <td class="dim" x-text="m.role_hint || ''"></td>
+              <td x-text="m.size_gb + ' GB'"></td>
+              <td x-text="m.params_b ? m.params_b + 'B' : '?'"></td>
+              <td class="dim" x-text="m.quant || '?'"></td>
+              <td><span class="badge"
+                    :class="m.fit === 'full_gpu' ? 'ok' : (m.fit === 'partial_offload' ? 'warn' : 'err')"
+                    x-text="m.fit"></span></td>
+              <td x-text="m.max_ctx_fit"></td>
+              <td x-text="Math.max(0, ...Object.values(m.scores || {0:0})).toFixed(0)"></td>
+              <td class="dim" x-text="m.confidence"></td>
+            </tr>
+            <tr x-show="expanded === m.path">
+              <td colspan="9" class="reasons" x-text="(m.reasons || []).join(' · ')"></td>
+            </tr>
+          </tbody>
+        </template>
+      </table>
+    </div>
+  </template>
+
+</div>
+
 <script>
 function dashboard() {
   return {
@@ -172,6 +307,83 @@ function dashboard() {
                 "tool_calling","sub_agent_task","background_worker","documentation"],
     route: { task_type: "chat", role: "", result: "" },
     controlMsg: "",
+    tab: "overview",
+    cookbook: null,
+    cookbookBusy: false,
+    expanded: "",
+    copied: "",
+    snippets: [
+      { id: "python", title: "Python (OpenAI SDK)" },
+      { id: "agent_zero", title: "Agent Zero" },
+      { id: "open_webui", title: "Open WebUI" },
+      { id: "aider", title: "Aider" },
+      { id: "n8n", title: "n8n" },
+      { id: "curl", title: "curl" },
+    ],
+
+    get base() { return location.origin; },
+    get dockerBase() { return "http://host.docker.internal:" + (location.port || "9000"); },
+
+    snippetText(id) {
+      const b = this.base, d = this.dockerBase;
+      const texts = {
+        python:
+`from openai import OpenAI
+
+client = OpenAI(base_url="${b}/v1", api_key="local")
+resp = client.chat.completions.create(
+    model="auto",  # or: chat / coder / fast / deep / embedding
+    messages=[{"role": "user", "content": "Hello"}],
+)
+print(resp.choices[0].message.content)`,
+        agent_zero:
+`# Agent Zero → Settings → Models (runs in Docker, so use the docker host)
+provider:  OpenAI-compatible
+api_base:  ${d}/v1
+model:     chat            # or auto
+api_key:   local`,
+        open_webui:
+`# Open WebUI → Admin → Settings → Connections → OpenAI API
+# (if Open WebUI runs in Docker, use ${d}/v1)
+URL: ${b}/v1
+Key: local`,
+        aider:
+`aider --openai-api-base ${b}/v1 --openai-api-key local --model openai/coder`,
+        n8n:
+`# n8n → Credentials → OpenAI
+Base URL: ${b}/v1          # docker: ${d}/v1
+API Key:  local
+# optional, enables per-app policy from conf/apps.yaml:
+#   add HTTP header  X-App-Id: n8n`,
+        curl:
+`curl ${b}/v1/chat/completions \\
+  -H "Content-Type: application/json" \\
+  -H "X-App-Id: my-script" \\
+  -d '{"model":"auto","messages":[{"role":"user","content":"hi"}]}'`,
+      };
+      return texts[id] || "";
+    },
+
+    copy(id) {
+      navigator.clipboard.writeText(this.snippetText(id));
+      this.copied = id;
+      setTimeout(() => { this.copied = ""; }, 1500);
+    },
+
+    openTab(t) {
+      this.tab = t;
+      if (t === "cookbook" && !this.cookbook) this.loadCookbook();
+    },
+
+    async loadCookbook(force = false) {
+      this.cookbookBusy = true;
+      try {
+        this.cookbook = await this.get("/cookbook" + (force ? "?refresh=1" : ""));
+      } catch (err) {
+        this.cookbook = { ok: false, error: String(err) };
+      }
+      this.cookbookBusy = false;
+    },
 
     saveKey() { localStorage.setItem("lmr_key", this.apiKey); },
     headers() {
