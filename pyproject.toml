@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "local-model-router"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Local-first model router: one OpenAI-compatible gateway in front of a local llama.cpp fleet, with explainable routing, health/failover, and a fleet-manager control plane."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -29,6 +29,9 @@ local-model-router = "local_model_router.cli:main"
 
 [project.urls]
 Source = "https://github.com/adam10890/local-model-router"
+
+[tool.setuptools.dynamic]
+version = { attr = "local_model_router.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["local_model_router*"]

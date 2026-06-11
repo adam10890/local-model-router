@@ -26,7 +26,7 @@ Agent Zero is client #1, not the owner.
 
 ## Status
 
-**0.1.0 — working extraction.** What works today:
+**0.2.0 — extraction + control plane + cookbook.** What works today:
 
 | Surface | Endpoint | Notes |
 |---|---|---|

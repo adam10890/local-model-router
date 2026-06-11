@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from local_model_router import __version__
+
 AGENT_NAME = "Local Model Router Agent"
 AGENT_DESCRIPTION = (
     "An agent that manages local LLM backends, selects the best local model "
@@ -76,7 +78,7 @@ def agent_card(base_url: str) -> Dict[str, Any]:
         "description": AGENT_DESCRIPTION,
         "url": f"{base}/a2a",
         "preferredTransport": "JSONRPC",
-        "version": "0.1.0",
+        "version": __version__,
         "capabilities": {
             "streaming": False,
             "pushNotifications": False,

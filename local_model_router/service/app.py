@@ -52,7 +52,7 @@ from .models_listing import FetchFn, _default_fetch as _models_default_fetch, li
 from .observer import ObserverBackend
 from .routing_intent import RoutingIntentHandler, RoutingIntentRequest
 
-_VERSION = "0.1.0"
+from local_model_router import __version__ as _VERSION
 _SERVICE_NAME = "lmm-router-observer"
 _FORWARD_TIMEOUT_SECONDS = 120
 _API_KEY_ENV = "A0_LMM_ROUTER_API_KEY"
