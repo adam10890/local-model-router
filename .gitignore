@@ -10,6 +10,9 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
+# Downloaded llama.cpp binaries (Vulkan build for the iGPU worker)
+bin/
+
 # Local runtime state — never commit
 conf/llama_cpp_servers.yaml
 conf/router_state.json
