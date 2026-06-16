@@ -20,8 +20,15 @@ control (`fleet_control.py`). Entry point: `__main__.py`
 ## Local Contracts
 
 - `POST /routing/request` is dry-run intent routing.
+- `GET /routing/models`, `GET /routing/models/{id}`, and
+  `GET /routing/analytics` are safe discovery/telemetry surfaces. They must
+  never return API keys, prompt bodies, or raw request content.
 - OpenAI-compatible endpoints reuse the routing decision path and forward to
   the selected llama.cpp slot; no duplicate routing policy.
+- `model=auto` is capability-aware: tools, vision payloads, JSON mode,
+  estimated tokens, app profile, strategy, health, latency hints, quality
+  hints, and local resource cost hints may affect ranking. Preserve
+  explainability with reason codes and score inputs.
 - Model name contract: recognized aliases (`auto`, `fast`, `coder`, … —
   defined in `local_model_router/routing/aliases.py`) forward the routing
   decision's model; unrecognized names are explicit model requests and pass
@@ -30,9 +37,15 @@ control (`fleet_control.py`). Entry point: `__main__.py`
   routing and forward straight to that upstream with its env-sourced auth.
   Upstream requests do not consume the fleet queue (it guards local VRAM).
 - App profile enforcement runs before alias resolution: empty model takes
-  the profile default; disallowed models return 403 with a policy code.
+  the profile default; `auto` is allowed whenever `allow_auto_route` is true;
+  disallowed explicit models return 403 with a policy code.
 - `GET /v1/models` lists aliases first; live slot models merge into matching
-  alias entries as `meta.live` instead of duplicating ids.
+  alias entries as `meta.live` instead of duplicating ids. Capability/context
+  metadata is additive and must remain safe for OpenAI-compatible clients to
+  ignore.
+- Prompt cache is opt-in via `A0_LMM_ROUTER_PROMPT_CACHE=1`, in-memory only,
+  and limited to deterministic non-streaming requests. Cache status is exposed
+  in response headers and telemetry, but prompt bodies are not stored.
 - Lifecycle is opt-in: `/fleet/start`, `/fleet/stop`, and
   `/fleet/slots/{id}/start|stop` return 403 `fleet_control_disabled` unless
   `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1` is set at startup. With the flag on,
@@ -51,7 +64,7 @@ control (`fleet_control.py`). Entry point: `__main__.py`
 
 ## Verification
 
-- `python -m pytest tests/test_routing_intent.py tests/test_observer_service.py tests/test_openai_chat_completions.py tests/test_fleet_manager.py tests/test_fleet_control.py -q`
+- `python -m pytest tests/test_routing_intent.py tests/test_observer_service.py tests/test_openai_chat_completions.py tests/test_fleet_manager.py tests/test_fleet_control.py tests/test_local_first_plus_api.py -q`
 
 ## Child DOX Index
 

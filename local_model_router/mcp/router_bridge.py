@@ -16,6 +16,9 @@ from typing import Any
 
 import aiohttp
 
+from local_model_router.routing.aliases import public_aliases
+from local_model_router.routing.catalog import build_slot_candidates
+
 logger = logging.getLogger("lmm_router.mcp.bridge")
 
 # Allow running outside the /a0 container for testing.
@@ -225,6 +228,82 @@ async def fleet_status() -> dict[str, Any]:
     }
 
 
+async def list_models() -> dict[str, Any]:
+    """Return safe model catalog details for MCP discovery."""
+    fleet_result = await _fleet_manager_get("/routing/models")
+    if fleet_result is not None:
+        return fleet_result
+    models = [_alias_model(alias, role) for alias, role in sorted(public_aliases().items())]
+    models.extend(candidate.public_dict() for candidate in build_slot_candidates(slot_configs().values()))
+    return {"models": models}
+
+
+async def model_card(model_id: str) -> dict[str, Any]:
+    """Return one model card by public id, slot id, or model id."""
+    safe_id = str(model_id or "").strip()
+    if not safe_id:
+        return {"error": "model_id_required"}
+    fleet_result = await _fleet_manager_get(f"/routing/models/{safe_id}")
+    if fleet_result is not None:
+        return fleet_result
+    for alias, role in sorted(public_aliases().items()):
+        if safe_id in {alias, f"alias:{alias}"}:
+            return {"model": _alias_model(alias, role)}
+    for candidate in build_slot_candidates(slot_configs().values()):
+        if safe_id in {candidate.id, candidate.model_id, candidate.slot_id}:
+            return {"model": candidate.public_dict()}
+    return {"error": "model_not_found", "model_id": safe_id}
+
+
+async def providers_list() -> dict[str, Any]:
+    """Return backend/provider inventory for MCP discovery."""
+    fleet_result = await _fleet_manager_get("/backends")
+    if fleet_result is not None:
+        return fleet_result
+    mgr = _get_manager()
+    return {
+        "backends": [
+            {
+                "name": "local_fleet",
+                "type": "llama_cpp_fleet",
+                "backend": mgr.backend_type,
+                "serves_inference": True,
+            }
+        ]
+    }
+
+
+async def route_preview(
+    role: str = "chat",
+    task_type: str = "chat",
+    requires_tools: bool = False,
+    requires_vision: bool = False,
+    requires_json_mode: bool = False,
+    estimated_tokens: int | None = None,
+    routing_strategy: str = "balanced_local",
+    local_only: bool = False,
+) -> dict[str, Any]:
+    """Dry-run route preview through the HTTP Fleet Manager when available."""
+    payload = {
+        "agent_id": "mcp-router",
+        "agent_type": "mcp",
+        "role": role,
+        "task_type": task_type,
+        "requires_tools": requires_tools,
+        "requires_vision": requires_vision,
+        "requires_json_mode": requires_json_mode,
+        "estimated_tokens": estimated_tokens,
+        "routing_strategy": routing_strategy,
+        "local_only": local_only,
+    }
+    fleet_result = await _fleet_manager_post("/routing/request", payload, timeout=30)
+    if fleet_result is not None:
+        return fleet_result
+    mgr = _get_manager()
+    decision = await mgr.select_slot_with_failover_async(role)
+    return decision or {"error": "no_slot_available", "role": role}
+
+
 async def start_slot(slot_id: str) -> dict[str, Any]:
     if _fleet_manager_base_url():
         return {
@@ -266,6 +345,28 @@ def hardware_profile() -> dict[str, Any]:
         return data.get("hardware", {})
     except Exception:
         return {}
+
+
+def _alias_model(alias: str, role: str) -> dict[str, Any]:
+    return {
+        "id": f"alias:{alias}",
+        "model_id": alias,
+        "source": "alias",
+        "role": role,
+        "backend_type": "router",
+        "slot_id": None,
+        "upstream_name": None,
+        "context_size": 0,
+        "health": "available",
+        "capabilities": {
+            "auto_route": alias == "auto",
+            "tools": role in {"chat", "utility", "scribe", "task-dependent"},
+            "vision": False,
+            "json_mode": role not in {"embed", "embedding"},
+        },
+        "hints": {"latency_ms": None, "quality": 0.0, "resource_cost": 0.0},
+        "metadata": {"kind": "alias", "maps_to_role": role},
+    }
 
 
 # ---------------------------------------------------------------------------

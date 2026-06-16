@@ -114,8 +114,10 @@ class AppProfiles:
 
         if not requested:
             requested = profile.default_model
-        if requested.lower() == "auto" and not profile.allow_auto_route:
-            return requested, "auto_route_disabled_for_app"
+        if requested.lower() == "auto":
+            if not profile.allow_auto_route:
+                return requested, "auto_route_disabled_for_app"
+            return requested, None
         if not profile.model_allowed(requested):
             return requested, "model_not_allowed_for_app"
         return requested, None

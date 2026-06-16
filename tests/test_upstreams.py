@@ -147,9 +147,12 @@ def test_v1_models_includes_namespaced_upstream_models(tmp_path, monkeypatch):
     client = TestClient(_make_app(tmp_path, monkeypatch, fetch=fetch))
     resp = client.get("/v1/models")
     assert resp.status_code == 200
-    ids = {row["id"] for row in resp.json()["data"]}
+    by_id = {row["id"]: row for row in resp.json()["data"]}
+    ids = set(by_id)
     assert "ollama/llama3.3:70b" in ids
     assert "ollama/qwen2.5-coder:32b" in ids
+    assert by_id["ollama/llama3.3:70b"]["source"] == "upstream"
+    assert by_id["ollama/llama3.3:70b"]["capabilities"]["json_mode"] is True
     # disabled vllm and non-serving airllm contribute nothing
     assert not any(i.startswith("vllm/") or i.startswith("airllm/") for i in ids)
 

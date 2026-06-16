@@ -7,6 +7,8 @@ Durable documentation for operators, contributors, and coding agents.
 ## Ownership
 
 - `PROVIDER.md` owns standalone provider runbook details.
+- `INTEGRATIONS.md` owns copy-paste client setup snippets for MCP and
+  OpenAI-compatible clients.
 - `development/` owns Git workflow, branch catalog rules, and collaboration
   process.
 

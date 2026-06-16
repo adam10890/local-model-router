@@ -67,11 +67,15 @@ codebase.
   dashboard buttons; gated by `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1`);
   (7) ✅ dashboard v2: tabs (Overview / Connect an agent / Cookbook) +
   `GET /cookbook` (`local_model_router/cookbook/` — GGUF header parsing,
-  VRAM fit math, per-role recommendations).
+  VRAM fit math, per-role recommendations); (8) ready candidate on
+  `ready/orca-inspired-routing`: Local-first+ catalog, capability-aware `auto`,
+  routing strategies, analytics, MCP discovery, Compare / Routing dashboard,
+  and integration snippets inspired by OrcaRouter patterns without vendor
+  code or cloud BYOK scope.
   Future: per-app API keys, rate limits, `/v1/embeddings` passthrough,
   `/metrics`, `/routing/history`, AirLLM serving adapter, upstream-aware
   auto-routing, one-click "apply recommendation" (cookbook → fleet
-  control), Compare dashboard page, integration docs set.
+  control).
 - Renaming modules toward a layered layout (`api/`, `routing/`, `backends/`,
   `telemetry/`) is allowed once tests cover the seam being moved — never as a
   big-bang rewrite.

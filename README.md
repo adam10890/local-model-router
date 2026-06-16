@@ -26,21 +26,22 @@ Agent Zero is client #1, not the owner.
 
 ## Status
 
-**0.2.0 — extraction + control plane + cookbook.** What works today:
+**0.3.0-dev - Local-first+ routing catalog.** What works today:
 
 | Surface | Endpoint | Notes |
 |---|---|---|
 | Health | `GET /health` | open, no auth |
 | Slots | `GET /slots`, `GET /health/slots` | fleet view + live probes |
-| Routing (dry-run) | `POST /routing/request` | explainable intent routing |
+| Routing (dry-run) | `POST /routing/request` | explainable capability-aware intent routing |
 | Routing preview | `GET /routing/preview` | which slot a role would get |
-| OpenAI-compatible | `GET /v1/models`, `POST /v1/chat/completions` | aliases + live models; streaming + non-streaming forwarding |
+| Routing catalog | `GET /routing/models`, `GET /routing/models/{id}`, `GET /routing/analytics` | safe model cards, recent decisions, latency/fallback/cache stats |
+| OpenAI-compatible | `GET /v1/models`, `POST /v1/chat/completions` | aliases + live/upstream models; capabilities metadata; streaming + non-streaming forwarding |
 | Fleet Manager | `GET /fleet/status`, `GET /fleet/agents`, `POST /fleet/agents/register` | agent identity, bounded queueing, SQLite telemetry |
 | Fleet control (opt-in) | `POST /fleet/start`, `POST /fleet/stop`, `POST /fleet/slots/{id}/start` + `/stop` | start/stop slots; off unless `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1` |
 | Backends | `GET /backends` | local fleet + configured upstreams with capabilities |
 | App profiles | `GET /apps` | per-client routing policy |
 | Config preview | `GET /config/preview` | secrets redacted |
-| Dashboard | `GET /ui` | three tabs: Overview (slots, backends, models, queue, routing test), Connect an agent (copy-paste setup per client), Cookbook |
+| Dashboard | `GET /ui` | Overview, Connect an agent, Compare / Routing, Cookbook |
 | Cookbook | `GET /cookbook` | scans your GGUF folder, VRAM fit math, per-role model recommendations with confidence grades |
 | A2A | `GET /.well-known/agent-card.json`, `POST /a2a` | agent card + skills for agent-to-agent use |
 | MCP | `python -m local_model_router mcp` | Streamable HTTP MCP server (port 8095, `[mcp]` extra) |
@@ -49,24 +50,37 @@ Agent Zero is client #1, not the owner.
 MCP is for tool-using agents; A2A is for agent-to-agent collaboration. All
 three reuse the same routing engine — no duplicate policy.
 
-**Model names:** send an alias — `auto` (routes by task type), `chat`/`deep`,
-`fast`/`utility`, `coder`, `embedding`, `scribe` — and the router picks the
-slot and model. Send any other model id and it passes through verbatim to the
-selected slot (Router Mode fleets can hot-swap to it). Send
+**Model names:** send an alias - `auto` (capability-aware routing),
+`chat`/`deep`, `fast`/`utility`, `coder`, `embedding`, `scribe` - and the
+router picks the slot and model. Send any other model id and it passes through
+verbatim to the selected slot (Router Mode fleets can hot-swap to it). Send
 `<upstream>/<model>` (e.g. `ollama/llama3.3:70b`) to target an upstream
 backend configured in `conf/upstreams.yaml` — one `openai_compatible`
 adapter covers Ollama, vLLM, LocalAI, and LM Studio. AirLLM is recognized as
 an experimental, non-serving entry.
 
+**Routing strategies:** `auto` uses the local catalog to rank slots by
+capabilities (`tools`, vision payloads, JSON mode, context size), health,
+latency hints, quality hints, resource cost hints, app profile, and privacy
+flags. Supported strategies are `balanced_local` (default), `fastest`,
+`quality`, and `economy`. Decisions expose reason codes, score inputs, and
+response headers for requested model, resolved model, selected slot, selected
+strategy, and cache status.
+
 **App profiles:** identify your client with the `X-App-Id` header and
 `conf/apps.yaml` controls its default model and allowed models. Unknown apps
 get the permissive default profile.
 
+**Prompt cache:** disabled by default. Set `A0_LMM_ROUTER_PROMPT_CACHE=1` to
+enable an in-memory deterministic cache for non-streaming requests with
+`temperature=0` or a fixed `seed`. Cache data is process-local and prompt
+bodies are never written to telemetry.
+
 **CLI:** `python -m local_model_router [serve|doctor|list-models|test-route|config-check]`
 
-Roadmap (see `AGENTS.md`): multi-backend adapters (Ollama, generic OpenAI,
-vLLM, AirLLM experimental), app profiles, standalone dashboard, MCP server,
-A2A agent card.
+Roadmap (see `AGENTS.md`): per-app API keys, rate limits, `/v1/embeddings`
+passthrough, Prometheus-style `/metrics`, upstream-aware auto-routing, and
+one-click cookbook recommendations.
 
 ## Quickstart
 
@@ -170,10 +184,14 @@ key. The fleet config is mounted read-only from `./conf`;
 ```
 
 Tools: `chat_completion`, `utility_completion`, `route_completion`,
-`get_embeddings`, `fleet_status`, `list_slots` — plus admin tools
+`get_embeddings`, `fleet_status`, `list_slots`, `list_models`,
+`model_card`, `providers_list`, `route_preview` - plus admin tools
 (`start_fleet`, `start_slot`, `stop_slot`) **only** when
 `MCP_ALLOW_MUTATING_TOOLS=1`. Bearer auth is on by default; inspect with
 `npx @modelcontextprotocol/inspector http://127.0.0.1:8095/mcp`.
+
+See `docs/INTEGRATIONS.md` for Claude Code MCP, Open WebUI, Dify, Aider, and
+Vercel AI SDK style setup snippets.
 
 ## Development
 

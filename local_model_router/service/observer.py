@@ -125,6 +125,13 @@ class ObserverBackend:
                 "model_id": slot.get("model_id"),
                 "router_mode": slot.get("router_mode", False),
                 "context_size": slot.get("context_size"),
+                "supports_tools": slot.get("supports_tools"),
+                "supports_vision": slot.get("supports_vision"),
+                "supports_json_mode": slot.get("supports_json_mode"),
+                "latency_hint_ms": slot.get("latency_hint_ms"),
+                "quality_hint": slot.get("quality_hint"),
+                "resource_cost_hint": slot.get("resource_cost_hint"),
+                "parallel_slots": slot.get("parallel_slots"),
                 "router_models_preset": slot.get("router_models_preset", ""),
                 "router_models_max": slot.get("router_models_max"),
             })

@@ -148,3 +148,58 @@ def register_tools(mcp: FastMCP, allow_mutating_tools: bool = False) -> None:
                 "enabled": cfg.get("enabled", True),
             }
         return result
+
+    @mcp.tool()
+    async def list_models(
+        capability: str = "",
+        source: str = "",
+        min_context: int = 0,
+    ) -> dict:
+        """List model catalog entries with optional local filtering.
+
+        capability: optional "tools" | "vision" | "json_mode".
+        source: optional "local_fleet" | "upstream".
+        min_context: optional minimum context window.
+        """
+        catalog = await bridge.list_models()
+        models = list(catalog.get("models", []))
+        if capability:
+            models = [m for m in models if (m.get("capabilities") or {}).get(capability)]
+        if source:
+            models = [m for m in models if m.get("source") == source]
+        if min_context:
+            models = [m for m in models if int(m.get("context_size") or 0) >= min_context]
+        return {"models": models, "count": len(models)}
+
+    @mcp.tool()
+    async def model_card(model_id: str) -> dict:
+        """Return safe model details: role, source, capabilities, context, and hints."""
+        return await bridge.model_card(model_id)
+
+    @mcp.tool()
+    async def providers_list() -> dict:
+        """List local fleet and configured upstream providers."""
+        return await bridge.providers_list()
+
+    @mcp.tool()
+    async def route_preview(
+        role: str = "chat",
+        task_type: str = "chat",
+        requires_tools: bool = False,
+        requires_vision: bool = False,
+        requires_json_mode: bool = False,
+        estimated_tokens: int | None = None,
+        routing_strategy: str = "balanced_local",
+        local_only: bool = False,
+    ) -> dict:
+        """Preview which local model would serve a task without forwarding a prompt."""
+        return await bridge.route_preview(
+            role=role,
+            task_type=task_type,
+            requires_tools=requires_tools,
+            requires_vision=requires_vision,
+            requires_json_mode=requires_json_mode,
+            estimated_tokens=estimated_tokens,
+            routing_strategy=routing_strategy,
+            local_only=local_only,
+        )

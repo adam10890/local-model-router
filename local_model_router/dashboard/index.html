@@ -62,6 +62,7 @@
 <nav class="tabs">
   <button class="tab" :class="tab==='overview' && 'active'" @click="openTab('overview')">Overview</button>
   <button class="tab" :class="tab==='connect' && 'active'" @click="openTab('connect')">Connect an agent</button>
+  <button class="tab" :class="tab==='compare' && 'active'" @click="openTab('compare')">Compare / Routing</button>
   <button class="tab" :class="tab==='cookbook' && 'active'" @click="openTab('cookbook')">Cookbook</button>
 </nav>
 
@@ -212,6 +213,48 @@
 </div>
 
 <!-- ════════════════════ COOKBOOK ════════════════════ -->
+<div class="grid" x-show="tab==='compare'" x-cloak>
+
+  <div class="card">
+    <h2>Routing analytics</h2>
+    <div class="row"><span class="dim">fallbacks</span><span x-text="analytics.fallback_count ?? 0"></span></div>
+    <div class="row"><span class="dim">no slot failures</span><span x-text="analytics.no_slot_count ?? 0"></span></div>
+    <div class="row"><span class="dim">cache hits</span><span x-text="analytics.cache?.HIT ?? 0"></span></div>
+    <div class="row"><span class="dim">cache misses</span><span x-text="analytics.cache?.MISS ?? 0"></span></div>
+  </div>
+
+  <div class="card">
+    <h2>Model card</h2>
+    <div style="display:flex; gap:.5rem; margin-bottom:.6rem;">
+      <input x-model="cardModel" placeholder="model id or slot id">
+      <button @click="loadModelCard()">Load</button>
+    </div>
+    <pre x-text="modelCard || 'model details will appear here'"></pre>
+  </div>
+
+  <div class="card" style="grid-column:1/-1">
+    <h2>Recent routing decisions</h2>
+    <table>
+      <thead><tr><th>time</th><th>app</th><th>requested</th><th>resolved</th><th>slot</th><th>strategy</th><th>cache</th><th>status</th></tr></thead>
+      <tbody>
+        <template x-for="r in (analytics.recent || [])" :key="r.request_id">
+          <tr>
+            <td class="dim" x-text="r.updated_at"></td>
+            <td x-text="r.app_id || r.agent_type"></td>
+            <td x-text="r.requested_model"></td>
+            <td x-text="r.resolved_model || r.model"></td>
+            <td x-text="r.slot_id"></td>
+            <td x-text="r.routing_strategy"></td>
+            <td x-text="r.cache_status"></td>
+            <td x-text="r.status"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
 <div class="grid" x-show="tab==='cookbook'" x-cloak>
 
   <div class="card" style="grid-column:1/-1; display:flex; justify-content:space-between; align-items:center;">
@@ -302,10 +345,12 @@
 function dashboard() {
   return {
     apiKey: localStorage.getItem("lmr_key") || "",
-    health: {}, slots: [], backends: [], apps: [], models: [], fleet: {},
+    health: {}, slots: [], backends: [], apps: [], models: [], fleet: {}, analytics: {},
     taskTypes: ["chat","coding","planning","research","summarization","embedding",
                 "tool_calling","sub_agent_task","background_worker","documentation"],
     route: { task_type: "chat", role: "", result: "" },
+    cardModel: "auto",
+    modelCard: "",
     controlMsg: "",
     tab: "overview",
     cookbook: null,
@@ -316,6 +361,9 @@ function dashboard() {
       { id: "python", title: "Python (OpenAI SDK)" },
       { id: "agent_zero", title: "Agent Zero" },
       { id: "open_webui", title: "Open WebUI" },
+      { id: "claude_mcp", title: "Claude Code MCP" },
+      { id: "dify", title: "Dify" },
+      { id: "vercel_ai", title: "Vercel AI SDK" },
       { id: "aider", title: "Aider" },
       { id: "n8n", title: "n8n" },
       { id: "curl", title: "curl" },
@@ -347,6 +395,24 @@ api_key:   local`,
 # (if Open WebUI runs in Docker, use ${d}/v1)
 URL: ${b}/v1
 Key: local`,
+        claude_mcp:
+`# Claude Code MCP
+.venv\\Scripts\\python -m local_model_router mcp
+claude mcp add local-model-router -s user -- http://127.0.0.1:8095/mcp`,
+        dify:
+`# Dify -> Settings -> Model Provider -> OpenAI-compatible
+Base URL: ${b}/v1
+API Key: local
+Model: auto`,
+        vercel_ai:
+`import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
+
+const lmr = createOpenAICompatible({
+  name: "local-model-router",
+  baseURL: "${b}/v1",
+  apiKey: "local",
+})
+const model = lmr.chatModel("auto")`,
         aider:
 `aider --openai-api-base ${b}/v1 --openai-api-key local --model openai/coder`,
         n8n:
@@ -403,6 +469,7 @@ API Key:  local
       try { this.apps = (await this.get("/apps")).apps || []; } catch { this.apps = []; }
       try { this.models = (await this.get("/v1/models")).data || []; } catch { this.models = []; }
       try { this.fleet = await this.get("/fleet/status"); } catch { this.fleet = {}; }
+      try { this.analytics = await this.get("/routing/analytics"); } catch { this.analytics = {}; }
     },
     async control(path) {
       this.controlMsg = path + " ...";
@@ -425,6 +492,12 @@ API Key:  local
         });
         this.route.result = JSON.stringify(await resp.json(), null, 2);
       } catch (err) { this.route.result = String(err); }
+    },
+    async loadModelCard() {
+      this.modelCard = "loading...";
+      try {
+        this.modelCard = JSON.stringify(await this.get("/routing/models/" + encodeURIComponent(this.cardModel)), null, 2);
+      } catch (err) { this.modelCard = String(err); }
     },
     boot() { this.refresh(); setInterval(() => this.refresh(), 7000); },
   };

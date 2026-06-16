@@ -26,6 +26,7 @@ As of 2026-06-16:
 | Branch | Status | Action |
 | --- | --- | --- |
 | `main` | active trunk | Branch new work from here. |
+| `ready/orca-inspired-routing` | verified candidate | Local-first+ catalog/routing phase; ready for merge review after full verification and DOX updates. |
 | `feature/dashboard-v2` | merged into `main` | Local and remote branch deleted. |
 | `feature/fleet-control` | merged into `main` | Local and remote branch deleted. |
 

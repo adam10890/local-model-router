@@ -24,7 +24,11 @@ from starlette.routing import Route
 
 from local_model_router.a2a.card import agent_card, skill_ids
 from local_model_router.apps.profiles import AppProfiles
-from local_model_router.routing.aliases import resolve_alias
+from local_model_router.routing.aliases import public_aliases, resolve_alias
+from local_model_router.routing.catalog import (
+    build_slot_candidates,
+    required_capabilities_from_chat_body,
+)
 from local_model_router.upstreams.registry import (
     UpstreamConfig,
     load_upstreams,
@@ -50,6 +54,12 @@ from .fleet_manager import (
 )
 from .models_listing import FetchFn, _default_fetch as _models_default_fetch, list_models
 from .observer import ObserverBackend
+from .prompt_cache import (
+    InMemoryPromptCache,
+    cache_key as prompt_cache_key,
+    is_cacheable as prompt_is_cacheable,
+    prompt_cache_enabled,
+)
 from .routing_intent import RoutingIntentHandler, RoutingIntentRequest
 
 from local_model_router import __version__ as _VERSION
@@ -70,7 +80,10 @@ _ROUTING_ONLY_KEYS = {
     "cloud_allowed",
     "requires_long_context",
     "requires_tools",
+    "requires_vision",
+    "requires_json_mode",
     "requires_code_execution",
+    "routing_strategy",
     "latency_preference",
     "quality_preference",
     "cost_preference",
@@ -182,10 +195,17 @@ def _role_from_chat_body(body: Dict[str, Any], routing: Dict[str, Any], metadata
     return "chat"
 
 
-def _intent_from_chat_body(body: Dict[str, Any], agent: Optional[AgentIdentity] = None) -> RoutingIntentRequest:
+def _intent_from_chat_body(
+    body: Dict[str, Any],
+    agent: Optional[AgentIdentity] = None,
+    *,
+    app_id: Optional[str] = None,
+    requested_model: Optional[str] = None,
+) -> RoutingIntentRequest:
     routing = _dict_or_empty(body.get("routing"))
     metadata = _dict_or_empty(body.get("metadata"))
     role = _role_from_chat_body(body, routing, metadata)
+    needs = required_capabilities_from_chat_body(body, role=role)
 
     payload = {
         "agent_id": _pick_routing_value(
@@ -198,17 +218,24 @@ def _intent_from_chat_body(body: Dict[str, Any], agent: Optional[AgentIdentity] 
         "local_only": _pick_routing_value(body, routing, metadata, "local_only", False),
         "cloud_allowed": _pick_routing_value(body, routing, metadata, "cloud_allowed", True),
         "requires_long_context": _pick_routing_value(
-            body, routing, metadata, "requires_long_context", False
+            body, routing, metadata, "requires_long_context", needs.requires_long_context
         ),
-        "requires_tools": _pick_routing_value(body, routing, metadata, "requires_tools", False),
+        "requires_tools": _pick_routing_value(body, routing, metadata, "requires_tools", needs.requires_tools),
+        "requires_vision": _pick_routing_value(body, routing, metadata, "requires_vision", needs.requires_vision),
+        "requires_json_mode": _pick_routing_value(
+            body, routing, metadata, "requires_json_mode", needs.requires_json_mode
+        ),
         "requires_code_execution": _pick_routing_value(
             body, routing, metadata, "requires_code_execution", False
         ),
         "latency_preference": _pick_routing_value(body, routing, metadata, "latency_preference", "normal"),
         "quality_preference": _pick_routing_value(body, routing, metadata, "quality_preference", "normal"),
         "cost_preference": _pick_routing_value(body, routing, metadata, "cost_preference", "normal"),
-        "estimated_tokens": _pick_routing_value(body, routing, metadata, "estimated_tokens"),
-        "preferred_slot": _pick_routing_value(body, routing, metadata, "preferred_slot"),
+        "routing_strategy": _pick_routing_value(body, routing, metadata, "routing_strategy", needs.strategy),
+        "estimated_tokens": _pick_routing_value(body, routing, metadata, "estimated_tokens", needs.estimated_tokens),
+        "preferred_slot": _pick_routing_value(body, routing, metadata, "preferred_slot", needs.preferred_slot),
+        "requested_model": requested_model or body.get("model"),
+        "app_id": app_id,
         "input_classification": _pick_routing_value(body, routing, metadata, "input_classification"),
         "metadata": metadata,
     }
@@ -341,6 +368,7 @@ def create_app(
     api_key = _configured_api_key()
     store = fleet_store or FleetStore()
     queue = fleet_queue or FleetQueue()
+    prompt_cache = InMemoryPromptCache() if prompt_cache_enabled() else None
 
     conf_dir = Path(observer.config_path).resolve().parent
     upstreams = load_upstreams(upstreams_path or conf_dir / "upstreams.yaml")
@@ -553,12 +581,23 @@ def create_app(
                 if namespaced in existing_ids:
                     continue
                 existing_ids.add(namespaced)
+                capabilities = {
+                    "tools": "tools" in upstream.capabilities,
+                    "vision": "vision" in upstream.capabilities,
+                    "json_mode": "json_mode" in upstream.capabilities or upstream.serves_inference,
+                }
                 listing["data"].append({
                     "id": namespaced,
                     "object": "model",
                     "created": row.get("created") or 0,
                     "owned_by": upstream.name,
-                    "meta": {"kind": "upstream_model", "upstream": upstream.name},
+                    "capabilities": capabilities,
+                    "source": "upstream",
+                    "meta": {
+                        "kind": "upstream_model",
+                        "upstream": upstream.name,
+                        "capabilities": capabilities,
+                    },
                 })
         return JSONResponse(listing)
 
@@ -577,6 +616,75 @@ def create_app(
     async def apps_list(request: Request) -> JSONResponse:
         return JSONResponse({"apps": app_profiles.list_profiles()})
 
+    def routing_catalog_models() -> list[Dict[str, Any]]:
+        slots_with_health: list[Dict[str, Any]] = []
+        for slot in observer.get_slots():
+            row = dict(slot)
+            # /routing/models is read-only and fast; avoid live probes here.
+            row.setdefault("health", row.get("health") or "unknown")
+            slots_with_health.append(row)
+        models: list[Dict[str, Any]] = []
+        for alias, role in sorted(public_aliases().items()):
+            normalized_role = str(role or "chat")
+            models.append({
+                "id": f"alias:{alias}",
+                "model_id": alias,
+                "source": "alias",
+                "role": normalized_role,
+                "backend_type": "router",
+                "slot_id": None,
+                "upstream_name": None,
+                "context_size": 0,
+                "health": "available",
+                "capabilities": {
+                    "auto_route": alias == "auto",
+                    "tools": normalized_role in {"chat", "utility", "scribe", "task-dependent"},
+                    "vision": False,
+                    "json_mode": normalized_role not in {"embed", "embedding"},
+                },
+                "hints": {"latency_ms": None, "quality": 0.0, "resource_cost": 0.0},
+                "metadata": {"kind": "alias", "maps_to_role": role},
+            })
+        models.extend(candidate.public_dict() for candidate in build_slot_candidates(slots_with_health))
+        for upstream in upstreams:
+            entry = upstream.describe()
+            models.append({
+                "id": upstream.name,
+                "model_id": upstream.name,
+                "source": "upstream",
+                "role": "chat",
+                "backend_type": upstream.type,
+                "slot_id": None,
+                "upstream_name": upstream.name,
+                "context_size": 0,
+                "health": "unknown" if upstream.serves_inference else "disabled",
+                "capabilities": {
+                    "tools": "tools" in upstream.capabilities,
+                    "vision": "vision" in upstream.capabilities,
+                    "json_mode": "json_mode" in upstream.capabilities or upstream.serves_inference,
+                },
+                "hints": {"latency_ms": None, "quality": 0.5, "resource_cost": 0.0},
+                "metadata": {k: v for k, v in entry.items() if k != "base_url"},
+            })
+        return models
+
+    async def routing_models(request: Request) -> JSONResponse:
+        return JSONResponse({"models": routing_catalog_models()})
+
+    async def routing_model_card(request: Request) -> JSONResponse:
+        requested = str(request.path_params.get("model_id") or "").strip()
+        for model in routing_catalog_models():
+            if requested in {str(model.get("id")), str(model.get("model_id"))}:
+                return JSONResponse({"model": model})
+        return JSONResponse({"error": "model_not_found", "model_id": requested}, status_code=404)
+
+    async def routing_analytics(request: Request) -> JSONResponse:
+        try:
+            limit = max(1, min(1000, int(request.query_params.get("limit", "50"))))
+        except ValueError:
+            limit = 50
+        return JSONResponse(store.routing_analytics(limit=limit))
+
     async def forward_to_upstream(
         upstream: UpstreamConfig, bare_model: str, body: Dict[str, Any]
     ) -> Response:
@@ -586,6 +694,10 @@ def create_app(
         out_headers = {
             "x-a0-router-upstream": upstream.name,
             "x-a0-router-model": bare_model,
+            "x-a0-router-requested-model": str(body.get("model") or ""),
+            "x-a0-router-resolved-model": bare_model,
+            "x-a0-router-strategy": "explicit_upstream",
+            "x-a0-router-cache": "BYPASS",
         }
         try:
             if wants_stream:
@@ -745,6 +857,7 @@ def create_app(
         try:
             agent = identity_from_headers(request.headers, body)
             app_id = _app_id_from(request.headers, body, agent)
+            requested_model = str(body.get("model") or "auto").strip() or "auto"
             effective_model, policy_error = app_profiles.apply(app_id, body.get("model"))
             if policy_error:
                 return _openai_error(
@@ -755,7 +868,12 @@ def create_app(
                     extra={"app_id": app_id},
                 )
             body["model"] = effective_model
-            intent = _intent_from_chat_body(body, agent=agent)
+            intent = _intent_from_chat_body(
+                body,
+                agent=agent,
+                app_id=app_id,
+                requested_model=requested_model,
+            )
         except ValidationError as exc:
             import json as _json
             return _openai_error(
@@ -782,7 +900,15 @@ def create_app(
         try:
             admission = await queue.acquire(agent.priority)
         except QueueFull as exc:
-            store.update_request(request_id, status="rejected", error_code="queue_full")
+            store.update_request(
+                request_id,
+                status="rejected",
+                error_code="queue_full",
+                app_id=app_id,
+                requested_model=requested_model,
+                routing_strategy=intent.routing_strategy,
+                cache_status="BYPASS",
+            )
             store.record_queue_event(
                 request_id=request_id,
                 agent=agent,
@@ -831,8 +957,12 @@ def create_app(
             error_code: Optional[str] = None,
             slot_id: Optional[str] = None,
             model: Optional[str] = None,
+            decision: Any = None,
+            cache_status: Optional[str] = None,
+            usage: Optional[Dict[str, Any]] = None,
         ) -> None:
             duration_ms = int((time.monotonic() - started) * 1000)
+            usage = usage or {}
             store.update_request(
                 request_id,
                 status=status,
@@ -841,6 +971,16 @@ def create_app(
                 queued_ms=admission.queued_ms,
                 duration_ms=duration_ms,
                 error_code=error_code,
+                app_id=app_id,
+                requested_model=requested_model,
+                resolved_model=model or getattr(decision, "selected_model", None),
+                routing_strategy=getattr(decision, "routing_strategy", intent.routing_strategy),
+                selected_source=getattr(decision, "selected_source", None),
+                fallback_used=getattr(decision, "fallback_used", False),
+                reason_codes=getattr(decision, "reason_codes", None),
+                cache_status=cache_status,
+                prompt_tokens=usage.get("prompt_tokens"),
+                completion_tokens=usage.get("completion_tokens"),
             )
             await queue.release()
 
@@ -856,7 +996,7 @@ def create_app(
             )
         decision_body = decision.model_dump()
         if decision.no_slot_available or not decision.selected_url:
-            await finish("failed", error_code="no_slot_available")
+            await finish("failed", error_code="no_slot_available", decision=decision, cache_status="BYPASS")
             return _openai_error(
                 "no healthy local llama.cpp slot is available for this request",
                 "no_slot_available",
@@ -880,6 +1020,44 @@ def create_app(
             decision.selected_model,
         )
 
+        def router_response_headers(cache_status: str, extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+            headers = {
+                "x-a0-router-slot-id": decision.selected_slot_id or "",
+                "x-a0-router-backend": decision.selected_backend_type or "",
+                "x-a0-router-requested-model": requested_model,
+                "x-a0-router-resolved-model": decision.selected_model or "",
+                "x-a0-router-strategy": decision.routing_strategy,
+                "x-a0-router-cache": cache_status,
+            }
+            if decision.selected_model:
+                headers["x-a0-router-model"] = decision.selected_model
+            headers.update(context_extra_headers)
+            if extra:
+                headers.update(extra)
+            return fleet_headers(headers)
+
+        cache_status = "BYPASS"
+        cache_lookup_key: Optional[str] = None
+        if prompt_cache is not None and not wants_stream and prompt_is_cacheable(payload):
+            cache_lookup_key = prompt_cache_key(payload, resolved_model=forward_model or decision.selected_model or "")
+            cached = prompt_cache.get(cache_lookup_key)
+            if cached is not None:
+                cache_status = "HIT"
+                await finish(
+                    "completed",
+                    slot_id=decision.selected_slot_id,
+                    model=decision.selected_model,
+                    decision=decision,
+                    cache_status=cache_status,
+                    usage=_dict_or_empty(cached.get("usage")),
+                )
+                return JSONResponse(
+                    cached,
+                    status_code=200,
+                    headers=router_response_headers(cache_status),
+                )
+            cache_status = "MISS"
+
         try:
             if wants_stream:
                 session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=_FORWARD_TIMEOUT_SECONDS))
@@ -889,16 +1067,13 @@ def create_app(
                     await session.close()
                     raise
 
-                headers = {
-                    "x-a0-router-slot-id": decision.selected_slot_id or "",
-                    "x-a0-router-backend": decision.selected_backend_type or "",
+                headers = router_response_headers(
+                    "BYPASS",
+                    {
                     "cache-control": "no-cache",
                     "x-accel-buffering": "no",
-                }
-                if decision.selected_model:
-                    headers["x-a0-router-model"] = decision.selected_model
-                headers.update(context_extra_headers)
-                headers = fleet_headers(headers)
+                    },
+                )
 
                 if resp.status >= 400:
                     try:
@@ -912,6 +1087,8 @@ def create_app(
                         error_code="upstream_error",
                         slot_id=decision.selected_slot_id,
                         model=decision.selected_model,
+                        decision=decision,
+                        cache_status="BYPASS",
                     )
 
                     message = "upstream llama.cpp stream request failed"
@@ -938,6 +1115,8 @@ def create_app(
                             "completed",
                             slot_id=decision.selected_slot_id,
                             model=decision.selected_model,
+                            decision=decision,
+                            cache_status="BYPASS",
                         )
 
                 return StreamingResponse(
@@ -963,6 +1142,8 @@ def create_app(
                             error_code="upstream_invalid_json",
                             slot_id=decision.selected_slot_id,
                             model=decision.selected_model,
+                            decision=decision,
+                            cache_status=cache_status,
                         )
                         return _openai_error(
                             "upstream llama.cpp response was not valid JSON",
@@ -972,14 +1153,7 @@ def create_app(
                             extra={"upstream_status": resp.status, "upstream_body": upstream_text[:1000]},
                         )
 
-                    headers = {
-                        "x-a0-router-slot-id": decision.selected_slot_id or "",
-                        "x-a0-router-backend": decision.selected_backend_type or "",
-                    }
-                    if decision.selected_model:
-                        headers["x-a0-router-model"] = decision.selected_model
-                    headers.update(context_extra_headers)
-                    headers = fleet_headers(headers)
+                    headers = router_response_headers(cache_status)
 
                     if resp.status >= 400:
                         message = "upstream llama.cpp request failed"
@@ -994,6 +1168,9 @@ def create_app(
                             error_code="upstream_error",
                             slot_id=decision.selected_slot_id,
                             model=decision.selected_model,
+                            decision=decision,
+                            cache_status=cache_status,
+                            usage=_dict_or_empty(upstream_json.get("usage")),
                         )
                         return _openai_error(
                             message,
@@ -1007,7 +1184,12 @@ def create_app(
                         "completed",
                         slot_id=decision.selected_slot_id,
                         model=decision.selected_model,
+                        decision=decision,
+                        cache_status=cache_status,
+                        usage=_dict_or_empty(upstream_json.get("usage")),
                     )
+                    if cache_status == "MISS" and cache_lookup_key is not None and prompt_cache is not None:
+                        prompt_cache.set(cache_lookup_key, upstream_json)
                     return JSONResponse(upstream_json, status_code=resp.status, headers=headers)
         except aiohttp.ClientError as exc:
             await finish(
@@ -1015,6 +1197,8 @@ def create_app(
                 error_code="upstream_unreachable",
                 slot_id=decision.selected_slot_id,
                 model=decision.selected_model,
+                decision=decision,
+                cache_status=cache_status,
             )
             return _openai_error(
                 f"could not reach selected llama.cpp slot: {exc}",
@@ -1029,6 +1213,8 @@ def create_app(
                 error_code="upstream_timeout",
                 slot_id=decision.selected_slot_id,
                 model=decision.selected_model,
+                decision=decision,
+                cache_status=cache_status,
             )
             return _openai_error(
                 "selected llama.cpp slot timed out",
@@ -1052,6 +1238,9 @@ def create_app(
         Route("/fleet/slots/{slot_id}/start", protected(control_gated(fleet_slot_start)), methods=["POST"]),
         Route("/fleet/slots/{slot_id}/stop", protected(control_gated(fleet_slot_stop)), methods=["POST"]),
         Route("/routing/request", protected(routing_request), methods=["POST"]),
+        Route("/routing/models", protected(routing_models)),
+        Route("/routing/models/{model_id:path}", protected(routing_model_card)),
+        Route("/routing/analytics", protected(routing_analytics)),
         Route("/backends", protected(backends)),
         Route("/apps", protected(apps_list)),
         Route("/cookbook", protected(cookbook)),

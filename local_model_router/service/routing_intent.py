@@ -23,6 +23,12 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from local_model_router.routing.catalog import (
+    RoutingNeeds,
+    build_slot_candidates,
+    rank_candidates,
+)
+
 # ---------------------------------------------------------------------------
 # Known value sets (not enums — unknown values are allowed with a warning)
 # ---------------------------------------------------------------------------
@@ -96,14 +102,19 @@ class RoutingIntentRequest(BaseModel):
 
     requires_long_context:    bool = False
     requires_tools:           bool = False
+    requires_vision:          bool = False
+    requires_json_mode:       bool = False
     requires_code_execution:  bool = False
 
     latency_preference: str = "normal"   # fast | normal | quality
     quality_preference: str = "normal"
     cost_preference:    str = "normal"
+    routing_strategy:   str = "balanced_local"
 
     estimated_tokens: Optional[int] = None
     preferred_slot:   Optional[str] = None
+    requested_model:   Optional[str] = None
+    app_id:            Optional[str] = None
 
     input_classification: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
@@ -141,6 +152,12 @@ class RoutingDecisionResponse(BaseModel):
     selected_url:          Optional[str]
     selected_backend_type: Optional[str]
     selected_model:        Optional[str]
+    selected_source:       Optional[str] = None
+    selected_candidate_id: Optional[str] = None
+    routing_strategy:      str = "balanced_local"
+    score:                 Optional[float] = None
+    score_inputs:          Dict[str, Any] = Field(default_factory=dict)
+    ranked_candidates:     List[Dict[str, Any]] = Field(default_factory=list)
 
     # Policy flags
     local_only_enforced: bool
@@ -211,13 +228,23 @@ class RoutingIntentHandler:
         # ── 4. Capability warnings ─────────────────────────────────────────
         if req.requires_long_context:
             warnings.append(
-                "long_context_routing_not_implemented: "
-                "context-size-aware slot selection is not yet implemented"
+                "long_context_routing_applied: "
+                "context-size-aware slot ranking is active when context metadata is available"
             )
         if req.requires_tools:
             warnings.append(
-                "tool_routing_not_implemented: "
-                "tool-capability-aware routing is not yet implemented"
+                "tool_routing_applied: "
+                "tool-capability-aware ranking is active when slot metadata is available"
+            )
+        if req.requires_vision:
+            warnings.append(
+                "vision_routing_applied: "
+                "vision-capability ranking is active when slot metadata is available"
+            )
+        if req.requires_json_mode:
+            warnings.append(
+                "json_mode_routing_applied: "
+                "JSON-mode capability ranking is active when slot metadata is available"
             )
         if req.requires_code_execution:
             warnings.append(
@@ -241,6 +268,12 @@ class RoutingIntentHandler:
                 selected_url=None,
                 selected_backend_type=None,
                 selected_model=None,
+                selected_source=None,
+                selected_candidate_id=None,
+                routing_strategy=req.routing_strategy,
+                score=None,
+                score_inputs={},
+                ranked_candidates=[],
                 local_only_enforced=local_only_enforced,
                 cloud_allowed=effective_cloud_allowed,
                 no_slot_available=True,
@@ -251,7 +284,42 @@ class RoutingIntentHandler:
             )
 
         # ── 6. Route ───────────────────────────────────────────────────────
-        decision = await mgr.select_slot_with_failover_async(role, req.preferred_slot)
+        slot_rows: List[Dict[str, Any]] = []
+        for slot_id, slot_cfg in getattr(mgr, "_slot_configs", {}).items():
+            row = dict(slot_cfg)
+            row.setdefault("id", slot_id)
+            try:
+                row["health"] = await mgr._get_slot_health_async(slot_id)
+            except Exception:
+                row["health"] = "unknown"
+            slot_rows.append(row)
+
+        needs = RoutingNeeds(
+            role=role,
+            task_type=req.task_type,
+            requires_tools=req.requires_tools,
+            requires_vision=req.requires_vision,
+            requires_json_mode=req.requires_json_mode,
+            requires_long_context=req.requires_long_context,
+            estimated_tokens=req.estimated_tokens,
+            local_only=local_only_enforced,
+            strategy=req.routing_strategy,
+            preferred_slot=req.preferred_slot,
+        )
+        ranked = rank_candidates(needs, build_slot_candidates(slot_rows), strategy=req.routing_strategy)
+        ranked_public = [item.public_dict() for item in ranked[:5]]
+        selected_rank = ranked[0] if ranked else None
+        preferred_slot = req.preferred_slot
+        route_role = role
+        if selected_rank is not None:
+            preferred_slot = selected_rank.candidate.slot_id or preferred_slot
+            route_role = selected_rank.candidate.role or role
+            reason_codes.extend(selected_rank.reason_codes)
+            reason_codes.append(f"routing_strategy:{selected_rank.score_inputs.get('strategy', req.routing_strategy)}")
+        else:
+            reason_codes.append("no_candidate_satisfies_requirements")
+
+        decision = await mgr.select_slot_with_failover_async(route_role, preferred_slot)
 
         if not decision:
             reason_codes.append("no_healthy_slot_in_chain")
@@ -267,6 +335,12 @@ class RoutingIntentHandler:
                 selected_url=None,
                 selected_backend_type=None,
                 selected_model=None,
+                selected_source=selected_rank.candidate.source if selected_rank else None,
+                selected_candidate_id=selected_rank.candidate.id if selected_rank else None,
+                routing_strategy=req.routing_strategy,
+                score=round(selected_rank.score, 4) if selected_rank else None,
+                score_inputs=selected_rank.score_inputs if selected_rank else {},
+                ranked_candidates=ranked_public,
                 local_only_enforced=local_only_enforced,
                 cloud_allowed=effective_cloud_allowed,
                 no_slot_available=True,
@@ -279,6 +353,8 @@ class RoutingIntentHandler:
         slot_id = decision.get("slot_id")
         slot_url = decision.get("url")
         fallback_used = decision.get("is_failover", False)
+        if selected_rank is not None and selected_rank.candidate.slot_id and selected_rank.candidate.slot_id != slot_id:
+            fallback_used = True
 
         # ── 7. Enrich from slot config ─────────────────────────────────────
         slot_cfg: Dict[str, Any] = mgr._slot_configs.get(slot_id, {})
@@ -310,6 +386,12 @@ class RoutingIntentHandler:
             selected_url=slot_url,
             selected_backend_type=backend_type,
             selected_model=model_id,
+            selected_source=selected_rank.candidate.source if selected_rank else "local_fleet",
+            selected_candidate_id=selected_rank.candidate.id if selected_rank else slot_id,
+            routing_strategy=req.routing_strategy,
+            score=round(selected_rank.score, 4) if selected_rank else None,
+            score_inputs=selected_rank.score_inputs if selected_rank else {},
+            ranked_candidates=ranked_public,
             local_only_enforced=local_only_enforced,
             cloud_allowed=effective_cloud_allowed,
             no_slot_available=False,

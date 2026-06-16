@@ -73,12 +73,15 @@ def test_v1_models_lists_aliases_and_slot_models(tmp_path, monkeypatch):
     assert by_id["gemma-4-12b-it-Q4_K_M"]["meta"]["kind"] == "slot_model"
     assert by_id["gemma-4-12b-it-Q4_K_M"]["meta"]["slot_id"] == "slot_router"
     assert by_id["gemma-4-12b-it-Q4_K_M"]["meta"]["n_ctx"] == 65536
+    assert by_id["gemma-4-12b-it-Q4_K_M"]["context_size"] == 65536
+    assert by_id["gemma-4-12b-it-Q4_K_M"]["capabilities"]["json_mode"] is True
 
     # an alias name reported by the slot does not duplicate the alias entry;
     # instead the alias gains live serving metadata
     assert by_id["chat"]["meta"]["kind"] == "alias"
     assert by_id["chat"]["meta"]["live"]["slot_id"] == "slot_router"
     assert by_id["chat"]["meta"]["live"]["n_ctx"] == 131072
+    assert by_id["auto"]["capabilities"]["auto_route"] is True
 
     # disabled slots are not probed (only one slot model id present)
     slot_models = [r for r in payload["data"] if r["meta"].get("kind") == "slot_model"]

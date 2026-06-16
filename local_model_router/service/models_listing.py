@@ -18,10 +18,28 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 import aiohttp
 
 from local_model_router.routing.aliases import public_aliases
+from local_model_router.routing.catalog import build_slot_candidates
 
 FetchFn = Callable[[str], Awaitable[Optional[List[Dict[str, Any]]]]]
 
 _FETCH_TIMEOUT_SECONDS = 3.0
+
+
+def _alias_capabilities(role: str) -> Dict[str, bool]:
+    if role == "task-dependent":
+        return {
+            "auto_route": True,
+            "tools": True,
+            "vision": False,
+            "json_mode": True,
+        }
+    normalized = str(role or "chat").lower()
+    return {
+        "auto_route": False,
+        "tools": normalized in {"chat", "utility", "scribe"},
+        "vision": False,
+        "json_mode": normalized not in {"embed", "embedding"},
+    }
 
 
 async def _default_fetch(base_url: str) -> Optional[List[Dict[str, Any]]]:
@@ -46,6 +64,11 @@ async def list_models(observer: Any, fetch: Optional[FetchFn] = None) -> Dict[st
     created = int(time.time())
     entries: List[Dict[str, Any]] = []
     by_id: Dict[str, Dict[str, Any]] = {}
+    catalog_by_slot = {
+        candidate.slot_id: candidate.public_dict()
+        for candidate in build_slot_candidates(observer.get_slots())
+        if candidate.slot_id
+    }
 
     for alias, role in sorted(public_aliases().items()):
         entry = {
@@ -53,7 +76,12 @@ async def list_models(observer: Any, fetch: Optional[FetchFn] = None) -> Dict[st
             "object": "model",
             "created": created,
             "owned_by": "local-model-router",
-            "meta": {"kind": "alias", "maps_to_role": role},
+            "capabilities": _alias_capabilities(role),
+            "meta": {
+                "kind": "alias",
+                "maps_to_role": role,
+                "routing_strategy_default": "balanced_local",
+            },
         }
         entries.append(entry)
         by_id[alias] = entry
@@ -69,23 +97,35 @@ async def list_models(observer: Any, fetch: Optional[FetchFn] = None) -> Dict[st
             if not model_id:
                 continue
             row_meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
+            catalog = catalog_by_slot.get(slot.get("id"), {})
+            capabilities = catalog.get("capabilities") or {}
+            hints = catalog.get("hints") or {}
+            context_size = row_meta.get("n_ctx") or catalog.get("context_size") or slot.get("context_size")
             live = {
                 "slot_id": slot.get("id"),
                 "role": slot.get("role"),
                 "base_url": slot.get("base_url"),
                 "n_ctx": row_meta.get("n_ctx"),
+                "context_size": context_size,
+                "capabilities": capabilities,
+                "hints": hints,
+                "health": catalog.get("health", "unknown"),
             }
             existing = by_id.get(model_id)
             if existing is not None:
                 # a live slot serves a model named like one of our aliases —
                 # keep the alias entry and attach the live serving info
                 existing["meta"].setdefault("live", live)
+                existing.setdefault("capabilities", capabilities)
                 continue
             entry = {
                 "id": model_id,
                 "object": "model",
                 "created": row.get("created") or created,
                 "owned_by": "local-fleet",
+                "capabilities": capabilities,
+                "context_size": context_size,
+                "source": "local_fleet",
                 "meta": {"kind": "slot_model", **live},
             }
             entries.append(entry)

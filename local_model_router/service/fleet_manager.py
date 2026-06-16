@@ -127,9 +127,15 @@ class FleetStore:
 
     def __init__(self, db_path: Optional[str] = None) -> None:
         self.db_path = db_path or os.environ.get(_STATE_DB_ENV, "").strip() or _default_db_path()
+        self._memory_conn: Optional[sqlite3.Connection] = None
+        if self.db_path == ":memory:":
+            self._memory_conn = sqlite3.connect(":memory:", check_same_thread=False)
+            self._memory_conn.row_factory = sqlite3.Row
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
+        if self._memory_conn is not None:
+            return self._memory_conn
         if self.db_path != ":memory:":
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.db_path)
@@ -155,12 +161,22 @@ class FleetStore:
                     agent_id TEXT NOT NULL,
                     agent_type TEXT NOT NULL,
                     priority TEXT NOT NULL,
+                    app_id TEXT,
+                    requested_model TEXT,
+                    resolved_model TEXT,
+                    routing_strategy TEXT,
+                    selected_source TEXT,
                     status TEXT NOT NULL,
                     slot_id TEXT,
                     model TEXT,
                     queued_ms INTEGER,
                     duration_ms INTEGER,
                     error_code TEXT,
+                    fallback_used INTEGER NOT NULL DEFAULT 0,
+                    reason_codes_json TEXT NOT NULL DEFAULT '[]',
+                    cache_status TEXT,
+                    prompt_tokens INTEGER,
+                    completion_tokens INTEGER,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -183,6 +199,28 @@ class FleetStore:
                 );
                 """
             )
+            self._ensure_request_columns(conn)
+
+    def _ensure_request_columns(self, conn: sqlite3.Connection) -> None:
+        existing = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(requests)").fetchall()
+        }
+        columns = {
+            "app_id": "TEXT",
+            "requested_model": "TEXT",
+            "resolved_model": "TEXT",
+            "routing_strategy": "TEXT",
+            "selected_source": "TEXT",
+            "fallback_used": "INTEGER NOT NULL DEFAULT 0",
+            "reason_codes_json": "TEXT NOT NULL DEFAULT '[]'",
+            "cache_status": "TEXT",
+            "prompt_tokens": "INTEGER",
+            "completion_tokens": "INTEGER",
+        }
+        for name, ddl in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE requests ADD COLUMN {name} {ddl}")
 
     def upsert_agent(self, agent: AgentIdentity, metadata: Optional[Dict[str, Any]] = None) -> None:
         metadata_json = _json_dumps(metadata or {})
@@ -274,21 +312,62 @@ class FleetStore:
         queued_ms: Optional[int] = None,
         duration_ms: Optional[int] = None,
         error_code: Optional[str] = None,
+        app_id: Optional[str] = None,
+        requested_model: Optional[str] = None,
+        resolved_model: Optional[str] = None,
+        routing_strategy: Optional[str] = None,
+        selected_source: Optional[str] = None,
+        fallback_used: Optional[bool] = None,
+        reason_codes: Optional[list[str]] = None,
+        cache_status: Optional[str] = None,
+        prompt_tokens: Optional[int] = None,
+        completion_tokens: Optional[int] = None,
     ) -> None:
+        reason_codes_json = _json_dumps(reason_codes) if reason_codes is not None else None
+        fallback_int = int(bool(fallback_used)) if fallback_used is not None else None
         with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE requests
                 SET status = ?,
+                    app_id = COALESCE(?, app_id),
+                    requested_model = COALESCE(?, requested_model),
+                    resolved_model = COALESCE(?, resolved_model),
+                    routing_strategy = COALESCE(?, routing_strategy),
+                    selected_source = COALESCE(?, selected_source),
                     slot_id = COALESCE(?, slot_id),
                     model = COALESCE(?, model),
                     queued_ms = COALESCE(?, queued_ms),
                     duration_ms = COALESCE(?, duration_ms),
                     error_code = COALESCE(?, error_code),
+                    fallback_used = COALESCE(?, fallback_used),
+                    reason_codes_json = COALESCE(?, reason_codes_json),
+                    cache_status = COALESCE(?, cache_status),
+                    prompt_tokens = COALESCE(?, prompt_tokens),
+                    completion_tokens = COALESCE(?, completion_tokens),
                     updated_at = ?
                 WHERE request_id = ?
                 """,
-                (status, slot_id, model, queued_ms, duration_ms, error_code, _now_iso(), request_id),
+                (
+                    status,
+                    app_id,
+                    requested_model,
+                    resolved_model,
+                    routing_strategy,
+                    selected_source,
+                    slot_id,
+                    model,
+                    queued_ms,
+                    duration_ms,
+                    error_code,
+                    fallback_int,
+                    reason_codes_json,
+                    cache_status,
+                    prompt_tokens,
+                    completion_tokens,
+                    _now_iso(),
+                    request_id,
+                ),
             )
 
     def record_queue_event(
@@ -339,6 +418,74 @@ class FleetStore:
             "total": total,
             "by_status": {row["status"]: row["n"] for row in by_status_rows},
             "recent": [dict(row) for row in recent_rows],
+        }
+
+    def routing_analytics(self, limit: int = 50) -> Dict[str, Any]:
+        with self._connect() as conn:
+            recent_rows = conn.execute(
+                """
+                SELECT request_id, agent_id, agent_type, app_id, priority, status,
+                       requested_model, resolved_model, routing_strategy,
+                       selected_source, slot_id, model, duration_ms, queued_ms,
+                       error_code, fallback_used, cache_status, prompt_tokens,
+                       completion_tokens, reason_codes_json, updated_at
+                FROM requests
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            by_status_rows = conn.execute(
+                "SELECT status, COUNT(*) AS n FROM requests GROUP BY status ORDER BY status"
+            ).fetchall()
+            by_app_rows = conn.execute(
+                """
+                SELECT COALESCE(app_id, agent_type, 'unknown') AS app_id, COUNT(*) AS n
+                FROM requests
+                GROUP BY COALESCE(app_id, agent_type, 'unknown')
+                ORDER BY n DESC, app_id ASC
+                """
+            ).fetchall()
+            by_model_rows = conn.execute(
+                """
+                SELECT COALESCE(resolved_model, model, 'unknown') AS model, COUNT(*) AS n
+                FROM requests
+                GROUP BY COALESCE(resolved_model, model, 'unknown')
+                ORDER BY n DESC, model ASC
+                """
+            ).fetchall()
+            fallback_count = conn.execute(
+                "SELECT COUNT(*) AS n FROM requests WHERE fallback_used = 1"
+            ).fetchone()["n"]
+            no_slot_count = conn.execute(
+                "SELECT COUNT(*) AS n FROM requests WHERE error_code = 'no_slot_available'"
+            ).fetchone()["n"]
+            cache_rows = conn.execute(
+                """
+                SELECT COALESCE(cache_status, 'BYPASS') AS cache_status, COUNT(*) AS n
+                FROM requests
+                GROUP BY COALESCE(cache_status, 'BYPASS')
+                """
+            ).fetchall()
+
+        recent: list[Dict[str, Any]] = []
+        for row in recent_rows:
+            item = dict(row)
+            try:
+                item["reason_codes"] = json.loads(item.pop("reason_codes_json") or "[]")
+            except Exception:
+                item["reason_codes"] = []
+            item["fallback_used"] = bool(item.get("fallback_used"))
+            recent.append(item)
+
+        return {
+            "recent": recent,
+            "by_status": {row["status"]: row["n"] for row in by_status_rows},
+            "by_app": {row["app_id"]: row["n"] for row in by_app_rows},
+            "by_model": {row["model"]: row["n"] for row in by_model_rows},
+            "fallback_count": fallback_count,
+            "no_slot_count": no_slot_count,
+            "cache": {row["cache_status"]: row["n"] for row in cache_rows},
         }
 
 
