@@ -26,6 +26,10 @@ codebase.
 - `conf/` — fleet description. `llama_cpp_servers.yaml` is local-only
   (gitignored); the `.example` variant is the committed reference.
   `upstreams.yaml` and `apps.yaml` are committed defaults (no secrets).
+- `docs/` — durable runbooks and development workflow docs.
+- `CONTRIBUTING.md` — public Git and contribution workflow; keep it aligned
+  with `docs/development/git-workflow.md`.
+- `CLAUDE.md` — Claude Code entrypoint; it points back to this DOX contract.
 - `tests/` — hermetic pytest suite; no live fleet or GPU required.
 - The service is lifecycle-free **by default**: it routes to running slots.
   Fleet control (start/stop slots via `BackendManager` — docker, subprocess,
@@ -48,6 +52,12 @@ codebase.
 
 - Keep increments small and behavior-preserving; this codebase is trusted by
   a live setup.
+- Git workflow: keep `main` shippable; use `dev/<slug>` for active work,
+  `ready/<slug>` for verified merge candidates, and delete merged branches
+  locally and remotely. Detailed rules live in
+  `docs/development/git-workflow.md`.
+- Agent handoffs between Codex, Claude Code, or humans must name the current
+  branch, changed files, verification commands, and unresolved risks.
 - Phase roadmap: (1) ✅ `GET /v1/models` + model aliases; (2) ✅ upstream
   adapters (`conf/upstreams.yaml`, `<name>/<model>` namespacing); (3) ✅ app
   profiles (`conf/apps.yaml`); (4) ✅ standalone dashboard at `/ui`;
@@ -77,6 +87,7 @@ codebase.
 
 - `local_model_router/service/AGENTS.md` — HTTP surface, auth, forwarding.
 - `local_model_router/helpers/AGENTS.md` — orchestration and routing helpers.
+- `docs/AGENTS.md` — project documentation and development workflow docs.
 - `tests/AGENTS.md` — test conventions (hermetic, no live fleet).
 
 - `local_model_router/cookbook/AGENTS.md` — GGUF parsing + fit math +

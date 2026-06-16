@@ -181,6 +181,9 @@ Tools: `chat_completion`, `utility_completion`, `route_completion`,
 .venv\Scripts\python -m pytest tests/ -q     # full suite
 ```
 
+See `CONTRIBUTING.md` and `docs/development/git-workflow.md` for branch
+naming, merge, cleanup, and agent handoff rules.
+
 This repo follows the [DOX](https://github.com/agent0ai/dox) living-docs
 convention: every significant directory has an `AGENTS.md` contract. Read the
 local contract before editing an area; update it when behavior changes.
