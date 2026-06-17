@@ -1,49 +1,54 @@
 @echo off
-title iGPU Worker (Radeon - Vulkan)
+setlocal
+title Local Model Router - iGPU Worker
 cd /d "%~dp0"
 
-:: ── Which Vulkan device to use ─────────────────────────────────────────────
-:: Check with:  bin\llama-vulkan\llama-server.exe --list-devices
-:: 1 = AMD Radeon(TM) Graphics (integrated GPU)
-:: 0 = RTX 4090 — leave it for the main fleet!
-set GGML_VK_VISIBLE_DEVICES=1
+if exist ".env" (
+    for /f "usebackq eol=# tokens=1,* delims==" %%A in (".env") do (
+        if not "%%A"=="" set "%%A=%%B"
+    )
+)
 
-:: ── What this worker serves (scribe model by default) ─────────────────────
-set "MODEL=C:\Users\frant\A0-Data-Permanent\A0_v.adam\models\gemma-4-E4B-it-OBLITERATED-Q5_K_M.gguf"
-set PORT=8089
-set CTX=32768
+if not defined IGPU_VK_DEVICE set "IGPU_VK_DEVICE=1"
+if not defined IGPU_PORT set "IGPU_PORT=8089"
+if not defined IGPU_CTX set "IGPU_CTX=32768"
+if not defined IGPU_PARALLEL set "IGPU_PARALLEL=1"
+if not defined IGPU_ALIAS set "IGPU_ALIAS=utility_cpu"
+if not defined IGPU_SERVER set "IGPU_SERVER=bin\llama-vulkan\llama-server.exe"
+if not defined IGPU_MODEL set "IGPU_MODEL=C:\Users\frant\A0-Data-Permanent\A0_v.adam\models\gemma-4-E4B-it-OBLITERATED-Q5_K_M.gguf"
 
-if not exist "%MODEL%" (
+if not exist "%IGPU_SERVER%" (
+    echo ERROR: llama-server not found:
+    echo   %IGPU_SERVER%
+    pause
+    exit /b 1
+)
+
+if not exist "%IGPU_MODEL%" (
     echo ERROR: model not found:
-    echo   %MODEL%
-    echo Edit the MODEL line in this file.
+    echo   %IGPU_MODEL%
+    echo Set IGPU_MODEL in .env or edit this file.
     pause
     exit /b 1
 )
 
-if not exist "bin\llama-vulkan\llama-server.exe" (
-    echo ERROR: llama-server.exe not found under bin\llama-vulkan\
-    pause
-    exit /b 1
-)
+set "GGML_VK_VISIBLE_DEVICES=%IGPU_VK_DEVICE%"
 
 echo.
-echo  =====================================================
-echo   iGPU Worker  ^|  http://127.0.0.1:%PORT%
-echo   Device : AMD Radeon integrated GPU ^(Vulkan^)
-echo   Model  : gemma-4-E4B ^(scribe^)
-echo   Ctx    : %CTX% total, 2 parallel sequences
+echo =====================================================
+echo  iGPU Worker  ^|  http://127.0.0.1:%IGPU_PORT%
+echo =====================================================
+echo  Vulkan device : %IGPU_VK_DEVICE%
+echo  Alias         : %IGPU_ALIAS%
+echo  Context       : %IGPU_CTX%
+echo  Parallel      : %IGPU_PARALLEL%
+echo  Model         : %IGPU_MODEL%
 echo.
-echo   Background worker for the scribe role. Slower than
-echo   the RTX 4090, but keeps it free for chat models.
-echo   First load takes ~30-60s. Keep this window open.
-echo  =====================================================
+echo Keep this window open. Press Ctrl+C to stop.
+echo =====================================================
 echo.
 
-:: This finetune's embedded jinja template is unparseable and crashes the
-:: output parser. --no-jinja --chat-template gemma uses the legacy gemma
-:: formatter instead (llama.cpp's own recommended workaround).
-bin\llama-vulkan\llama-server.exe -m "%MODEL%" --host 127.0.0.1 --port %PORT% -ngl 99 -c %CTX% -np 2 --alias scribe --no-jinja --chat-template gemma
+"%IGPU_SERVER%" -m "%IGPU_MODEL%" --host 127.0.0.1 --port %IGPU_PORT% -ngl 99 -c %IGPU_CTX% -np %IGPU_PARALLEL% --alias %IGPU_ALIAS% --no-jinja --chat-template gemma
 
 echo.
 echo Worker stopped.

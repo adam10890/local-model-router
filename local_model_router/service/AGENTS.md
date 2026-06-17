@@ -5,7 +5,8 @@
 The HTTP surface: Starlette app (`app.py`), dry-run routing intent
 (`routing_intent.py`), read-only fleet observer (`observer.py`), Fleet
 Manager control plane (`fleet_manager.py`), and opt-in fleet lifecycle
-control (`fleet_control.py`). Entry point: `__main__.py`
+control (`fleet_control.py`). Agent ticket coordination lives in
+`agent_orchestrator.py`. Entry point: `__main__.py`
 (`python -m local_model_router`).
 
 ## Ownership
@@ -16,6 +17,9 @@ control (`fleet_control.py`). Entry point: `__main__.py`
 - `fleet_manager.py` owns agent identity, bounded admission, SQLite state.
 - `fleet_control.py` owns the opt-in start/stop facade over
   `helpers/llama_cpp_manager.BackendManager`.
+- `agent_orchestrator.py` owns observe-first plan/ticket state, workspace
+  packets, DOX chain snapshots, and wake markers. It must not launch
+  containers or edit `AGENTS.md` files directly.
 
 ## Local Contracts
 
@@ -23,6 +27,9 @@ control (`fleet_control.py`). Entry point: `__main__.py`
 - `GET /routing/models`, `GET /routing/models/{id}`, and
   `GET /routing/analytics` are safe discovery/telemetry surfaces. They must
   never return API keys, prompt bodies, or raw request content.
+- `/orchestrator/*` is a protected coordination surface for multi-agent
+  plans. It stores prompts in ticket workspaces, not fleet telemetry; sub
+  agents submit DOX reports or explicit unchanged reasons.
 - OpenAI-compatible endpoints reuse the routing decision path and forward to
   the selected llama.cpp slot; no duplicate routing policy.
 - `model=auto` is capability-aware: tools, vision payloads, JSON mode,
@@ -64,7 +71,7 @@ control (`fleet_control.py`). Entry point: `__main__.py`
 
 ## Verification
 
-- `python -m pytest tests/test_routing_intent.py tests/test_observer_service.py tests/test_openai_chat_completions.py tests/test_fleet_manager.py tests/test_fleet_control.py tests/test_local_first_plus_api.py -q`
+- `python -m pytest tests/test_routing_intent.py tests/test_observer_service.py tests/test_openai_chat_completions.py tests/test_fleet_manager.py tests/test_fleet_control.py tests/test_local_first_plus_api.py tests/test_agent_orchestrator.py -q`
 
 ## Child DOX Index
 

@@ -52,6 +52,8 @@ codebase.
 
 - Keep increments small and behavior-preserving; this codebase is trusted by
   a live setup.
+- Default to Ponytail-style implementation: stdlib/native first, shortest
+  working diff, no speculative abstractions.
 - Git workflow: keep `main` shippable; use `dev/<slug>` for active work,
   `ready/<slug>` for verified merge candidates, and delete merged branches
   locally and remotely. Detailed rules live in
@@ -100,6 +102,5 @@ codebase.
 Smaller areas without child contracts yet: `routing/` (aliases),
 `upstreams/`, `apps/`, `mcp/` (ported from the plugin; mutating tools gated
 by `MCP_ALLOW_MUTATING_TOOLS`), `a2a/` (card + skills; card is public, skills
-honor the API key), `dashboard/` (single static page at `/ui`, three tabs:
-Overview / Connect an agent / Cookbook; data calls carry the user-entered
-key).
+honor the API key), `dashboard/` (single static page at `/ui`; data calls
+carry the user-entered key).

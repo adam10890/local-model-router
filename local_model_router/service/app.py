@@ -41,6 +41,7 @@ from .fleet_control import (
     configured_backend,
     fleet_control_enabled,
 )
+from .agent_orchestrator import AgentOrchestrator, OrchestratorError
 from .fleet_manager import (
     AgentIdentity,
     FleetQueue,
@@ -361,6 +362,7 @@ def create_app(
     models_fetch: Optional[FetchFn] = None,
     upstreams_path: Optional[str] = None,
     apps_path: Optional[str] = None,
+    orchestrator: Optional[AgentOrchestrator] = None,
 ) -> Starlette:
     """Return a configured Starlette app.  Safe to call multiple times (no side-effects)."""
     observer = ObserverBackend(config_path)
@@ -373,6 +375,10 @@ def create_app(
     conf_dir = Path(observer.config_path).resolve().parent
     upstreams = load_upstreams(upstreams_path or conf_dir / "upstreams.yaml")
     app_profiles = AppProfiles.load(apps_path or conf_dir / "apps.yaml")
+    agent_orchestrator = orchestrator or AgentOrchestrator(
+        repo_root=str(Path(__file__).resolve().parents[2]),
+        bundles_path=str(conf_dir / "agent_orchestrator.yaml"),
+    )
 
     control_enabled = fleet_control_enabled()
     fleet_control = FleetControlHandler(observer.config_path)
@@ -684,6 +690,47 @@ def create_app(
         except ValueError:
             limit = 50
         return JSONResponse(store.routing_analytics(limit=limit))
+
+    def _orchestrator_error(exc: OrchestratorError) -> JSONResponse:
+        return JSONResponse({"error": exc.code, "detail": exc.message}, status_code=exc.status_code)
+
+    async def orchestrator_create_plan(request: Request) -> JSONResponse:
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid_json", "detail": "request body is not valid JSON"}, status_code=400)
+        try:
+            return JSONResponse(agent_orchestrator.create_plan(body))
+        except OrchestratorError as exc:
+            return _orchestrator_error(exc)
+
+    async def orchestrator_list_plans(request: Request) -> JSONResponse:
+        return JSONResponse(agent_orchestrator.list_plans())
+
+    async def orchestrator_plan_detail(request: Request) -> JSONResponse:
+        plan_id = str(request.path_params.get("plan_id") or "")
+        try:
+            return JSONResponse(agent_orchestrator.get_plan(plan_id))
+        except OrchestratorError as exc:
+            return _orchestrator_error(exc)
+
+    async def orchestrator_ticket_detail(request: Request) -> JSONResponse:
+        ticket_id = str(request.path_params.get("ticket_id") or "")
+        try:
+            return JSONResponse(agent_orchestrator.get_ticket(ticket_id))
+        except OrchestratorError as exc:
+            return _orchestrator_error(exc)
+
+    async def orchestrator_ticket_submit(request: Request) -> JSONResponse:
+        ticket_id = str(request.path_params.get("ticket_id") or "")
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid_json", "detail": "request body is not valid JSON"}, status_code=400)
+        try:
+            return JSONResponse(agent_orchestrator.submit_ticket(ticket_id, body))
+        except OrchestratorError as exc:
+            return _orchestrator_error(exc)
 
     async def forward_to_upstream(
         upstream: UpstreamConfig, bare_model: str, body: Dict[str, Any]
@@ -1241,6 +1288,11 @@ def create_app(
         Route("/routing/models", protected(routing_models)),
         Route("/routing/models/{model_id:path}", protected(routing_model_card)),
         Route("/routing/analytics", protected(routing_analytics)),
+        Route("/orchestrator/plans", protected(orchestrator_create_plan), methods=["POST"]),
+        Route("/orchestrator/plans", protected(orchestrator_list_plans)),
+        Route("/orchestrator/plans/{plan_id}", protected(orchestrator_plan_detail)),
+        Route("/orchestrator/tickets/{ticket_id}/submit", protected(orchestrator_ticket_submit), methods=["POST"]),
+        Route("/orchestrator/tickets/{ticket_id}", protected(orchestrator_ticket_detail)),
         Route("/backends", protected(backends)),
         Route("/apps", protected(apps_list)),
         Route("/cookbook", protected(cookbook)),

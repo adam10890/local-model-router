@@ -1,0 +1,24 @@
+# Capability bundles for observe-first agent ticket orchestration.
+# These names are copied into ticket workspaces for audit; V1 does not launch
+# containers or grant tools by itself.
+
+bundles:
+  code:
+    mcp_servers: ["filesystem"]
+    plugins: ["GitHub"]
+    tools: ["shell", "pytest", "py_compile"]
+
+  docs:
+    mcp_servers: []
+    plugins: []
+    tools: ["markdown", "dox_report"]
+
+  research:
+    mcp_servers: []
+    plugins: ["Browser"]
+    tools: ["web_lookup", "source_notes"]
+
+  docker:
+    mcp_servers: []
+    plugins: []
+    tools: ["compose_plan", "resource_hints"]

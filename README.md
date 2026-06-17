@@ -35,13 +35,14 @@ Agent Zero is client #1, not the owner.
 | Routing (dry-run) | `POST /routing/request` | explainable capability-aware intent routing |
 | Routing preview | `GET /routing/preview` | which slot a role would get |
 | Routing catalog | `GET /routing/models`, `GET /routing/models/{id}`, `GET /routing/analytics` | safe model cards, recent decisions, latency/fallback/cache stats |
+| Agent orchestration | `POST /orchestrator/plans`, `GET /orchestrator/plans`, `POST /orchestrator/tickets/{id}/submit` | observe-first plan/ticket packets, DOX reports, artifacts, wake markers |
 | OpenAI-compatible | `GET /v1/models`, `POST /v1/chat/completions` | aliases + live/upstream models; capabilities metadata; streaming + non-streaming forwarding |
 | Fleet Manager | `GET /fleet/status`, `GET /fleet/agents`, `POST /fleet/agents/register` | agent identity, bounded queueing, SQLite telemetry |
 | Fleet control (opt-in) | `POST /fleet/start`, `POST /fleet/stop`, `POST /fleet/slots/{id}/start` + `/stop` | start/stop slots; off unless `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1` |
 | Backends | `GET /backends` | local fleet + configured upstreams with capabilities |
 | App profiles | `GET /apps` | per-client routing policy |
 | Config preview | `GET /config/preview` | secrets redacted |
-| Dashboard | `GET /ui` | Overview, Connect an agent, Compare / Routing, Cookbook |
+| Dashboard | `GET /ui` | Overview, Connect an agent, Compare / Routing, Orchestration, Cookbook |
 | Cookbook | `GET /cookbook` | scans your GGUF folder, VRAM fit math, per-role model recommendations with confidence grades |
 | A2A | `GET /.well-known/agent-card.json`, `POST /a2a` | agent card + skills for agent-to-agent use |
 | MCP | `python -m local_model_router mcp` | Streamable HTTP MCP server (port 8095, `[mcp]` extra) |
@@ -75,6 +76,11 @@ get the permissive default profile.
 enable an in-memory deterministic cache for non-streaming requests with
 `temperature=0` or a fixed `seed`. Cache data is process-local and prompt
 bodies are never written to telemetry.
+
+**Agent orchestration:** V1 is coordination only. It writes plan/ticket
+workspaces under `A0_AGENT_ORCH_DIR` (or temp by default), creates draft
+`compose.plan.yaml` files, snapshots relevant DOX chains, and writes
+`WAKE.json` when the planner should resume. It does not run Docker.
 
 **CLI:** `python -m local_model_router [serve|doctor|list-models|test-route|config-check]`
 
