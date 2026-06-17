@@ -28,8 +28,11 @@ control (`fleet_control.py`). Agent ticket coordination lives in
   `GET /routing/analytics` are safe discovery/telemetry surfaces. They must
   never return API keys, prompt bodies, or raw request content.
 - `/orchestrator/*` is a protected coordination surface for multi-agent
-  plans. It stores prompts in ticket workspaces, not fleet telemetry; sub
-  agents submit DOX reports or explicit unchanged reasons.
+  plans and sub-agent instance heartbeats. It stores prompts in ticket
+  workspaces, not fleet telemetry; list/summary endpoints must not expose
+  prompt bodies. Persona prompts live as workspace files referenced by
+  `persona_prompt_path`, not as list payload text. Sub agents submit DOX
+  reports or explicit unchanged reasons.
 - OpenAI-compatible endpoints reuse the routing decision path and forward to
   the selected llama.cpp slot; no duplicate routing policy.
 - `model=auto` is capability-aware: tools, vision payloads, JSON mode,

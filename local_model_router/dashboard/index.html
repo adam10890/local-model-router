@@ -259,6 +259,17 @@
 <!-- ORCHESTRATION -->
 <div class="grid" x-show="tab==='orchestration'" x-cloak>
   <div class="card">
+    <h2>Sub-agent instances</h2>
+    <div class="row"><span class="dim">running</span><span x-text="orchestration.summary.instances?.running ?? 0"></span></div>
+    <div class="row"><span class="dim">stale</span><span x-text="orchestration.summary.instances?.stale ?? 0"></span></div>
+    <div class="row"><span class="dim">blocked / failed</span><span x-text="orchestration.summary.instances?.blocked_failed ?? 0"></span></div>
+    <div class="row"><span class="dim">max parallel</span><span x-text="orchestration.summary.instances?.max_parallel || 'not set'"></span></div>
+    <div style="height:.45rem; background:#0d1016; border:1px solid var(--line); border-radius:6px; overflow:hidden; margin-top:.6rem;">
+      <div style="height:100%; background:var(--accent);" :style="'width:' + concurrencyPct() + '%'"></div>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>Plans</h2>
     <template x-for="p in orchestration.plans" :key="p.plan_id">
       <div class="row" @click="openPlan(p.plan_id)" style="cursor:pointer">
@@ -286,9 +297,31 @@
   </div>
 
   <div class="card" style="grid-column:1/-1">
+    <h2>Instances</h2>
+    <table>
+      <thead><tr><th>agent</th><th>status</th><th>persona</th><th>model</th><th>task</th><th>slot/container</th><th>runtime</th><th>DOX</th></tr></thead>
+      <tbody>
+        <template x-for="i in selectedInstances()" :key="i.instance_id">
+          <tr @click="openInstance(i.instance_id)" style="cursor:pointer">
+            <td><strong x-text="i.agent_id || i.instance_id"></strong><div class="dim" x-text="i.instance_id"></div></td>
+            <td><span class="badge" :class="instanceStatusClass(i.status)" x-text="i.status"></span></td>
+            <td><span x-text="i.persona_name || i.persona_id || '-'"></span><div class="dim" x-text="i.persona_prompt_path || ''"></div></td>
+            <td><span x-text="i.model"></span><div class="dim" x-text="i.role"></div></td>
+            <td><span x-text="i.task_title || i.ticket_id || ''"></span><div class="dim" x-text="i.prompt_preview"></div></td>
+            <td><span x-text="i.slot_id || '-'"></span><div class="dim" x-text="i.container_id || ''"></div></td>
+            <td class="dim" x-text="runtimeText(i)"></td>
+            <td class="dim" x-text="i.dox_state || 'missing'"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+    <div class="dim" x-show="!selectedInstances().length">no sub-agent instances yet</div>
+  </div>
+
+  <div class="card" style="grid-column:1/-1">
     <h2>Tickets</h2>
     <table>
-      <thead><tr><th>ticket</th><th>role</th><th>status</th><th>deps</th><th>artifacts</th><th>DOX</th></tr></thead>
+      <thead><tr><th>ticket</th><th>role</th><th>status</th><th>persona</th><th>deps</th><th>artifacts</th><th>DOX</th></tr></thead>
       <tbody>
         <template x-for="t in (orchestration.plan?.tickets || [])" :key="t.ticket_id">
           <tr @click="openTicket(t.ticket_id)" style="cursor:pointer">
@@ -297,6 +330,7 @@
             <td><span class="badge"
                       :class="t.status === 'completed' ? 'ok' : (['blocked','failed'].includes(t.status) ? 'err' : 'warn')"
                       x-text="t.status"></span></td>
+            <td><span x-text="t.persona_name || t.persona_id || '-'"></span><div class="dim" x-text="t.persona_prompt_path || ''"></div></td>
             <td class="dim" x-text="(t.dependencies || []).join(', ') || 'none'"></td>
             <td class="dim" x-text="t.artifact_path"></td>
             <td class="dim" x-text="t.dox_report_path"></td>
@@ -304,6 +338,11 @@
         </template>
       </tbody>
     </table>
+  </div>
+
+  <div class="card" style="grid-column:1/-1">
+    <h2>Instance packet</h2>
+    <pre x-text="orchestration.instance ? JSON.stringify(orchestration.instance, null, 2) : 'select an instance'"></pre>
   </div>
 
   <div class="card" style="grid-column:1/-1">
@@ -403,7 +442,7 @@ function dashboard() {
   return {
     apiKey: localStorage.getItem("lmr_key") || "",
     health: {}, slots: [], backends: [], apps: [], models: [], fleet: {}, analytics: {},
-    orchestration: { plans: [], plan: null, ticket: null, error: "" },
+    orchestration: { plans: [], plan: null, ticket: null, instances: [], instance: null, summary: { instances: {} }, error: "" },
     taskTypes: ["chat","coding","planning","research","summarization","embedding",
                 "tool_calling","sub_agent_task","background_worker","documentation"],
     route: { task_type: "chat", role: "", result: "" },
@@ -500,6 +539,25 @@ API Key:  local
       if (t === "orchestration") this.loadOrchestration();
     },
 
+    instanceStatusClass(status) {
+      return status === "completed" ? "ok" : (["blocked","failed","stale"].includes(status) ? "err" : "warn");
+    },
+    selectedInstances() {
+      const planId = this.orchestration.plan?.plan?.plan_id;
+      return planId
+        ? (this.orchestration.instances || []).filter((i) => i.plan_id === planId)
+        : (this.orchestration.instances || []);
+    },
+    concurrencyPct() {
+      const s = this.orchestration.summary.instances || {};
+      const running = Number(s.running || 0), max = Number(s.max_parallel || 0);
+      return max ? Math.min(100, Math.round((running / max) * 100)) : (running ? 100 : 0);
+    },
+    runtimeText(i) {
+      const seconds = Math.max(0, Math.floor(Number(i.runtime_ms || 0) / 1000));
+      return seconds < 60 ? seconds + "s" : Math.floor(seconds / 60) + "m " + (seconds % 60) + "s";
+    },
+
     async loadCookbook(force = false) {
       this.cookbookBusy = true;
       try {
@@ -561,8 +619,14 @@ API Key:  local
     },
     async loadOrchestration() {
       try {
-        const data = await this.get("/orchestrator/plans");
-        this.orchestration.plans = data.plans || [];
+        const [plans, summary, instances] = await Promise.all([
+          this.get("/orchestrator/plans"),
+          this.get("/orchestrator/summary"),
+          this.get("/orchestrator/instances"),
+        ]);
+        this.orchestration.plans = plans.plans || [];
+        this.orchestration.summary = summary || { instances: {} };
+        this.orchestration.instances = instances.instances || [];
         this.orchestration.error = "";
         if (!this.orchestration.plan && this.orchestration.plans.length) {
           await this.openPlan(this.orchestration.plans[0].plan_id);
@@ -573,8 +637,12 @@ API Key:  local
       try {
         this.orchestration.plan = await this.get("/orchestrator/plans/" + encodeURIComponent(planId));
         this.orchestration.ticket = null;
+        this.orchestration.instance = null;
         this.orchestration.error = "";
       } catch (err) { this.orchestration.error = String(err); }
+    },
+    openInstance(instanceId) {
+      this.orchestration.instance = (this.orchestration.instances || []).find((i) => i.instance_id === instanceId) || null;
     },
     async openTicket(ticketId) {
       try {

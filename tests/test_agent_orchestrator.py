@@ -74,6 +74,11 @@ def _plan_payload() -> dict:
                 "id": "ticket-code",
                 "title": "Code worker",
                 "prompt": "Implement the API surface.",
+                "persona": {
+                    "id": "local-coder",
+                    "name": "Local Coder",
+                    "prompt": "You are a focused local code agent.",
+                },
                 "agent_role": "coder",
                 "target_paths": ["local_model_router/service/app.py"],
                 "capability_bundles": ["code"],
@@ -112,11 +117,18 @@ def test_create_plan_writes_sqlite_rows_workspace_files_and_dox_chain(tmp_path, 
     assert "ticket-code" in compose
 
     ticket_dir = plan_dir / "tickets" / "ticket-code"
-    assert (ticket_dir / "task.md").read_text(encoding="utf-8").startswith("# Code worker")
+    task_md = (ticket_dir / "task.md").read_text(encoding="utf-8")
+    assert task_md.startswith("# Code worker")
+    assert task_md.index("## Persona") < task_md.index("## Prompt")
     ticket_json = json.loads((ticket_dir / "ticket.json").read_text(encoding="utf-8"))
     assert ticket_json["model_hint"] == "WeiboAI/VibeThinker-3B"
     assert ticket_json["prompt_path"].endswith("task.md")
+    assert ticket_json["persona_id"] == "local-coder"
+    assert ticket_json["persona_name"] == "Local Coder"
+    assert ticket_json["persona_prompt_path"].endswith("persona.md")
+    assert (ticket_dir / "persona.md").read_text(encoding="utf-8") == "You are a focused local code agent.\n"
     assert "Implement the API surface." not in json.dumps(ticket_json)
+    assert "You are a focused local code agent." not in json.dumps(ticket_json)
 
     capabilities = json.loads((ticket_dir / "capabilities.json").read_text(encoding="utf-8"))
     assert capabilities["requested_bundles"] == ["code"]
@@ -204,12 +216,89 @@ def test_orchestrator_list_and_ticket_detail_are_summary_safe(tmp_path, monkeypa
     assert listing["plans"][0]["goal"] == "Implement a local multi-agent feature"
     assert "work_document" not in listing["plans"][0]
     assert "Implement the API surface." not in str(listing)
+    assert "You are a focused local code agent." not in str(listing)
 
     ticket = client.get("/orchestrator/tickets/ticket-code").json()
     assert ticket["ticket"]["ticket_id"] == "ticket-code"
+    assert ticket["ticket"]["persona_name"] == "Local Coder"
     assert ticket["task"].endswith("Implement the API surface.\n")
     assert ticket["ticket"]["artifact_path"].endswith("artifacts")
     assert created["plan"]["plan_id"] == ticket["ticket"]["plan_id"]
+
+
+def test_instance_upsert_and_summary_are_prompt_safe(tmp_path, monkeypatch):
+    client, _orchestrator, _repo_root = _make_client(tmp_path, monkeypatch)
+    created = client.post("/orchestrator/plans", json=_plan_payload()).json()
+
+    resp = client.post(
+        "/orchestrator/instances/agent-01",
+        json={
+            "ticket_id": "ticket-code",
+            "agent_id": "agent-01",
+            "agent_type": "sub_agent",
+            "slot_id": "utility",
+            "container_id": "planned-container",
+            "model": "WeiboAI/VibeThinker-3B",
+            "role": "coder",
+            "status": "running",
+            "health": "ok",
+            "prompt": "FULL SECRET PROMPT SHOULD NOT LEAK",
+            "prompt_preview": "Implement API surface.",
+            "log_tail": "started",
+        },
+    )
+
+    assert resp.status_code == 200
+    instance = resp.json()["instance"]
+    assert instance["plan_id"] == created["plan"]["plan_id"]
+    assert instance["ticket_id"] == "ticket-code"
+    assert instance["task_title"] == "Code worker"
+    assert instance["persona_name"] == "Local Coder"
+    assert instance["artifact_path"].endswith("artifacts")
+    assert instance["dox_state"] == "pending"
+
+    listing = client.get("/orchestrator/instances").json()
+    assert listing["summary"]["running"] == 1
+    assert listing["summary"]["total"] == 1
+    assert listing["instances"][0]["prompt_preview"] == "Implement API surface."
+    assert listing["instances"][0]["persona_id"] == "local-coder"
+    assert "FULL SECRET PROMPT SHOULD NOT LEAK" not in str(listing)
+    assert "You are a focused local code agent." not in str(listing)
+
+    summary = client.get("/orchestrator/summary").json()
+    assert summary["instances"]["running"] == 1
+    assert "FULL SECRET PROMPT SHOULD NOT LEAK" not in str(summary)
+
+
+def test_instance_stale_and_finish_counts(tmp_path, monkeypatch):
+    client, orchestrator, _repo_root = _make_client(tmp_path, monkeypatch)
+    client.post("/orchestrator/plans", json=_plan_payload())
+    client.post(
+        "/orchestrator/instances/agent-01",
+        json={"ticket_id": "ticket-code", "status": "running", "health": "ok"},
+    )
+
+    with sqlite3.connect(orchestrator.db_path) as conn:
+        conn.execute(
+            "UPDATE agent_instances SET last_seen_at = ? WHERE instance_id = ?",
+            ("2000-01-01T00:00:00Z", "agent-01"),
+        )
+
+    stale = client.get("/orchestrator/instances").json()
+    assert stale["instances"][0]["status"] == "stale"
+    assert stale["summary"]["stale"] == 1
+
+    done = client.post(
+        "/orchestrator/instances/agent-01",
+        json={"ticket_id": "ticket-code", "status": "completed", "health": "ok"},
+    )
+    assert done.status_code == 200
+    assert done.json()["instance"]["finished_at"]
+
+    summary = client.get("/orchestrator/summary").json()
+    assert summary["instances"]["completed"] == 1
+    assert summary["instances"]["running"] == 0
+    assert summary["instances"]["stale"] == 0
 
 
 def test_dashboard_exposes_observe_only_orchestration_tab():
@@ -218,5 +307,9 @@ def test_dashboard_exposes_observe_only_orchestration_tab():
     html = dashboard_html()
     assert "Orchestration" in html
     assert "/orchestrator/plans" in html
+    assert "/orchestrator/instances" in html
+    assert "/orchestrator/summary" in html
+    assert "Sub-agent instances" in html
+    assert "persona" in html
     assert "orchestration.ticket" in html
     assert "Create plan" not in html

@@ -707,6 +707,27 @@ def create_app(
     async def orchestrator_list_plans(request: Request) -> JSONResponse:
         return JSONResponse(agent_orchestrator.list_plans())
 
+    async def orchestrator_summary(request: Request) -> JSONResponse:
+        return JSONResponse(agent_orchestrator.summary())
+
+    async def orchestrator_list_instances(request: Request) -> JSONResponse:
+        plan_id = str(request.query_params.get("plan_id") or "").strip()
+        try:
+            return JSONResponse(agent_orchestrator.list_instances(plan_id=plan_id))
+        except OrchestratorError as exc:
+            return _orchestrator_error(exc)
+
+    async def orchestrator_instance_upsert(request: Request) -> JSONResponse:
+        instance_id = str(request.path_params.get("instance_id") or "")
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid_json", "detail": "request body is not valid JSON"}, status_code=400)
+        try:
+            return JSONResponse(agent_orchestrator.upsert_instance(instance_id, body))
+        except OrchestratorError as exc:
+            return _orchestrator_error(exc)
+
     async def orchestrator_plan_detail(request: Request) -> JSONResponse:
         plan_id = str(request.path_params.get("plan_id") or "")
         try:
@@ -1290,6 +1311,9 @@ def create_app(
         Route("/routing/analytics", protected(routing_analytics)),
         Route("/orchestrator/plans", protected(orchestrator_create_plan), methods=["POST"]),
         Route("/orchestrator/plans", protected(orchestrator_list_plans)),
+        Route("/orchestrator/summary", protected(orchestrator_summary)),
+        Route("/orchestrator/instances", protected(orchestrator_list_instances)),
+        Route("/orchestrator/instances/{instance_id}", protected(orchestrator_instance_upsert), methods=["POST"]),
         Route("/orchestrator/plans/{plan_id}", protected(orchestrator_plan_detail)),
         Route("/orchestrator/tickets/{ticket_id}/submit", protected(orchestrator_ticket_submit), methods=["POST"]),
         Route("/orchestrator/tickets/{ticket_id}", protected(orchestrator_ticket_detail)),
