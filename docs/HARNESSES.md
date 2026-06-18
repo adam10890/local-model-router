@@ -84,22 +84,19 @@ coexist. Swap to 26b only if you accept the scribe time-sharing the GPU.
 
 ## Wiring status
 
-- **Now (this doc):** the plan + DOX. Nothing in the serving path reads it yet.
-- **Next (`feature/harness-role-pins`):** extend `conf/apps.yaml` so each app
-  carries a per-role model map, and make `app_profiles.apply` honor it before
-  the global failover chain. Proposed schema:
-
-  ```yaml
-  agent_zero:
-    display_name: "Agent Zero"
-    roles: { chat: gemma-4-12b, planner: vibethinker-3b,
-             utility: qwen3.5-9b, embedding: nomic-embed-text }
-  hermes:
-    display_name: "LMM ROUTER"
-    roles: { chat: gemma-4-12b }
-  ```
-- **Later (`feature/dashboard-harnesses-tab`):** dashboard tab renders this
-  matrix + live health, one card per app.
+- **Done:** per-harness `roles` map in `conf/apps.yaml`; `app_profiles.apply`
+  resolves a role to the harness's pinned model before the global failover
+  chain (admin pin beats `allowed_models`); `/apps` surfaces it; dashboard
+  **Harnesses** tab renders the matrix.
+- **Done — planner serving:** VibeThinker is served by **Docker Model Runner**
+  (`docker model pull hf.co/mradermacher/VibeThinker-3B-GGUF:Q8_0`), wired as
+  the `dmr` upstream in `conf/upstreams.yaml`; the A0 `planner` pin points at
+  `dmr/huggingface.co/mradermacher/vibethinker-3b-gguf:Q8_0`. Verified
+  end-to-end (`model: planner` → router → DMR → VibeThinker → 42).
+  > Caveat: DMR is a peer compute manager — its VRAM is **not** under the
+  > router's admission control. Fine while `backend: remote`; revisit when
+  > fork #1 lands (migrate the planner into the native managed fleet if it must
+  > coexist in the 24 GB budget).
 - **Open (fork #1) — runtime compute manager:** the router owns the GPU at
   runtime, not just request routing. The pieces exist — fit engine
   (`cookbook/engine.py`), fleet control, VRAM budget + `max_concurrent` limits
@@ -108,5 +105,5 @@ coexist. Swap to 26b only if you accept the scribe time-sharing the GPU.
   `global.backend: docker` + wire that loop and the router self-manages compute
   as load shifts (chat ↔ planner ↔ sub-agent bursts).
 
-> Pending: `vibethinker-3b` GGUF download + preset entry (see session notes).
-> Until then the planner role has no backing model on disk.
+> Follow-up: VibeThinker emits `<think>…</think>` reasoning in content; add a
+> reasoning-format split when the orchestrator starts consuming planner output.

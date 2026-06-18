@@ -19,7 +19,7 @@ apps:
     default_model: chat
     roles:                          # per-harness role -> local model (see docs/HARNESSES.md)
       chat: gemma-4-12b             # foreground ego
-      planner: vibethinker-3b       # background sub-agent planner (orchestrator DEFAULT_MODEL_HINT)
+      planner: "dmr/huggingface.co/mradermacher/vibethinker-3b-gguf:Q8_0"  # VibeThinker via Docker Model Runner (orchestrator DEFAULT_MODEL_HINT)
       utility: qwen3.5-9b
       embedding: nomic-embed-text
     allowed_models: ["*"]
