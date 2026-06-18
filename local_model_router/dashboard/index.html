@@ -61,6 +61,7 @@
 
 <nav class="tabs">
   <button class="tab" :class="tab==='overview' && 'active'" @click="openTab('overview')">Overview</button>
+  <button class="tab" :class="tab==='harnesses' && 'active'" @click="openTab('harnesses')">Harnesses</button>
   <button class="tab" :class="tab==='connect' && 'active'" @click="openTab('connect')">Connect an agent</button>
   <button class="tab" :class="tab==='compare' && 'active'" @click="openTab('compare')">Compare / Routing</button>
   <button class="tab" :class="tab==='orchestration' && 'active'" @click="openTab('orchestration')">Orchestration</button>
@@ -257,6 +258,32 @@
 </div>
 
 <!-- ORCHESTRATION -->
+<!-- ════════════════════ HARNESSES ════════════════════ -->
+<div class="grid" x-show="tab==='harnesses'" x-cloak>
+  <template x-for="app in apps" :key="app.app_id">
+    <div class="card" x-show="Object.keys(app.roles || {}).length">
+      <h2 style="display:flex; justify-content:space-between; align-items:center;">
+        <span x-text="app.display_name || app.app_id"></span>
+        <span class="dim" x-text="app.app_id"></span>
+      </h2>
+      <table>
+        <thead><tr><th>role</th><th>local model</th></tr></thead>
+        <tbody>
+          <template x-for="[role, model] in Object.entries(app.roles || {})" :key="role">
+            <tr><td x-text="role"></td><td x-text="model"></td></tr>
+          </template>
+        </tbody>
+      </table>
+      <div class="dim" style="margin-top:.5rem; font-size:.76rem;">
+        default: <span x-text="app.default_model"></span>
+      </div>
+    </div>
+  </template>
+  <div class="card" x-show="!apps.some(a => Object.keys(a.roles||{}).length)">
+    <div class="dim">No harness role maps yet — add a <code>roles:</code> block to an app in conf/apps.yaml.</div>
+  </div>
+</div>
+
 <div class="grid" x-show="tab==='orchestration'" x-cloak>
   <div class="card">
     <h2>Sub-agent instances</h2>
