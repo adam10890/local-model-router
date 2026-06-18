@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Local Router Studio - 1.0 Beta Roadmap</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #181b22;
+      --soft: #20242d;
+      --line: #2b303b;
+      --text: #e7eaf0;
+      --muted: #a0a7b5;
+      --accent: #58a6ff;
+      --ok: #3fb950;
+      --warn: #d29922;
+      --err: #f85149;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.65 system-ui, "Segoe UI", Arial, sans-serif;
+    }
+    main { max-width: 1180px; margin: 0 auto; padding: 32px 20px 56px; }
+    header { margin-bottom: 28px; }
+    h1, h2, h3 { line-height: 1.25; margin: 0; }
+    h1 { font-size: clamp(28px, 4vw, 46px); letter-spacing: 0; }
+    h2 { font-size: 22px; margin-bottom: 12px; }
+    h3 { font-size: 17px; margin-bottom: 8px; }
+    p { margin: 0 0 12px; }
+    a { color: var(--accent); }
+    code {
+      direction: ltr;
+      unicode-bidi: plaintext;
+      background: #0b0d12;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 1px 5px;
+    }
+    .subtitle { color: var(--muted); max-width: 860px; font-size: 17px; margin-top: 10px; }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 5px 10px;
+      background: var(--soft);
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; }
+    .card {
+      grid-column: span 12;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .half { grid-column: span 6; }
+    .third { grid-column: span 4; }
+    .two-third { grid-column: span 8; }
+    .status {
+      border-inline-start: 4px solid var(--accent);
+      background: #131720;
+    }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .err { color: var(--err); }
+    ul, ol { margin: 8px 0 0; padding-inline-start: 22px; }
+    li { margin: 6px 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      direction: rtl;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 9px 8px;
+      vertical-align: top;
+      text-align: right;
+    }
+    th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .phase {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 14px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .phase:last-child { border-bottom: 0; }
+    .phase-id {
+      direction: ltr;
+      text-align: left;
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .flow {
+      direction: ltr;
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .node {
+      min-height: 76px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #10141c;
+      padding: 10px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 4px;
+    }
+    .node strong { color: var(--text); }
+    .node span { color: var(--muted); font-size: 12px; }
+    .note {
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      color: var(--muted);
+      background: #11151d;
+    }
+    @media (max-width: 850px) {
+      .half, .third, .two-third { grid-column: span 12; }
+      .phase { grid-template-columns: 1fr; }
+      .phase-id { text-align: right; }
+      .flow { grid-template-columns: 1fr; direction: rtl; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Local Router Studio - מפת דרך ל-1.0 Beta</h1>
+    <p class="subtitle">
+      מסמך חי למוצר עצמאי ופשוט: המשתמש מדליק תוכנה אחת, מקבל מודל חזק מקומי,
+      רשת תתי-סוכנים, דשבורד ויזואלי, ותוצרים בלי לראות קוד.
+    </p>
+    <div class="meta">
+      <span class="pill">סטטוס: חי ומתעדכן</span>
+      <span class="pill">עודכן: 2026-06-18</span>
+      <span class="pill">כיוון מאושר: Native Router Studio</span>
+      <span class="pill">עיקרון: Ponytail - מינימום שעובד</span>
+    </div>
+  </header>
+
+  <section class="grid">
+    <article class="card status two-third">
+      <h2>החלטת מוצר</h2>
+      <p>
+        1.0 Beta יהיה מוצר עצמאי: <strong>Local Router Studio</strong>.
+        לא "תוסף ל-Agent Zero", לא "LangFlow clone", ולא מערכת שמבקשת מהמשתמש
+        להבין Docker, llama.cpp, YAML או קוד.
+      </p>
+      <p>
+        LangGraph ו-LangFlow נשארים רעיונות להמשך. בגרסת הבטא נבנה flow
+        ויזואלי פשוט משלנו מעל מצב שכבר קיים ב-SQLite ובדשבורד.
+      </p>
+    </article>
+
+    <article class="card third">
+      <h2>יעד בטא</h2>
+      <ul>
+        <li>התקנה/הפעלה אחת.</li>
+        <li>בחירת מודל אוטומטית או מומלצת.</li>
+        <li>משימה אחת נכנסת, רשת סוכנים יוצאת לעבוד.</li>
+        <li>דשבורד מציג התקדמות ותוצרים.</li>
+        <li>אין prompt bodies בטלמטריה.</li>
+      </ul>
+    </article>
+  </section>
+
+  <section class="card">
+    <h2>חוויית המשתמש הרצויה</h2>
+    <div class="flow">
+      <div class="node"><strong>Start</strong><span>פותחים את האפליקציה</span></div>
+      <div class="node"><strong>Doctor</strong><span>בדיקת חומרה ומודלים</span></div>
+      <div class="node"><strong>Auto Setup</strong><span>בחירת מודל ותפקידים</span></div>
+      <div class="node"><strong>Task</strong><span>המשתמש מתאר מטרה</span></div>
+      <div class="node"><strong>Agents</strong><span>Planner + workers</span></div>
+      <div class="node"><strong>Result</strong><span>תוצרים, דוח, artifacts</span></div>
+    </div>
+  </section>
+
+  <section class="grid">
+    <article class="card half">
+      <h2>מה כבר קיים במוצר</h2>
+      <ul>
+        <li>OpenAI-compatible router: <code>/v1/models</code>, <code>/v1/chat/completions</code>.</li>
+        <li>Routing מוסבר: aliases, auto, strategies, analytics.</li>
+        <li>Dashboard קיים: Overview, Connect, Compare/Routing, Orchestration, Cookbook.</li>
+        <li>Cookbook סורק GGUF ומחשב התאמה ל-VRAM.</li>
+        <li>Fleet control קיים אך כבוי כברירת מחדל.</li>
+        <li>Orchestrator: plans, tickets, instances, personas, DOX, WAKE.</li>
+        <li>בדיקות hermetic רחבות.</li>
+      </ul>
+    </article>
+
+    <article class="card half">
+      <h2>מה עדיין חסר לבטא אמיתית</h2>
+      <ul>
+        <li>Onboarding שמסתיר קבצי config.</li>
+        <li>Runner מינימלי שמריץ תתי-סוכנים בפועל.</li>
+        <li>Model setup בטוח: לא להוריד עשרות GB בלי אישור מפורש.</li>
+        <li>Readiness UX: מה קריטי, מה אופציונלי, ומה לתקן עכשיו.</li>
+        <li>Release/versioning: הגרסה בקוד, README והדשבורד חייבים להיות מסונכרנים.</li>
+        <li>Browser smoke לדשבורד, מעבר ל-string tests.</li>
+      </ul>
+    </article>
+  </section>
+
+  <section class="card">
+    <h2>שלבי פיתוח עד 1.0 Beta</h2>
+
+    <div class="phase">
+      <div class="phase-id">0.3.1</div>
+      <div>
+        <h3>ייצוב אחרי ה-merge האחרון</h3>
+        <p>מטרת השלב: להפוך את main הנוכחי לבסיס נקי.</p>
+        <ul>
+          <li>לסנכרן version: <code>__version__</code>, README, dashboard.</li>
+          <li>לשפר <code>doctor</code>: critical / optional / disabled slots.</li>
+          <li>לעדכן docs מיושנים, במיוחד runbooks שמזכירים קבצים שכבר לא קיימים.</li>
+          <li>להוסיף בדיקת dashboard smoke בסיסית.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-id">0.4.0</div>
+      <div>
+        <h3>Onboarding ללא קבצי config</h3>
+        <p>המשתמש לא אמור לערוך YAML כדי להתחיל.</p>
+        <ul>
+          <li>מסך Setup בדשבורד: חומרה, תיקיית מודלים, slots, API key.</li>
+          <li>Auto-detect ל-GGUF folder ו-llama.cpp server קיים.</li>
+          <li>יצירת config מקומי מתוך UI, עם preview לפני שמירה.</li>
+          <li>כפתור "Run readiness check" שמסביר בעיות בעברית/אנגלית פשוטה.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-id">0.5.0</div>
+      <div>
+        <h3>Model autopilot</h3>
+        <p>בחירה אוטומטית של מודל חזק ותתי-מודלים לפי החומרה.</p>
+        <ul>
+          <li>Cookbook הופך ממסך המלצות למסך "Apply recommendation".</li>
+          <li>חלוקת roles: planner, worker, scribe/reviewer, embed אם קיים.</li>
+          <li>אם אין מודל מתאים: להציע רשימת אפשרויות, לא להוריד אוטומטית.</li>
+          <li>לשמור החלטות כ-profile מקומי שניתן לשחזר.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-id">0.6.0</div>
+      <div>
+        <h3>Runner מינימלי לתתי-סוכנים</h3>
+        <p>זה השלב שבו orchestration מפסיק להיות observe-only בלבד.</p>
+        <ul>
+          <li>Local runner ראשון: Python subprocess או task loop פנימי, לא Docker כברירת מחדל.</li>
+          <li>Bounded concurrency לפי חומרה: כמה workers רצים במקביל.</li>
+          <li>כל worker מקבל persona + DOX + ticket prompt + artifact folder.</li>
+          <li>ה-runner מדווח דרך <code>/orchestrator/instances/{id}</code>.</li>
+          <li>Stop/cancel task בסיסי.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-id">0.7.0</div>
+      <div>
+        <h3>חוויה ויזואלית של העבודה</h3>
+        <p>לא LangFlow עדיין. תצוגה פשוטה שמסבירה מה קורה.</p>
+        <ul>
+          <li>Flow view: Planner -> Tickets -> Workers -> Review -> Result.</li>
+          <li>Timeline לאירועים: created, running, blocked, completed.</li>
+          <li>Artifact browser לתוצרים.</li>
+          <li>התראות ברורות: blocked, failed, model unavailable, no capacity.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-id">0.8.0</div>
+      <div>
+        <h3>Task UX למשתמש לא טכני</h3>
+        <p>המסך הראשי צריך להיות "מה תרצה להשיג?", לא "בחר endpoint".</p>
+        <ul>
+          <li>Task composer פשוט עם goal, files/context, output type.</li>
+          <li>Templates: research, coding, docs, planning, local files.</li>
+          <li>Preview של plan לפני הרצה.</li>
+          <li>תצוגת privacy: מה נשאר מקומי ומה נשלח למודל.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-id">0.9.0</div>
+      <div>
+        <h3>Beta freeze</h3>
+        <p>אין פיצ'רים גדולים. רק יציבות, בדיקות, docs, התקנה.</p>
+        <ul>
+          <li>Windows-first QA: setup, start, restart, update.</li>
+          <li>בדיקת live smoke מול llama.cpp אמיתי.</li>
+          <li>Docs למשתמש: install, first task, troubleshooting.</li>
+          <li>Release checklist ו-known limitations.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-id">1.0.0-beta</div>
+      <div>
+        <h3>בטא ציבורית</h3>
+        <p>קריטריון: משתמש לא טכני יחסית יכול להפעיל, להריץ משימה, לראות סוכנים, ולקבל תוצר.</p>
+        <ul>
+          <li>אפליקציה נפתחת לדשבורד, לא לטרמינל בלבד.</li>
+          <li>Setup guided עובד ללא עריכת YAML ידנית.</li>
+          <li>מודל חזק נבחר או מומלץ באופן ברור.</li>
+          <li>רשת תתי-סוכנים רצה במגבלת משאבים.</li>
+          <li>תוצרי העבודה נשמרים וניתנים לפתיחה מהדשבורד.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="grid">
+    <article class="card third">
+      <h2>לא לבטא</h2>
+      <ul>
+        <li>LangFlow canvas מלא.</li>
+        <li>Docker orchestration כברירת מחדל.</li>
+        <li>Cloud BYOK.</li>
+        <li>Marketplace של agents.</li>
+        <li>Fine-tuning או model training.</li>
+      </ul>
+    </article>
+
+    <article class="card third">
+      <h2>שיקול: LangGraph</h2>
+      <p>
+        מתאים אם ה-flow הפנימי נהיה מורכב מדי ל-SQLite state machine פשוט.
+        לא להכניס לפני שיש runner עובד ו-3 workflows שחוזרים על עצמם.
+      </p>
+      <p class="note">Gate: להוסיף רק אם הוא מוחק קוד משלנו, לא אם הוא מוסיף שכבה.</p>
+    </article>
+
+    <article class="card third">
+      <h2>שיקול: LangFlow</h2>
+      <p>
+        מתאים למשתמשים מתקדמים שרוצים לערוך workflows. למשתמש הממוצע זה עלול
+        להיות יותר מדי. עדיף להתחיל עם flow view לקריאה בלבד.
+      </p>
+      <p class="note">Gate: להוסיף אחרי שיש דרישה לעריכה ויזואלית, לא רק צפייה.</p>
+    </article>
+  </section>
+
+  <section class="card">
+    <h2>Acceptance Gates</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>תחום</th>
+          <th>חייב לעבור לפני בטא</th>
+          <th>בדיקה</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>התקנה</td>
+          <td>משתמש חדש יכול להפעיל בלי לערוך קוד או YAML ידנית.</td>
+          <td>Clean machine checklist.</td>
+        </tr>
+        <tr>
+          <td>מודלים</td>
+          <td>המערכת מזהה מודלים קיימים ומציעה בחירה חזקה לפי חומרה.</td>
+          <td>Cookbook + apply recommendation smoke.</td>
+        </tr>
+        <tr>
+          <td>סוכנים</td>
+          <td>Planner ו-workers רצים ומדווחים status.</td>
+          <td>End-to-end local task.</td>
+        </tr>
+        <tr>
+          <td>דשבורד</td>
+          <td>אפשר להבין מה קורה בלי לקרוא logs.</td>
+          <td>Browser smoke + manual walkthrough.</td>
+        </tr>
+        <tr>
+          <td>בטיחות</td>
+          <td>אין prompt bodies בטלמטריה, public bind דורש auth.</td>
+          <td>Hermetic tests + config preview checks.</td>
+        </tr>
+        <tr>
+          <td>שחרור</td>
+          <td>version, docs, changelog, README מסונכרנים.</td>
+          <td>Release checklist.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Backlog מתקדם אחרי בטא</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>שלב</th>
+          <th>רעיון</th>
+          <th>מתי כן</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1.1</td>
+          <td>LangGraph adapter פנימי</td>
+          <td>אם state machine פנימי נהיה כבד או קשה לבדיקה.</td>
+        </tr>
+        <tr>
+          <td>1.2</td>
+          <td>Workflow templates מתקדמים</td>
+          <td>אחרי שיש נתונים על המשימות שמשתמשים באמת מריצים.</td>
+        </tr>
+        <tr>
+          <td>1.3</td>
+          <td>LangFlow-style visual editor</td>
+          <td>רק אם משתמשים מבקשים לערוך flow, לא רק לראות אותו.</td>
+        </tr>
+        <tr>
+          <td>1.x</td>
+          <td>Curated model downloader</td>
+          <td>אחרי שיש UX ברור לגודל הורדה, רישיון, שטח דיסק ו-hash verification.</td>
+        </tr>
+        <tr>
+          <td>2.0</td>
+          <td>Plugin/agent marketplace מקומי</td>
+          <td>אחרי שה-core runner יציב ויש פורמט persona/ticket סופי.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="grid">
+    <article class="card half">
+      <h2>עקרונות מוצר</h2>
+      <ol>
+        <li>המשתמש עובד דרך דשבורד, לא דרך קבצי config.</li>
+        <li>ברירת המחדל מקומית ובטוחה.</li>
+        <li>Automation כן, magic לא: כל פעולה כבדה מקבלת אישור ברור.</li>
+        <li>להראות התקדמות ותוצרים, לא logs גולמיים.</li>
+        <li>להוסיף dependencies רק כשהם מוחקים מורכבות קיימת.</li>
+      </ol>
+    </article>
+
+    <article class="card half">
+      <h2>שאלות פתוחות</h2>
+      <ul>
+        <li>שם מוצר סופי: Local Router Studio או שם קצר יותר?</li>
+        <li>האם 1.0 Beta חייב לכלול הורדת מודלים, או רק בחירה ממודלים קיימים?</li>
+        <li>האם runner ראשון צריך להיות subprocess פנימי או container opt-in?</li>
+        <li>איזה template ראשון הכי חשוב: coding, research, docs או planning?</li>
+      </ul>
+    </article>
+  </section>
+</main>
+</body>
+</html>

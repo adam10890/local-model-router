@@ -9,13 +9,16 @@ Durable documentation for operators, contributors, and coding agents.
 - `PROVIDER.md` owns standalone provider runbook details.
 - `INTEGRATIONS.md` owns copy-paste client setup snippets for MCP and
   OpenAI-compatible clients.
+- `1.0-beta-roadmap.html` owns the accepted living product roadmap toward
+  the standalone beta; keep decisions, gates, and deferred ideas current.
 - `development/` owns Git workflow, branch catalog rules, and collaboration
   process.
 
 ## Local Contracts
 
 - Documentation must describe current behavior and stable operating rules, not
-  speculative plans.
+  speculative plans. The beta roadmap is the explicit exception: it tracks
+  accepted product direction and must label deferred ideas as deferred.
 - Do not include secrets, API keys, prompt bodies, or machine-local fleet
   config values.
 - Keep `AGENTS.md`, `CONTRIBUTING.md`, `CLAUDE.md`, and development workflow
