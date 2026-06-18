@@ -21,6 +21,10 @@ if not errorlevel 1 (
     exit /b 0
 )
 
+REM Ensure the planner backend (Docker Model Runner) is enabled. Non-fatal:
+REM if Docker isn't running, the non-planner lanes still serve.
+docker desktop enable model-runner >nul 2>nul
+
 if not exist ".venv\Scripts\python.exe" (
     echo ERROR: virtual environment not found.
     echo Run SETUP.bat once, then run this file again.
