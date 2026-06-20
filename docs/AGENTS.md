@@ -10,7 +10,8 @@ Durable documentation for operators, contributors, and coding agents.
 - `INTEGRATIONS.md` owns copy-paste client setup snippets for MCP and
   OpenAI-compatible clients.
 - `1.0-beta-roadmap.html` owns the accepted living product roadmap toward
-  the standalone beta; keep decisions, gates, and deferred ideas current.
+  the standalone Imperium beta; keep decisions, gates, and deferred ideas
+  current.
 - `development/` owns Git workflow, branch catalog rules, and collaboration
   process.
 

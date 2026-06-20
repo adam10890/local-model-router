@@ -1,4 +1,4 @@
-# local-model-router
+# Imperium (local-model-router)
 
 **A local-first model router: one OpenAI-compatible gateway in front of your
 local llama.cpp fleet — with explainable routing, health/failover, and a

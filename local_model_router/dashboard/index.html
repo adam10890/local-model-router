@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>local-model-router</title>
+<title>Imperium - local-model-router</title>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <style>
   :root { --bg:#0f1115; --card:#181b22; --line:#262a33; --text:#e6e8ee; --dim:#8b93a3;
@@ -50,7 +50,7 @@
 <body x-data="dashboard()" x-init="boot()">
 
 <h1><span class="pulse" :class="health.status === 'ok' ? 'up' : ''"></span>
-    local-model-router
+    Imperium <span class="dim">(local-model-router)</span>
     <span class="dim" x-text="health.version ? 'v' + health.version : ''"></span></h1>
 
 <div class="key-bar">
