@@ -28,6 +28,8 @@ class AppProfile:
     allowed_models: tuple[str, ...] = ("*",)
     allow_auto_route: bool = True
     notes: str = ""
+    display_name: str = ""
+    roles: Dict[str, str] = field(default_factory=dict)
 
     def model_allowed(self, model: str) -> bool:
         if "*" in self.allowed_models:
@@ -41,6 +43,8 @@ class AppProfile:
             "allowed_models": list(self.allowed_models),
             "allow_auto_route": self.allow_auto_route,
             "notes": self.notes,
+            "display_name": self.display_name,
+            "roles": dict(self.roles),
         }
 
 
@@ -55,12 +59,20 @@ def _parse_profile(app_id: str, raw: Any) -> Optional[AppProfile]:
         allowed_tuple = tuple(str(m).strip() for m in allowed if str(m).strip())
     else:
         allowed_tuple = ("*",)
+    roles_raw = raw.get("roles")
+    roles = {
+        str(k).strip().lower(): str(v).strip()
+        for k, v in roles_raw.items()
+        if str(k).strip() and str(v).strip()
+    } if isinstance(roles_raw, dict) else {}
     return AppProfile(
         app_id=app_id,
         default_model=str(raw.get("default_model") or "auto").strip() or "auto",
         allowed_models=allowed_tuple or ("*",),
         allow_auto_route=bool(raw.get("allow_auto_route", True)),
         notes=str(raw.get("notes") or ""),
+        display_name=str(raw.get("display_name") or "").strip(),
+        roles=roles,
     )
 
 
@@ -118,6 +130,11 @@ class AppProfiles:
             if not profile.allow_auto_route:
                 return requested, "auto_route_disabled_for_app"
             return requested, None
+        # Per-harness role pin (chat/planner/utility/…) wins and is implicitly
+        # allowed — it is admin-configured in conf/apps.yaml, not client input.
+        pinned = profile.roles.get(requested.lower())
+        if pinned:
+            return pinned, None
         if not profile.model_allowed(requested):
             return requested, "model_not_allowed_for_app"
         return requested, None

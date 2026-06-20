@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Standalone local-first model router. One OpenAI-compatible gateway in front
+Imperium is a standalone local-first model router. One OpenAI-compatible gateway in front
 of a local llama.cpp fleet: explainable intent routing, slot health/failover,
 chat-completions forwarding, and a Fleet Manager control plane (agent
 identity, bounded queueing, SQLite telemetry).

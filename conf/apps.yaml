@@ -15,13 +15,22 @@ apps:
     notes: "Fallback profile for unidentified clients."
 
   agent_zero:
+    display_name: "Agent Zero"
     default_model: chat
+    roles:                          # per-harness role -> local model (see docs/HARNESSES.md)
+      chat: gemma-4-12b             # foreground ego
+      planner: "dmr/huggingface.co/mradermacher/vibethinker-3b-gguf:Q8_0"  # VibeThinker via Docker Model Runner (orchestrator DEFAULT_MODEL_HINT)
+      utility: qwen3.5-9b
+      embedding: nomic-embed-text
     allowed_models: ["*"]
     allow_auto_route: true
     notes: "Agent Zero main/utility/embedding roles via the lmm_router provider."
 
   hermes:
-    default_model: auto
+    display_name: "LMM ROUTER"      # what Hermes shows as its model name
+    default_model: chat
+    roles:
+      chat: gemma-4-12b             # the local model Hermes actually gets
     allowed_models: ["*"]
     allow_auto_route: true
 

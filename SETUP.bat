@@ -52,6 +52,6 @@ echo Optional config check:
 ".venv\Scripts\python.exe" -m local_model_router config-check
 
 echo.
-echo Setup complete. Start with: START ROUTER.bat
+echo Setup complete. Start with: START.bat
 echo.
 pause

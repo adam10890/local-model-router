@@ -8,6 +8,12 @@
 # Never put key material in this file.
 
 upstreams:
+  - name: dmr
+    type: openai_compatible
+    base_url: http://localhost:12434/engines/v1
+    enabled: true
+    notes: "Docker Model Runner. 'docker model pull hf.co/...' then reference as dmr/<model-id>. Peer compute manager — not under the router's VRAM admission control (fork #1)."
+
   - name: ollama
     type: openai_compatible
     base_url: http://localhost:11434/v1

@@ -81,6 +81,56 @@ def test_apply_defaults_and_restrictions(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# per-harness role pins
+# ---------------------------------------------------------------------------
+
+_APPS_ROLES = textwrap.dedent("""
+    apps:
+      agent_zero:
+        display_name: "Agent Zero"
+        default_model: chat
+        roles:
+          chat: gemma-4-12b
+          planner: vibethinker-3b
+        allowed_models: ["chat", "planner"]
+      hermes:
+        display_name: "LMM ROUTER"
+        default_model: chat
+        roles:
+          chat: gemma-4-12b
+""")
+
+
+def test_role_pin_resolves_to_local_model(tmp_path):
+    profiles = AppProfiles.load(_write(tmp_path, "apps.yaml", _APPS_ROLES))
+    # explicit role request -> pinned local model
+    assert profiles.apply("agent_zero", "planner") == ("vibethinker-3b", None)
+    # default_model ("chat") also resolves through the pin
+    assert profiles.apply("agent_zero", None) == ("gemma-4-12b", None)
+    # hermes: the one role it consumes
+    assert profiles.apply("hermes", "chat") == ("gemma-4-12b", None)
+
+
+def test_role_pin_bypasses_allowed_list(tmp_path):
+    apps = textwrap.dedent("""
+        apps:
+          agent_zero:
+            roles: { planner: vibethinker-3b }
+            allowed_models: ["chat"]
+    """)
+    profiles = AppProfiles.load(_write(tmp_path, "apps.yaml", apps))
+    # planner is pinned but NOT in allowed_models -> the admin pin still wins
+    assert profiles.apply("agent_zero", "planner") == ("vibethinker-3b", None)
+
+
+def test_describe_includes_display_name_and_roles(tmp_path):
+    profiles = AppProfiles.load(_write(tmp_path, "apps.yaml", _APPS_ROLES))
+    desc = profiles.get("hermes").describe()
+    assert desc["display_name"] == "LMM ROUTER"
+    assert desc["roles"]["chat"] == "gemma-4-12b"
+
+
+# ---------------------------------------------------------------------------
 # HTTP enforcement
 # ---------------------------------------------------------------------------
 

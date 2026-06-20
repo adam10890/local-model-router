@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>local-model-router</title>
+<title>Imperium - local-model-router</title>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <style>
   :root { --bg:#0f1115; --card:#181b22; --line:#262a33; --text:#e6e8ee; --dim:#8b93a3;
@@ -50,7 +50,7 @@
 <body x-data="dashboard()" x-init="boot()">
 
 <h1><span class="pulse" :class="health.status === 'ok' ? 'up' : ''"></span>
-    local-model-router
+    Imperium <span class="dim">(local-model-router)</span>
     <span class="dim" x-text="health.version ? 'v' + health.version : ''"></span></h1>
 
 <div class="key-bar">
@@ -60,12 +60,56 @@
 </div>
 
 <nav class="tabs">
+  <button class="tab" :class="tab==='chat' && 'active'" @click="openTab('chat')">Chat</button>
   <button class="tab" :class="tab==='overview' && 'active'" @click="openTab('overview')">Overview</button>
+  <button class="tab" :class="tab==='harnesses' && 'active'" @click="openTab('harnesses')">Harnesses</button>
   <button class="tab" :class="tab==='connect' && 'active'" @click="openTab('connect')">Connect an agent</button>
   <button class="tab" :class="tab==='compare' && 'active'" @click="openTab('compare')">Compare / Routing</button>
   <button class="tab" :class="tab==='orchestration' && 'active'" @click="openTab('orchestration')">Orchestration</button>
   <button class="tab" :class="tab==='cookbook' && 'active'" @click="openTab('cookbook')">Cookbook</button>
 </nav>
+
+<!-- ════════════════════ CHAT ════════════════════ -->
+<div x-show="tab==='chat'" x-cloak style="max-width:820px;">
+  <div class="card">
+    <h2 style="display:flex; justify-content:space-between; align-items:center;">
+      <span>Chat <span class="dim" style="text-transform:none; letter-spacing:0;">· talk to the router directly, no other harness</span></span>
+      <span style="display:flex; gap:.4rem; align-items:center;">
+        <select x-model="chat.model" style="width:auto; max-width:340px;">
+          <option value="auto">auto</option>
+          <template x-for="m in models" :key="m.id">
+            <option x-show="m.id !== 'auto'" :value="m.id" x-text="m.id"></option>
+          </template>
+        </select>
+        <button class="btn-sm btn-ghost" @click="chat.messages=[]; chat.error=''">clear</button>
+      </span>
+    </h2>
+
+    <div x-ref="chatlog" style="display:flex; flex-direction:column; gap:.6rem; min-height:200px;
+         max-height:55vh; overflow:auto; padding:.3rem 0;">
+      <template x-for="(m,i) in chat.messages" :key="i">
+        <div style="border:1px solid var(--line); border-radius:10px; padding:.5rem .7rem; white-space:pre-wrap;"
+             :style="m.role==='user'
+               ? 'align-self:flex-end; background:#1d2530; max-width:85%;'
+               : 'align-self:flex-start; background:#161a21; max-width:92%;'">
+          <div class="dim" style="font-size:.7rem; margin-bottom:.2rem;" x-text="m.role"></div>
+          <div x-text="m.content"></div>
+        </div>
+      </template>
+      <div class="dim" x-show="!chat.messages.length">
+        Pick a lane and type. The router serves the reply — no Agent Zero, no Open WebUI in the path.
+      </div>
+      <div class="dim" x-show="chat.busy">thinking…</div>
+    </div>
+
+    <div style="display:flex; gap:.5rem; margin-top:.6rem;">
+      <textarea x-model="chat.input" rows="2" placeholder="Message…  (Ctrl+Enter to send)"
+                @keydown.ctrl.enter="sendChat()"></textarea>
+      <button @click="sendChat()" :disabled="chat.busy">Send</button>
+    </div>
+    <div class="dim" x-show="chat.error" x-text="chat.error" style="margin-top:.4rem; color:var(--err);"></div>
+  </div>
+</div>
 
 <!-- ════════════════════ OVERVIEW ════════════════════ -->
 <div class="grid" x-show="tab==='overview'">
@@ -257,6 +301,32 @@
 </div>
 
 <!-- ORCHESTRATION -->
+<!-- ════════════════════ HARNESSES ════════════════════ -->
+<div class="grid" x-show="tab==='harnesses'" x-cloak>
+  <template x-for="app in apps" :key="app.app_id">
+    <div class="card" x-show="Object.keys(app.roles || {}).length">
+      <h2 style="display:flex; justify-content:space-between; align-items:center;">
+        <span x-text="app.display_name || app.app_id"></span>
+        <span class="dim" x-text="app.app_id"></span>
+      </h2>
+      <table>
+        <thead><tr><th>role</th><th>local model</th></tr></thead>
+        <tbody>
+          <template x-for="[role, model] in Object.entries(app.roles || {})" :key="role">
+            <tr><td x-text="role"></td><td x-text="model"></td></tr>
+          </template>
+        </tbody>
+      </table>
+      <div class="dim" style="margin-top:.5rem; font-size:.76rem;">
+        default: <span x-text="app.default_model"></span>
+      </div>
+    </div>
+  </template>
+  <div class="card" x-show="!apps.some(a => Object.keys(a.roles||{}).length)">
+    <div class="dim">No harness role maps yet — add a <code>roles:</code> block to an app in conf/apps.yaml.</div>
+  </div>
+</div>
+
 <div class="grid" x-show="tab==='orchestration'" x-cloak>
   <div class="card">
     <h2>Sub-agent instances</h2>
@@ -449,7 +519,8 @@ function dashboard() {
     cardModel: "auto",
     modelCard: "",
     controlMsg: "",
-    tab: "overview",
+    tab: "chat",
+    chat: { messages: [], input: "", model: "auto", busy: false, error: "" },
     cookbook: null,
     cookbookBusy: false,
     expanded: "",
@@ -649,6 +720,34 @@ API Key:  local
         this.orchestration.ticket = await this.get("/orchestrator/tickets/" + encodeURIComponent(ticketId));
         this.orchestration.error = "";
       } catch (err) { this.orchestration.error = String(err); }
+    },
+    async sendChat() {
+      const text = this.chat.input.trim();
+      if (!text || this.chat.busy) return;
+      this.chat.messages.push({ role: "user", content: text });
+      this.chat.input = "";
+      this.chat.error = "";
+      this.chat.busy = true;
+      this.$nextTick(() => { const el = this.$refs.chatlog; if (el) el.scrollTop = el.scrollHeight; });
+      try {
+        const resp = await fetch("/v1/chat/completions", {
+          method: "POST",
+          headers: this.headers(),
+          body: JSON.stringify({
+            model: this.chat.model,
+            messages: this.chat.messages.map((m) => ({ role: m.role, content: m.content })),
+            stream: false,
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error?.message || ("HTTP " + resp.status));
+        this.chat.messages.push({ role: "assistant", content: data.choices?.[0]?.message?.content ?? "(no content)" });
+      } catch (err) {
+        this.chat.error = String(err);
+      } finally {
+        this.chat.busy = false;
+        this.$nextTick(() => { const el = this.$refs.chatlog; if (el) el.scrollTop = el.scrollHeight; });
+      }
     },
     boot() { this.refresh(); setInterval(() => this.refresh(), 7000); },
   };

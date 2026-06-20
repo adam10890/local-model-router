@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Local Router Studio - 1.0 Beta Roadmap</title>
+  <title>Imperium - 1.0 Beta Roadmap</title>
   <style>
     :root {
       --bg: #0f1115;
@@ -39,6 +39,15 @@
       border: 1px solid var(--line);
       border-radius: 5px;
       padding: 1px 5px;
+    }
+    pre {
+      direction: ltr;
+      text-align: left;
+      background: #0b0d12;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      overflow: auto;
     }
     .subtitle { color: var(--muted); max-width: 860px; font-size: 17px; margin-top: 10px; }
     .meta {
@@ -145,15 +154,16 @@
 <body>
 <main>
   <header>
-    <h1>Local Router Studio - מפת דרך ל-1.0 Beta</h1>
+    <h1>Imperium - מפת דרך ל-1.0 Beta</h1>
     <p class="subtitle">
       מסמך חי למוצר עצמאי ופשוט: המשתמש מדליק תוכנה אחת, מקבל מודל חזק מקומי,
       רשת תתי-סוכנים, דשבורד ויזואלי, ותוצרים בלי לראות קוד.
     </p>
     <div class="meta">
       <span class="pill">סטטוס: חי ומתעדכן</span>
-      <span class="pill">עודכן: 2026-06-18</span>
-      <span class="pill">כיוון מאושר: Native Router Studio</span>
+      <span class="pill">עודכן: 2026-06-20</span>
+      <span class="pill">שם מוצר: Imperium</span>
+      <span class="pill">כיוון מאושר: Native Imperium Studio</span>
       <span class="pill">עיקרון: Ponytail - מינימום שעובד</span>
     </div>
   </header>
@@ -162,7 +172,7 @@
     <article class="card status two-third">
       <h2>החלטת מוצר</h2>
       <p>
-        1.0 Beta יהיה מוצר עצמאי: <strong>Local Router Studio</strong>.
+        1.0 Beta יהיה מוצר עצמאי: <strong>Imperium</strong>.
         לא "תוסף ל-Agent Zero", לא "LangFlow clone", ולא מערכת שמבקשת מהמשתמש
         להבין Docker, llama.cpp, YAML או קוד.
       </p>
@@ -194,6 +204,76 @@
       <div class="node"><strong>Agents</strong><span>Planner + workers</span></div>
       <div class="node"><strong>Result</strong><span>תוצרים, דוח, artifacts</span></div>
     </div>
+  </section>
+
+  <section class="card">
+    <h2>החלטת מודלים וחבילה</h2>
+    <p>
+      מאמצים את ההפרדה של Agent Zero ברמת העיקרון, אבל לא מעתיקים אותה אחד לאחד.
+      ב-Imperium הישות המרכזית היא <strong>חבילה</strong>: persona, loop, ticket, מודל,
+      כלי הרצה, מגבלות משאבים, DOX, artifacts וכללי עצירה.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>תפקיד</th>
+          <th>אחריות ב-Imperium</th>
+          <th>לא באחריותו</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Chat / Planner</td>
+          <td>שיחה עם המשתמש, הבנת מטרה, שאלות הבהרה, תכנון חבילות, אישור לפני הרצה.</td>
+          <td>מעקב טכני שוטף אחרי heartbeats והרצת subprocesses.</td>
+        </tr>
+        <tr>
+          <td>Utility / Router</td>
+          <td>בדיקות readiness, סיכום הקשר, חילוץ משימות, מילוי metadata, תעדוף queue ומעקב רקע.</td>
+          <td>החלטות מוצר/ארכיטקטורה כבדות או כתיבת קוד מורכבת.</td>
+        </tr>
+        <tr>
+          <td>Runner</td>
+          <td>קוד קשיח שמריץ חבילה, פותח process, מגביל concurrency, שומר artifacts ומדווח status.</td>
+          <td>Reasoning. runner לא צריך להיות מודל; הוא צריך להיות מתזמן אמין.</td>
+        </tr>
+        <tr>
+          <td>PI Code Worker</td>
+          <td>הרצת משימות קוד דרך PI עם DOX, persona, loop, allowed paths ובדיקות הצלחה.</td>
+          <td>ניהול גלובלי של כל המערכת.</td>
+        </tr>
+        <tr>
+          <td>Embedding</td>
+          <td>אינדוקס וזיכרון מקומי אם יש צורך.</td>
+          <td>תכנון, שיחה, או ביצוע משימות.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="note">
+      החלטת beta: המשתמש מדבר עם Chat/Planner חזק. Utility קטן עובד ברקע רק להכנת חבילה
+      ולמעקב קל. אחרי אישור המשתמש, runner קשיח מפעיל חבילות; למשימות קוד הוא מפעיל PI.
+    </p>
+    <h3>Package V0 מינימלי</h3>
+    <p>
+      זה ה-contract הראשון בין planner, utility, runner והדשבורד. אין פה DSL חדש:
+      JSON פשוט שה-orchestrator יכול לשמור ולהציג.
+    </p>
+    <pre>{
+  "persona": "local-coder",
+  "loop": "code_fix_verify",
+  "ticket_id": "ticket-123",
+  "model_role": "utility",
+  "runner": "pi-subprocess",
+  "tools": ["pi", "pytest"],
+  "allowed_paths": ["local_model_router/", "tests/"],
+  "success_checks": ["python -m pytest tests/ -q"],
+  "resource_limits": {"max_parallel": 1},
+  "artifacts_dir": "plans/.../tickets/.../artifacts"
+}</pre>
+    <p class="note">
+      ה-Utility רשאי להציע או להשלים חבילה, אבל לא להריץ אותה. ה-Runner מריץ רק חבילה מאושרת
+      ושומר סטטוס, stdout/stderr, artifacts ו-DOX report.
+    </p>
   </section>
 
   <section class="grid">
@@ -261,7 +341,8 @@
         <p>בחירה אוטומטית של מודל חזק ותתי-מודלים לפי החומרה.</p>
         <ul>
           <li>Cookbook הופך ממסך המלצות למסך "Apply recommendation".</li>
-          <li>חלוקת roles: planner, worker, scribe/reviewer, embed אם קיים.</li>
+          <li>חלוקת roles: chat/planner, utility/router, PI code worker, reviewer, embed אם קיים.</li>
+          <li>שמירת <code>Package V0</code> בכל ticket כדי שהדשבורד וה-runner יקראו אותו בלי לנחש.</li>
           <li>אם אין מודל מתאים: להציע רשימת אפשרויות, לא להוריד אוטומטית.</li>
           <li>לשמור החלטות כ-profile מקומי שניתן לשחזר.</li>
         </ul>
@@ -274,9 +355,10 @@
         <h3>Runner מינימלי לתתי-סוכנים</h3>
         <p>זה השלב שבו orchestration מפסיק להיות observe-only בלבד.</p>
         <ul>
-          <li>Local runner ראשון: Python subprocess או task loop פנימי, לא Docker כברירת מחדל.</li>
+          <li>Local runner ראשון: subprocess שמפעיל PI למשימות קוד; loop פנימי פשוט למשימות לא-קוד.</li>
           <li>Bounded concurrency לפי חומרה: כמה workers רצים במקביל.</li>
-          <li>כל worker מקבל persona + DOX + ticket prompt + artifact folder.</li>
+          <li>כל worker מקבל חבילה: persona + loop + DOX + ticket prompt + artifact folder + success checks.</li>
+          <li>Package Preview בדשבורד לפני הרצה: מודל, runner, allowed paths, tools ובדיקות הצלחה.</li>
           <li>ה-runner מדווח דרך <code>/orchestrator/instances/{id}</code>.</li>
           <li>Stop/cancel task בסיסי.</li>
         </ul>
@@ -304,7 +386,7 @@
         <p>המסך הראשי צריך להיות "מה תרצה להשיג?", לא "בחר endpoint".</p>
         <ul>
           <li>Task composer פשוט עם goal, files/context, output type.</li>
-          <li>Templates: research, coding, docs, planning, local files.</li>
+          <li>Agent loops במקום templates: research, coding, docs, planning, local files.</li>
           <li>Preview של plan לפני הרצה.</li>
           <li>תצוגת privacy: מה נשאר מקומי ומה נשלח למודל.</li>
         </ul>
@@ -435,8 +517,8 @@
         </tr>
         <tr>
           <td>1.2</td>
-          <td>Workflow templates מתקדמים</td>
-          <td>אחרי שיש נתונים על המשימות שמשתמשים באמת מריצים.</td>
+          <td>Agent loops מתקדמים</td>
+          <td>אחרי שיש נתונים על החבילות וה-loops שמשתמשים באמת מריצים.</td>
         </tr>
         <tr>
           <td>1.3</td>
@@ -472,10 +554,11 @@
     <article class="card half">
       <h2>שאלות פתוחות</h2>
       <ul>
-        <li>שם מוצר סופי: Local Router Studio או שם קצר יותר?</li>
-        <li>האם 1.0 Beta חייב לכלול הורדת מודלים, או רק בחירה ממודלים קיימים?</li>
-        <li>האם runner ראשון צריך להיות subprocess פנימי או container opt-in?</li>
-        <li>איזה template ראשון הכי חשוב: coding, research, docs או planning?</li>
+        <li><span class="ok">סגור:</span> שם המוצר הוא Imperium.</li>
+        <li><span class="ok">סגור:</span> 1.0 Beta בוחר ממודלים קיימים; הורדת מודלים נדחית.</li>
+        <li><span class="ok">סגור:</span> runner ראשון הוא subprocess מקומי; container הוא opt-in עתידי.</li>
+        <li>איזה agent loop ראשון הכי חשוב: coding, research, docs או planning?</li>
+        <li><span class="ok">סגור:</span> Package V0 המינימלי מתועד במסמך הזה.</li>
       </ul>
     </article>
   </section>
