@@ -1,0 +1,27 @@
+id: task-002
+title: 'Proposal: Tiered Context Budget as a routing signal'
+description: >-
+  Proposal only (no behavior change). Surface the existing Agent-Zero-inspired
+  context budget as a tiered, explainable routing signal: utilization zones,
+  a context_overflow reason code with larger-window recommendation, and a
+  read-only context block in observer / GET /v1/models / dashboard.
+status: pending
+priority: medium
+owner: local-model-router
+specifications:
+  reference: agent-zero context_analyzer (tiers) and is_over_limit()
+  existing:
+    - context_planner.py DEFAULT_EFFECTIVE_CTX_RATIO = 0.70 (VRAM-aware, compression guard)
+    - context_calculator.py ExternalTokenBudget + recommend_context_for_budget
+  gap: internal planning only; not tiered, not exposed, not explainable
+  design:
+    tiers: green<=50 / yellow<=70 / orange<=85 / red
+    reason_code: context_overflow + recommend larger-window alias
+    surface: context block in observer / GET /v1/models / dashboard
+  integration: context_calculator.py + service/routing_intent.py (read-only surfacing)
+  constraints: small/behavior-preserving, stdlib-first, no Agent Zero imports, explainable, redact secrets
+dependencies:
+  - agent-zero (reference architecture)
+metrics:
+  overflow_routes_carry_reason: context_overflow
+  observer_reports_zone: true
