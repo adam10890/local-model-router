@@ -28,6 +28,7 @@ from local_model_router.routing.catalog import (
     build_slot_candidates,
     rank_candidates,
 )
+from local_model_router.helpers.context_calculator import ContextUtilization
 
 # ---------------------------------------------------------------------------
 # Known value sets (not enums — unknown values are allowed with a warning)
@@ -373,6 +374,21 @@ class RoutingIntentHandler:
         reason_codes.append("slot_selected")
         if fallback_used:
             reason_codes.append("primary_slot_unavailable_failover_used")
+
+        # Explainable context fit: surface (never silently change) the request's
+        # utilization zone against the selected slot's window, and flag when the
+        # estimate exceeds the effective budget so a larger window can be chosen.
+        slot_ctx = slot_cfg.get("context_size")
+        if req.estimated_tokens and slot_ctx:
+            util = ContextUtilization(used=int(req.estimated_tokens), total=int(slot_ctx))
+            reason_codes.append(f"context_zone:{util.zone}")
+            if util.over_budget:
+                reason_codes.append("context_overflow")
+                warnings.append(
+                    f"context_overflow: ~{req.estimated_tokens} tokens exceed the "
+                    f"effective budget ({util.effective_budget}) of slot context "
+                    f"window {slot_ctx}; consider a slot/alias with a larger window."
+                )
 
         return RoutingDecisionResponse(
             decision_id=decision_id,

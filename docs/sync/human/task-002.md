@@ -42,7 +42,16 @@ observer/dashboard. No change to loopback defaults, auth, or fleet behavior.
 
 ## Status / priority
 
-Proposed · medium (infrastructure already exists; this is exposure + tiers).
+In progress · medium (infrastructure already exists; this is exposure + tiers).
+
+**Implemented (this branch):** `helpers/context_calculator.py` gains
+`utilization_zone()` + `ContextUtilization` (green/yellow/orange/red,
+`EFFECTIVE_CTX_RATIO = 0.70`), with tests in
+`tests/test_context_calculator_tiers.py`. `service/routing_intent.py` now
+appends an explainable `context_zone:<zone>` reason code and a
+`context_overflow` reason + warning when the estimated request exceeds the
+selected slot's effective budget — additive only, slot selection is unchanged.
+Follow-up: surface the `context` block in observer / `GET /v1/models` / dashboard.
 
 ## Acceptance metrics
 

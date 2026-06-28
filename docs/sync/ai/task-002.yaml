@@ -5,7 +5,7 @@ description: >-
   context budget as a tiered, explainable routing signal: utilization zones,
   a context_overflow reason code with larger-window recommendation, and a
   read-only context block in observer / GET /v1/models / dashboard.
-status: pending
+status: in_progress
 priority: medium
 owner: local-model-router
 specifications:
