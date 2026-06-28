@@ -1,0 +1,17 @@
+id: task-001
+title: Adopt Human-AI Doc-Sync
+description: >-
+  Introduce the Human-AI documentation sync system into local-model-router. Human docs
+  under docs/sync/human/*.md pair with AI docs under docs/sync/ai/*.yaml, kept
+  aligned by a dependency-free drift gate.
+status: in_progress
+priority: medium
+owner: local-model-router
+specifications:
+  pairing: stem-based (human/<id>.md <-> ai/<id>.yaml)
+  gate: docs/sync/doc_sync_check.sh (POSIX sh, no Node/network/deps)
+  coupling: none (docs-only; no router runtime dependency)
+dependencies:
+  - human-ai-doc-sync-tool
+metrics:
+  drift_gate: IN SYNC

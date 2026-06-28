@@ -125,6 +125,74 @@ def recommend_context_for_budget(
     return clamped
 
 
+# ── Context utilization tiers ──────────────────────────────────────────────
+# Mirror Agent Zero's context_analyzer: the fraction of the context window a
+# request consumes maps to a capability "zone". EFFECTIVE_CTX_RATIO matches
+# context_planner.DEFAULT_EFFECTIVE_CTX_RATIO — history is bounded to ~70% of
+# the window, leaving headroom for the system prompt and the response.
+EFFECTIVE_CTX_RATIO = 0.70
+
+# Inclusive upper bound of each zone, as a fraction of the full window.
+_ZONE_GREEN_MAX = 0.50
+_ZONE_YELLOW_MAX = 0.70
+_ZONE_ORANGE_MAX = 0.85
+
+
+def utilization_zone(used: int, total: int) -> str:
+    """Map context utilization to a capability zone.
+
+    - ``green``  (<=50%): full capability
+    - ``yellow`` (<=70%): good, early degradation
+    - ``orange`` (<=85%): noticeable degradation — compress or route to a
+      larger window
+    - ``red``    (>85%):  risk to output quality
+
+    Returns ``"unknown"`` when the window size is not known.
+    """
+    if total <= 0:
+        return "unknown"
+    frac = used / total
+    if frac <= _ZONE_GREEN_MAX:
+        return "green"
+    if frac <= _ZONE_YELLOW_MAX:
+        return "yellow"
+    if frac <= _ZONE_ORANGE_MAX:
+        return "orange"
+    return "red"
+
+
+@dataclass
+class ContextUtilization:
+    """A request's estimated context utilization against a slot's window."""
+
+    used: int
+    total: int
+
+    @property
+    def percent(self) -> float:
+        if self.total <= 0:
+            return 0.0
+        return round(self.used / self.total * 100, 1)
+
+    @property
+    def zone(self) -> str:
+        return utilization_zone(self.used, self.total)
+
+    @property
+    def effective_budget(self) -> int:
+        """Tokens allowed before the request is considered over budget."""
+        return int(self.total * EFFECTIVE_CTX_RATIO)
+
+    @property
+    def over_budget(self) -> bool:
+        """True when usage exceeds the effective (history) budget."""
+        return self.total > 0 and self.used > self.effective_budget
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.total - self.used)
+
+
 def read_gguf_metadata(model_path: str) -> dict:
     """
     Read GGUF metadata to extract context-related information.
