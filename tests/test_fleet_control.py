@@ -31,6 +31,7 @@ global:
 
 
 def _make_app(tmp_path, monkeypatch, *, control=False, api_key=None):
+    from local_model_router.helpers.compute_monitor import CPUStats, ComputeSnapshot
     from local_model_router.helpers.llama_cpp_manager import BackendManager
     from local_model_router.service.app import create_app
 
@@ -44,6 +45,10 @@ def _make_app(tmp_path, monkeypatch, *, control=False, api_key=None):
     monkeypatch.setattr(
         "local_model_router.helpers.smart_router.health._aiohttp_probe",
         health_probe,
+    )
+    monkeypatch.setattr(
+        "local_model_router.service.app.scan_hardware",
+        lambda: ComputeSnapshot(1_750_000_000.25, (), CPUStats(25.0, 32768, 12288, 20480)),
     )
 
     if control:

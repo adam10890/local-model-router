@@ -9,7 +9,9 @@ Or run via python -m local_model_router.service (see __main__.py).
 """
 from __future__ import annotations
 
+import asyncio
 import hmac
+import logging
 import os
 import time
 from pathlib import Path
@@ -51,8 +53,9 @@ from .fleet_manager import (
     fleet_config_from_env,
     identity_from_headers,
     slots_model_snapshot,
+    vram_unknown_summary,
 )
-from ..helpers.compute_monitor import scan_hardware, to_gb
+from ..helpers.compute_monitor import scan_hardware
 from .models_listing import FetchFn, _default_fetch as _models_default_fetch, list_models
 from .observer import ObserverBackend
 from .prompt_cache import (
@@ -64,6 +67,10 @@ from .prompt_cache import (
 from .routing_intent import RoutingIntentHandler, RoutingIntentRequest
 
 from local_model_router import __version__ as _VERSION
+logger = logging.getLogger(__name__)
+
+_SERVICE_NAME = "lmm-router-observer"
+_COMPUTE_CACHE_TTL_SECONDS = 5.0
 _FORWARD_TIMEOUT_SECONDS = 120
 _API_KEY_ENV = "A0_LMM_ROUTER_API_KEY"
 
@@ -370,6 +377,8 @@ def create_app(
     store = fleet_store or FleetStore()
     queue = fleet_queue or FleetQueue()
     prompt_cache = InMemoryPromptCache() if prompt_cache_enabled() else None
+    compute_cache: Optional[tuple[float, dict[str, Any], dict[str, Any]]] = None
+    compute_lock = asyncio.Lock()
 
     conf_dir = Path(observer.config_path).resolve().parent
     upstreams = load_upstreams(upstreams_path or conf_dir / "upstreams.yaml")
@@ -382,6 +391,33 @@ def create_app(
     control_enabled = fleet_control_enabled()
     fleet_control = FleetControlHandler(observer.config_path)
     fleet_backend = configured_backend(observer.config_path)
+
+    async def compute_status() -> tuple[dict[str, Any], dict[str, Any]]:
+        nonlocal compute_cache
+        now = time.monotonic()
+        if compute_cache and now - compute_cache[0] < _COMPUTE_CACHE_TTL_SECONDS:
+            return compute_cache[1], compute_cache[2]
+
+        async with compute_lock:
+            now = time.monotonic()
+            if compute_cache and now - compute_cache[0] < _COMPUTE_CACHE_TTL_SECONDS:
+                return compute_cache[1], compute_cache[2]
+            try:
+                hardware = await asyncio.to_thread(scan_hardware)
+                vram = hardware.vram_summary()
+                compute = hardware.to_dict()
+            except Exception as exc:
+                logger.warning("Hardware monitoring failed: %s", exc)
+                vram = vram_unknown_summary()
+                compute = {
+                    "available": False,
+                    "timestamp": None,
+                    "gpus": [],
+                    "cpu": None,
+                    "ram": None,
+                }
+            compute_cache = (time.monotonic(), vram, compute)
+            return vram, compute
 
     def protected(handler: Callable[[Request], Awaitable[Response]]) -> Callable[[Request], Awaitable[Response]]:
         async def wrapper(request: Request) -> Response:
@@ -420,6 +456,7 @@ def create_app(
         context_windows = context_windows_from_slots(slots)
         store.record_model_snapshot("observer_slots", snapshot)
         agents = store.list_agents()
+        vram, compute = await compute_status()
         return JSONResponse(
             {
                 "ok": True,
@@ -432,7 +469,8 @@ def create_app(
                     "items": agents,
                 },
                 "requests": store.request_summary(),
-                "vram": vram_unknown_summary(),
+                "vram": vram,
+                "compute": compute,
                 "slots": slots,
                 "model_residency": snapshot,
                 "context_windows": context_windows,
