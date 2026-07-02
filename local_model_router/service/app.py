@@ -51,8 +51,8 @@ from .fleet_manager import (
     fleet_config_from_env,
     identity_from_headers,
     slots_model_snapshot,
-    vram_unknown_summary,
 )
+from ..helpers.compute_monitor import scan_hardware, to_gb
 from .models_listing import FetchFn, _default_fetch as _models_default_fetch, list_models
 from .observer import ObserverBackend
 from .prompt_cache import (
@@ -64,7 +64,6 @@ from .prompt_cache import (
 from .routing_intent import RoutingIntentHandler, RoutingIntentRequest
 
 from local_model_router import __version__ as _VERSION
-_SERVICE_NAME = "lmm-router-observer"
 _FORWARD_TIMEOUT_SECONDS = 120
 _API_KEY_ENV = "A0_LMM_ROUTER_API_KEY"
 
