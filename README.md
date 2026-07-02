@@ -26,7 +26,7 @@ Agent Zero is client #1, not the owner.
 
 ## Status
 
-**0.3.0-dev - Local-first+ routing catalog.** What works today:
+**0.3.0 - Local-first+ routing catalog.** What works today:
 
 | Surface | Endpoint | Notes |
 |---|---|---|
@@ -37,7 +37,7 @@ Agent Zero is client #1, not the owner.
 | Routing catalog | `GET /routing/models`, `GET /routing/models/{id}`, `GET /routing/analytics` | safe model cards, recent decisions, latency/fallback/cache stats |
 | Agent orchestration | `POST /orchestrator/plans`, `GET /orchestrator/plans`, `GET /orchestrator/summary`, `GET /orchestrator/instances`, `POST /orchestrator/instances/{id}`, `POST /orchestrator/tickets/{id}/submit` | observe-first plan/ticket packets, sub-agent instance heartbeats, DOX reports, artifacts, wake markers |
 | OpenAI-compatible | `GET /v1/models`, `POST /v1/chat/completions` | aliases + live/upstream models; capabilities metadata; streaming + non-streaming forwarding |
-| Fleet Manager | `GET /fleet/status`, `GET /fleet/agents`, `POST /fleet/agents/register` | agent identity, bounded queueing, SQLite telemetry |
+| Fleet Manager | `GET /fleet/status`, `GET /fleet/agents`, `POST /fleet/agents/register` | agent identity, bounded queueing, SQLite + cached GPU/CPU/RAM telemetry |
 | Fleet control (opt-in) | `POST /fleet/start`, `POST /fleet/stop`, `POST /fleet/slots/{id}/start` + `/stop` | start/stop slots; off unless `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1` |
 | Backends | `GET /backends` | local fleet + configured upstreams with capabilities |
 | App profiles | `GET /apps` | per-client routing policy |

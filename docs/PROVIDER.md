@@ -1,9 +1,9 @@
 # Standalone Provider Runbook
 
-Phase 9 packages the router service as a small local OpenAI-compatible
-provider. It now also acts as the V1 Fleet Manager control plane: agent-aware
-state, bounded queueing, and fleet status endpoints. It does not change Agent
-Zero plugin behavior and it does not start or stop llama.cpp containers.
+The standalone router is a local OpenAI-compatible provider and Fleet Manager
+control plane: agent-aware state, bounded queueing, hardware telemetry, and
+fleet status endpoints. It does not start or stop llama.cpp containers unless
+fleet control is explicitly enabled.
 
 ## Endpoints
 
@@ -11,7 +11,8 @@ Zero plugin behavior and it does not start or stop llama.cpp containers.
 - `POST /routing/request` returns the routing decision for an intent payload.
 - `POST /v1/chat/completions` forwards non-streaming and streaming requests to
   the selected llama.cpp slot.
-- `GET /fleet/status` returns queue, agent, request, slot, and state summary.
+- `GET /fleet/status` returns queue, agent, request, slot, state, and local
+  hardware summaries.
 - `GET /fleet/agents` lists registered/observed agents.
 - `POST /fleet/agents/register` registers an agent identity manually.
 
@@ -20,6 +21,27 @@ When `A0_LMM_ROUTER_API_KEY` is set, every endpoint except `/health` requires:
 ```text
 Authorization: Bearer <key>
 ```
+
+## Hardware Telemetry
+
+`GET /fleet/status` preserves the existing `vram` object:
+
+```json
+{
+  "total_gb": 24.0,
+  "used_gb": 6.0,
+  "available_gb": 18.0,
+  "source": "nvidia-smi"
+}
+```
+
+It also returns an additive `compute` object with a Unix timestamp, per-GPU
+MiB/utilization/temperature fields, CPU utilization, and RAM totals in MiB.
+NVIDIA data comes from `nvidia-smi`; CPU and RAM data come from `psutil`.
+Snapshots are cached for five seconds and collected outside the ASGI event
+loop. If a probe fails, fleet status remains HTTP 200 and reports explicit
+unavailable values. Hardware telemetry is local to the router host; remote
+fleet hosts are not probed.
 
 ## Windows
 
@@ -97,16 +119,11 @@ A0_FLEET_MAX_QUEUE=32
 
 ## Dependency Map
 
-Runtime Python dependencies are listed in `requirements.txt`:
-
-- `aiohttp` for upstream forwarding to llama.cpp slots
-- `mcp` for the plugin's MCP surface
-- `pyyaml` for fleet config parsing
-
-The standalone service also uses dependencies already present in Agent Zero's
-Python environment, including Starlette, Pydantic, and Uvicorn. If running
-outside the Agent Zero environment, install the A0 application dependencies or
-use the A0 virtual environment.
+Runtime dependencies are declared in `pyproject.toml` and installed by
+`pip install -e .`: `aiohttp` for upstream forwarding, Starlette/Uvicorn for
+HTTP serving, Pydantic for schemas, PyYAML for fleet configuration, and
+`psutil` for cross-platform CPU/RAM telemetry. Optional Docker and MCP support
+remain in the `[docker]` and `[mcp]` extras.
 
 ## Update Guide
 
