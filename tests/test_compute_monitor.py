@@ -43,8 +43,14 @@ def test_query_gpus_returns_empty_when_nvidia_smi_is_unavailable():
 
 
 def test_query_cpu_reports_cross_platform_utilization_and_available_ram():
+    intervals = []
+
+    def cpu_percent(interval=None):
+        intervals.append(interval)
+        return 37.5
+
     fake_psutil = SimpleNamespace(
-        cpu_percent=lambda interval=None: 37.5,
+        cpu_percent=cpu_percent,
         virtual_memory=lambda: SimpleNamespace(
             total=16 * MIB,
             available=6 * MIB,
@@ -59,6 +65,7 @@ def test_query_cpu_reports_cross_platform_utilization_and_available_ram():
         ram_used_mb=10,
         ram_available_mb=6,
     )
+    assert intervals == [0.1]
 
 
 def test_scan_hardware_serializes_compute_and_backward_compatible_vram():

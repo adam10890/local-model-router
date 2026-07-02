@@ -138,7 +138,7 @@ def query_cpu(*, psutil_module: Any = psutil) -> CPUStats:
     total_mb = int(memory.total // _MIB)
     available_mb = int(memory.available // _MIB)
     return CPUStats(
-        utilization_pct=round(float(psutil_module.cpu_percent(interval=None)), 1),
+        utilization_pct=round(float(psutil_module.cpu_percent(interval=0.1)), 1),
         ram_total_mb=total_mb,
         ram_used_mb=max(0, total_mb - available_mb),
         ram_available_mb=available_mb,

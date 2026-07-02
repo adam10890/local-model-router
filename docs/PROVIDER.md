@@ -45,7 +45,7 @@ fleet hosts are not probed.
 
 ## Windows
 
-From the plugin root:
+From the repository root:
 
 ```powershell
 .\scripts\run_provider.ps1 -InstallDeps
@@ -69,7 +69,7 @@ Smoke test:
 
 ## WSL Or Linux Server
 
-From the plugin root:
+From the repository root:
 
 ```bash
 ./scripts/run_provider.sh --install-deps
