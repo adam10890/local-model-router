@@ -35,7 +35,17 @@ global:
 """
 
 
-def _make_client(tmp_path, monkeypatch, queue=None):
+def _hardware_snapshot():
+    from local_model_router.helpers.compute_monitor import CPUStats, ComputeSnapshot, GPUStats
+
+    return ComputeSnapshot(
+        timestamp=1_750_000_000.25,
+        gpus=(GPUStats(0, "Test GPU", 24576, 6144, 18432, 37.0, 49.0),),
+        cpu=CPUStats(25.0, 32768, 12288, 20480),
+    )
+
+
+def _make_client(tmp_path, monkeypatch, queue=None, hardware_scan=None):
     from local_model_router.service.app import create_app
     from local_model_router.service.fleet_manager import FleetQueue, FleetStore
     from local_model_router.helpers.llama_cpp_manager import BackendManager
@@ -50,6 +60,10 @@ def _make_client(tmp_path, monkeypatch, queue=None):
     monkeypatch.setattr(
         "local_model_router.helpers.smart_router.health._aiohttp_probe",
         health_probe,
+    )
+    monkeypatch.setattr(
+        "local_model_router.service.app.scan_hardware",
+        hardware_scan or _hardware_snapshot,
     )
     store = FleetStore(str(tmp_path / "fleet.sqlite3"))
     app = create_app(str(cfg), fleet_store=store, fleet_queue=queue or FleetQueue(max_active=1, max_queue=4))
@@ -162,9 +176,77 @@ def test_fleet_status_reports_queue_agents_and_slots(tmp_path, monkeypatch):
     assert body["docker_socket_enabled"] is False
     assert body["queue"]["max_active"] == 1
     assert body["agents"]["count"] == 1
+    assert body["vram"] == {
+        "total_gb": 24.0,
+        "used_gb": 6.0,
+        "available_gb": 18.0,
+        "source": "nvidia-smi",
+    }
+    assert body["compute"]["available"] is True
+    assert body["compute"]["cpu"]["utilization_pct"] == 25.0
+    assert body["compute"]["ram"]["available_mb"] == 20480
     assert body["model_residency"][0]["slot_id"] == "chat"
     assert body["context_windows"][0]["hard_ctx"] == 65536
     assert body["context_windows"][0]["effective_ctx"] == 45875
+    manager_cls._instance = None
+
+
+def test_health_still_reports_service_identity(tmp_path, monkeypatch):
+    client, _store, manager_cls = _make_client(tmp_path, monkeypatch)
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["service"] == "lmm-router-observer"
+    manager_cls._instance = None
+
+
+def test_fleet_status_reuses_recent_hardware_snapshot(tmp_path, monkeypatch):
+    calls = 0
+
+    def scan():
+        nonlocal calls
+        calls += 1
+        return _hardware_snapshot()
+
+    client, _store, manager_cls = _make_client(
+        tmp_path,
+        monkeypatch,
+        hardware_scan=scan,
+    )
+
+    assert client.get("/fleet/status").status_code == 200
+    assert client.get("/fleet/status").status_code == 200
+    assert calls == 1
+    manager_cls._instance = None
+
+
+def test_fleet_status_survives_hardware_probe_failure(tmp_path, monkeypatch):
+    def failing_scan():
+        raise RuntimeError("probe failed")
+
+    client, _store, manager_cls = _make_client(
+        tmp_path,
+        monkeypatch,
+        hardware_scan=failing_scan,
+    )
+
+    response = client.get("/fleet/status")
+
+    assert response.status_code == 200
+    assert response.json()["vram"] == {
+        "total_gb": None,
+        "used_gb": None,
+        "available_gb": None,
+        "source": "not_configured",
+    }
+    assert response.json()["compute"] == {
+        "available": False,
+        "timestamp": None,
+        "gpus": [],
+        "cpu": None,
+        "ram": None,
+    }
     manager_cls._instance = None
 
 
