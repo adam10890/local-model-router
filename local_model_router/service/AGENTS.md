@@ -35,6 +35,11 @@ control (`fleet_control.py`). Agent ticket coordination lives in
   reports or explicit unchanged reasons.
 - OpenAI-compatible endpoints reuse the routing decision path and forward to
   the selected llama.cpp slot; no duplicate routing policy.
+- `/harnesses/{id}/v1` and named-connection variants pin one configured model.
+  Client model/role hints cannot escape the path, and an unavailable target
+  returns `503 harness_model_unavailable` without cross-model failover.
+- `POST /harnesses` requires both bearer auth and
+  `A0_LMM_ROUTER_ENABLE_CONFIG_WRITES=1`; writes are atomic and backed up.
 - `model=auto` is capability-aware: tools, vision payloads, JSON mode,
   estimated tokens, app profile, strategy, health, latency hints, quality
   hints, and local resource cost hints may affect ranking. Preserve

@@ -11,6 +11,9 @@ fleet control is explicitly enabled.
 - `POST /routing/request` returns the routing decision for an intent payload.
 - `POST /v1/chat/completions` forwards non-streaming and streaming requests to
   the selected llama.cpp slot.
+- `GET /harnesses` and `GET /harnesses/{id}` emit secret-free setup manifests.
+  Dedicated `.../v1/models` and `.../v1/chat/completions` paths pin one model
+  per connection; see `HARNESSES.md`.
 - `GET /fleet/status` returns queue, agent, request, slot, state, and local
   hardware summaries.
 - `GET /fleet/agents` lists registered/observed agents.

@@ -4,12 +4,15 @@
 local llama.cpp fleet — with explainable routing, health/failover, and a
 fleet-manager control plane.**
 
-Point every local AI tool (Agent Zero, Hermes, n8n, Open WebUI, Aider, custom
-scripts, …) at a single base URL instead of wiring each one to a model server:
+Give every local AI harness a stable router URL pinned to its compute model:
 
 ```text
-http://127.0.0.1:9000/v1
+http://127.0.0.1:9000/harnesses/hermes/v1
+http://127.0.0.1:9000/harnesses/pi/v1
 ```
+
+The generic `http://127.0.0.1:9000/v1` surface remains available for clients
+that intentionally want aliases and automatic routing.
 
 ## Why
 
@@ -26,7 +29,7 @@ Agent Zero is client #1, not the owner.
 
 ## Status
 
-**0.3.0 - Local-first+ routing catalog.** What works today:
+**0.4.0 - Dedicated harness connections.** What works today:
 
 | Surface | Endpoint | Notes |
 |---|---|---|
@@ -37,12 +40,13 @@ Agent Zero is client #1, not the owner.
 | Routing catalog | `GET /routing/models`, `GET /routing/models/{id}`, `GET /routing/analytics` | safe model cards, recent decisions, latency/fallback/cache stats |
 | Agent orchestration | `POST /orchestrator/plans`, `GET /orchestrator/plans`, `GET /orchestrator/summary`, `GET /orchestrator/instances`, `POST /orchestrator/instances/{id}`, `POST /orchestrator/tickets/{id}/submit` | observe-first plan/ticket packets, sub-agent instance heartbeats, DOX reports, artifacts, wake markers |
 | OpenAI-compatible | `GET /v1/models`, `POST /v1/chat/completions` | aliases + live/upstream models; capabilities metadata; streaming + non-streaming forwarding |
+| Harnesses | `GET /harnesses`, `GET /harnesses/{id}`, dedicated `.../v1/models` + `.../v1/chat/completions` | one authoritative model per connection; Agent Zero has chat + utility |
 | Fleet Manager | `GET /fleet/status`, `GET /fleet/agents`, `POST /fleet/agents/register` | agent identity, bounded queueing, SQLite + cached GPU/CPU/RAM telemetry |
 | Fleet control (opt-in) | `POST /fleet/start`, `POST /fleet/stop`, `POST /fleet/slots/{id}/start` + `/stop` | start/stop slots; off unless `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1` |
 | Backends | `GET /backends` | local fleet + configured upstreams with capabilities |
 | App profiles | `GET /apps` | per-client routing policy |
 | Config preview | `GET /config/preview` | secrets redacted |
-| Dashboard | `GET /ui` | Overview, Connect an agent, Compare / Routing, Orchestration, Cookbook |
+| Dashboard | `GET /ui` | Chat, Overview, Harnesses, Compare / Routing, Orchestration, Cookbook |
 | Cookbook | `GET /cookbook` | scans your GGUF folder, VRAM fit math, per-role model recommendations with confidence grades |
 | A2A | `GET /.well-known/agent-card.json`, `POST /a2a` | agent card + skills for agent-to-agent use |
 | MCP | `python -m local_model_router mcp` | Streamable HTTP MCP server (port 8095, `[mcp]` extra) |
@@ -70,7 +74,8 @@ strategy, and cache status.
 
 **App profiles:** identify your client with the `X-App-Id` header and
 `conf/apps.yaml` controls its default model and allowed models. Unknown apps
-get the permissive default profile.
+get the permissive default profile. Dedicated harness connections instead use
+`conf/harnesses.yaml`; their URL overrides client model and role hints.
 
 **Prompt cache:** disabled by default. Set `A0_LMM_ROUTER_PROMPT_CACHE=1` to
 enable an in-memory deterministic cache for non-streaming requests with
@@ -164,16 +169,22 @@ shows start/stop buttons per slot only when the flag is on.
 
 See `.env.example` for the full environment surface.
 
-## Connecting Agent Zero
+## Connecting harnesses
 
-Agent Zero ≥ the quiet-mode plugin (a0_lmm_router v1.4) talks to the fleet
-directly as an OpenAI-compatible provider. Point the `lmm_router` provider's
-API base at this router instead of a raw llama.cpp slot to gain failover,
-routing telemetry, and the fleet-manager queue:
+Hermes and Pi each receive one host URL. Agent Zero is the only current
+exception and receives separate Docker-reachable chat and utility URLs:
 
 ```text
-api_base: http://host.docker.internal:9000/v1
+Hermes:             http://127.0.0.1:9000/harnesses/hermes/v1
+Pi:                 http://127.0.0.1:9000/harnesses/pi/v1
+Agent Zero chat:    http://host.docker.internal:9000/harnesses/agent_zero/chat/v1
+Agent Zero utility: http://host.docker.internal:9000/harnesses/agent_zero/utility/v1
+Claude Code local:  http://127.0.0.1:9000/harnesses/claude_code_local/v1 (through LiteLLM)
 ```
+
+Use model ID `local` in the consumers. The router ignores that compatibility
+label and forwards the model pinned in `conf/harnesses.yaml`. See
+`docs/HARNESSES.md` for the setup contract.
 
 ## Docker
 

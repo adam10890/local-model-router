@@ -9,6 +9,8 @@ Durable documentation for operators, contributors, and coding agents.
 - `PROVIDER.md` owns standalone provider runbook details.
 - `INTEGRATIONS.md` owns copy-paste client setup snippets for MCP and
   OpenAI-compatible clients.
+- `HARNESSES.md` owns harness terminology, dedicated connection contracts,
+  and the new-harness setup flow.
 - `1.0-beta-roadmap.html` owns the accepted living product roadmap toward
   the standalone Imperium beta; keep decisions, gates, and deferred ideas
   current.

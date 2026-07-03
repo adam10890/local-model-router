@@ -23,9 +23,12 @@ codebase.
   recognized but experimental and non-serving). Keys via env only.
 - `local_model_router/apps/` — app/client profiles (`conf/apps.yaml`):
   default model, allowed models, auto-route policy per `X-App-Id`.
+- `local_model_router/harnesses/` — dedicated harness identities, pinned model
+  connections, setup manifests, and atomic `conf/harnesses.yaml` persistence.
 - `conf/` — fleet description. `llama_cpp_servers.yaml` is local-only
   (gitignored); the `.example` variant is the committed reference.
-  `upstreams.yaml` and `apps.yaml` are committed defaults (no secrets).
+  `upstreams.yaml`, `apps.yaml`, and `harnesses.yaml` are committed defaults
+  (no secrets).
 - `docs/` — durable runbooks and development workflow docs.
 - `CONTRIBUTING.md` — public Git and contribution workflow; keep it aligned
   with `docs/development/git-workflow.md`.
@@ -45,6 +48,8 @@ codebase.
   set.
 - Routing decisions must stay explainable: reason codes + warnings, never
   silent fallbacks.
+- Dedicated harness paths are authoritative: one pinned model per connection,
+  with Agent Zero's named chat/utility connections as the explicit exception.
 - Config previews and telemetry must redact secrets and never include prompt
   bodies.
 
@@ -67,7 +72,7 @@ codebase.
   card (`/.well-known/agent-card.json`, `POST /a2a`); (6) ✅ opt-in fleet
   lifecycle control (`/fleet/start|stop`, `/fleet/slots/{id}/start|stop`,
   dashboard buttons; gated by `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1`);
-  (7) ✅ dashboard v2: tabs (Overview / Connect an agent / Cookbook) +
+  (7) ✅ dashboard v2: tabs (Overview / Harnesses / Cookbook) +
   `GET /cookbook` (`local_model_router/cookbook/` — GGUF header parsing,
   VRAM fit math, per-role recommendations); (8) ready candidate on
   `ready/orca-inspired-routing`: Local-first+ catalog, capability-aware `auto`,
@@ -100,7 +105,7 @@ codebase.
   recommendations.
 
 Smaller areas without child contracts yet: `routing/` (aliases),
-`upstreams/`, `apps/`, `mcp/` (ported from the plugin; mutating tools gated
+  `upstreams/`, `apps/`, `harnesses/`, `mcp/` (ported from the plugin; mutating tools gated
 by `MCP_ALLOW_MUTATING_TOOLS`), `a2a/` (card + skills; card is public, skills
 honor the API key), `dashboard/` (single static page at `/ui`; data calls
 carry the user-entered key).

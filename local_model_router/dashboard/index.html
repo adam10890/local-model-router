@@ -63,7 +63,6 @@
   <button class="tab" :class="tab==='chat' && 'active'" @click="openTab('chat')">Chat</button>
   <button class="tab" :class="tab==='overview' && 'active'" @click="openTab('overview')">Overview</button>
   <button class="tab" :class="tab==='harnesses' && 'active'" @click="openTab('harnesses')">Harnesses</button>
-  <button class="tab" :class="tab==='connect' && 'active'" @click="openTab('connect')">Connect an agent</button>
   <button class="tab" :class="tab==='compare' && 'active'" @click="openTab('compare')">Compare / Routing</button>
   <button class="tab" :class="tab==='orchestration' && 'active'" @click="openTab('orchestration')">Orchestration</button>
   <button class="tab" :class="tab==='cookbook' && 'active'" @click="openTab('cookbook')">Cookbook</button>
@@ -223,40 +222,6 @@
 
 </div>
 
-<!-- ════════════════════ CONNECT ════════════════════ -->
-<div class="grid" x-show="tab==='connect'" x-cloak>
-
-  <div class="card" style="grid-column:1/-1">
-    <h2>One address for every agent</h2>
-    <p style="margin:.2rem 0 .6rem">
-      Point any OpenAI-compatible tool at this base URL. Send an alias as the
-      model name (<code>auto</code>, <code>chat</code>, <code>coder</code>,
-      <code>fast</code>, <code>deep</code>, <code>embedding</code>) and the
-      router picks the slot; any other model id passes through verbatim.
-      If no API key is configured, any key value (e.g. <code>local</code>) works.
-    </p>
-    <div class="row"><span class="dim">from this machine</span>
-      <strong x-text="base + '/v1'"></strong></div>
-    <div class="row"><span class="dim">from inside Docker (Agent Zero, Open WebUI…)</span>
-      <strong x-text="dockerBase + '/v1'"></strong></div>
-    <div class="row"><span class="dim">identify your client (optional, enables per-app policy)</span>
-      <strong>X-App-Id: &lt;name&gt;</strong></div>
-  </div>
-
-  <template x-for="s in snippets" :key="s.id">
-    <div class="card">
-      <div class="snippet-head">
-        <h2 style="margin:0" x-text="s.title"></h2>
-        <button class="btn-sm btn-ghost"
-                @click="copy(s.id)"
-                x-text="copied === s.id ? 'copied!' : 'copy'"></button>
-      </div>
-      <pre x-text="snippetText(s.id)"></pre>
-    </div>
-  </template>
-
-</div>
-
 <!-- ════════════════════ COOKBOOK ════════════════════ -->
 <div class="grid" x-show="tab==='compare'" x-cloak>
 
@@ -303,27 +268,91 @@
 <!-- ORCHESTRATION -->
 <!-- ════════════════════ HARNESSES ════════════════════ -->
 <div class="grid" x-show="tab==='harnesses'" x-cloak>
-  <template x-for="app in apps" :key="app.app_id">
-    <div class="card" x-show="Object.keys(app.roles || {}).length">
+  <div class="card" style="grid-column:1/-1">
+    <h2>Dedicated harness connections</h2>
+    <p style="margin:.2rem 0">
+      A harness is a client runtime. Each connection below has its own URL and one
+      authoritative pinned model. Roles remain inside the harness; Agent Zero is the
+      only current two-connection exception.
+    </p>
+  </div>
+
+  <template x-for="harness in harnesses" :key="harness.harness_id">
+    <div class="card">
       <h2 style="display:flex; justify-content:space-between; align-items:center;">
-        <span x-text="app.display_name || app.app_id"></span>
-        <span class="dim" x-text="app.app_id"></span>
+        <span x-text="harness.display_name"></span>
+        <span class="dim" x-text="harness.kind + ' · ' + harness.location"></span>
       </h2>
-      <table>
-        <thead><tr><th>role</th><th>local model</th></tr></thead>
-        <tbody>
-          <template x-for="[role, model] in Object.entries(app.roles || {})" :key="role">
-            <tr><td x-text="role"></td><td x-text="model"></td></tr>
-          </template>
-        </tbody>
-      </table>
-      <div class="dim" style="margin-top:.5rem; font-size:.76rem;">
-        default: <span x-text="app.default_model"></span>
+      <template x-for="connection in harness.connections" :key="connection.name">
+        <div style="border-top:1px solid var(--line); padding:.6rem 0">
+          <div class="row"><span class="dim">connection</span><strong x-text="connection.name"></strong></div>
+          <div class="row"><span class="dim">Pinned model</span><span x-text="connection.model"></span></div>
+          <div class="row"><span class="dim">base URL</span><code x-text="connection.base_url"></code></div>
+          <div class="row"><span class="dim">status</span>
+            <span class="badge" :class="connection.verification.state === 'verified' ? 'ok' : 'warn'"
+                  x-text="connection.verification.state"></span>
+          </div>
+          <div class="dim" x-show="connection.verification.last_seen"
+               x-text="'last seen: ' + connection.verification.last_seen"></div>
+          <div style="display:flex; gap:.4rem; margin-top:.5rem">
+            <button class="btn-sm btn-ghost" @click="copyText(connection.base_url, harness.harness_id + connection.name)"
+                    x-text="copied === harness.harness_id + connection.name ? 'copied!' : 'Copy URL'"></button>
+            <button class="btn-sm" @click="verifyHarness(harness, connection)">Verify</button>
+          </div>
+        </div>
+      </template>
+      <div class="snippet-head" style="margin-top:.7rem">
+        <span class="dim" x-text="harness.setup.target"></span>
+        <button class="btn-sm btn-ghost" @click="copyText(harness.setup.content, 'setup-' + harness.harness_id)">
+          Copy setup
+        </button>
       </div>
+      <pre x-text="harness.setup.content"></pre>
     </div>
   </template>
-  <div class="card" x-show="!apps.some(a => Object.keys(a.roles||{}).length)">
-    <div class="dim">No harness role maps yet — add a <code>roles:</code> block to an app in conf/apps.yaml.</div>
+
+  <div class="card" x-show="!harnesses.length">
+    <div class="dim">No harnesses configured in <code>conf/harnesses.yaml</code>.</div>
+  </div>
+
+  <div class="card" style="grid-column:1/-1">
+    <h2>Add harness</h2>
+    <div class="grid">
+      <label>Harness ID<input x-model="newHarness.harness_id" placeholder="my_harness"></label>
+      <label>Display name<input x-model="newHarness.display_name" placeholder="My Harness"></label>
+      <label>Template
+        <select x-model="newHarness.kind">
+          <option value="custom">OpenAI-compatible</option>
+          <option value="hermes">Hermes</option>
+          <option value="pi">Pi</option>
+          <option value="agent_zero">Agent Zero (chat + utility)</option>
+        </select>
+      </label>
+      <label>Location
+        <select x-model="newHarness.location"><option value="host">Host</option><option value="docker">Docker</option></select>
+      </label>
+      <label>Model<input x-model="newHarness.model" placeholder="dmr/model or slot model_id"></label>
+      <label x-show="newHarness.kind === 'agent_zero'">Utility model
+        <input x-model="newHarness.utility_model" placeholder="utility_cpu">
+      </label>
+    </div>
+    <div style="display:flex; gap:.5rem; margin-top:.7rem">
+      <button @click="previewHarness()">Generate setup</button>
+      <button class="btn-ghost" @click="saveHarness()" :disabled="!harnessMeta.config_writes_enabled">Save</button>
+    </div>
+    <div class="dim" x-show="!harnessMeta.config_writes_enabled" style="margin-top:.5rem">
+      Preview only. Saving requires an API key and A0_LMM_ROUTER_ENABLE_CONFIG_WRITES=1.
+    </div>
+    <div class="dim" x-text="harnessMessage" style="margin-top:.5rem"></div>
+    <pre x-show="harnessPreview" x-text="harnessPreview"></pre>
+  </div>
+
+  <div class="card" style="grid-column:1/-1">
+    <h2>Generic API (advanced)</h2>
+    <p class="dim">Unregistered tools can still use <code>/v1</code> with aliases and automatic routing.</p>
+    <template x-for="s in snippets" :key="s.id">
+      <details><summary x-text="s.title"></summary><pre x-text="snippetText(s.id)"></pre></details>
+    </template>
   </div>
 </div>
 
@@ -512,6 +541,11 @@ function dashboard() {
   return {
     apiKey: localStorage.getItem("lmr_key") || "",
     health: {}, slots: [], backends: [], apps: [], models: [], fleet: {}, analytics: {},
+    harnesses: [], harnessMeta: {}, harnessPreview: "", harnessMessage: "",
+    newHarness: {
+      harness_id: "", display_name: "", kind: "custom", location: "host",
+      model: "", utility_model: "utility_cpu",
+    },
     orchestration: { plans: [], plan: null, ticket: null, instances: [], instance: null, summary: { instances: {} }, error: "" },
     taskTypes: ["chat","coding","planning","research","summarization","embedding",
                 "tool_calling","sub_agent_task","background_worker","documentation"],
@@ -604,6 +638,63 @@ API Key:  local
       setTimeout(() => { this.copied = ""; }, 1500);
     },
 
+    copyText(value, id) {
+      navigator.clipboard.writeText(value || "");
+      this.copied = id;
+      setTimeout(() => { this.copied = ""; }, 1500);
+    },
+
+    harnessPayload() {
+      const h = this.newHarness;
+      const connections = h.kind === "agent_zero"
+        ? { chat: { model: h.model.trim() }, utility: { model: h.utility_model.trim() } }
+        : { default: { model: h.model.trim() } };
+      return {
+        harness_id: h.harness_id.trim(),
+        display_name: h.display_name.trim() || h.harness_id.trim(),
+        kind: h.kind,
+        protocol: "openai",
+        location: h.kind === "agent_zero" ? "docker" : h.location,
+        connections,
+      };
+    },
+
+    previewHarness() {
+      const p = this.harnessPayload();
+      const lines = ["harnesses:", "  " + (p.harness_id || "<harness_id>") + ":",
+        "    display_name: " + (p.display_name || "<display name>"),
+        "    kind: " + p.kind, "    protocol: openai", "    location: " + p.location,
+        "    connections:"];
+      Object.entries(p.connections).forEach(([name, value]) => {
+        lines.push("      " + name + ":", "        model: " + (value.model || "<model>"));
+      });
+      this.harnessPreview = lines.join("\n");
+      this.harnessMessage = "Setup preview generated; no file was changed.";
+    },
+
+    async saveHarness() {
+      this.previewHarness();
+      try {
+        const resp = await fetch("/harnesses", {
+          method: "POST", headers: this.headers(), body: JSON.stringify(this.harnessPayload()),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.detail || data.error || ("HTTP " + resp.status));
+        this.harnessMessage = "Saved " + data.harness_id + ". Configure the consumer with the generated setup.";
+        await this.refresh();
+      } catch (err) { this.harnessMessage = String(err); }
+    },
+
+    async verifyHarness(harness, connection) {
+      this.harnessMessage = "Verifying " + harness.harness_id + "/" + connection.name + "...";
+      try {
+        const resp = await fetch(connection.base_url + "/models", { headers: this.headers() });
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        this.harnessMessage = "Router endpoint verified. Consumer traffic is tracked separately.";
+        await this.refresh();
+      } catch (err) { this.harnessMessage = "Verification failed: " + String(err); }
+    },
+
     openTab(t) {
       this.tab = t;
       if (t === "cookbook" && !this.cookbook) this.loadCookbook();
@@ -655,6 +746,10 @@ API Key:  local
       try { this.slots = await this.get("/health/slots"); } catch { this.slots = []; }
       try { this.backends = (await this.get("/backends")).backends || []; } catch { this.backends = []; }
       try { this.apps = (await this.get("/apps")).apps || []; } catch { this.apps = []; }
+      try {
+        this.harnessMeta = await this.get("/harnesses");
+        this.harnesses = this.harnessMeta.harnesses || [];
+      } catch { this.harnessMeta = {}; this.harnesses = []; }
       try { this.models = (await this.get("/v1/models")).data || []; } catch { this.models = []; }
       try { this.fleet = await this.get("/fleet/status"); } catch { this.fleet = {}; }
       try { this.analytics = await this.get("/routing/analytics"); } catch { this.analytics = {}; }

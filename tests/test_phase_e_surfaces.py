@@ -52,6 +52,10 @@ def test_dashboard_page_loads(tmp_path, monkeypatch):
     assert "local-model-router" in html
     assert "Routing test panel" in html
     assert "/v1/models" in html  # the page consumes the router's own API
+    assert 'get("/harnesses")' in html
+    assert "Add harness" in html
+    assert "Copy setup" in html
+    assert "Verify" in html
 
 
 # ---------------------------------------------------------------------------
