@@ -183,3 +183,5 @@ def test_dashboard_exposes_compare_routing_and_integration_snippets():
     assert "Claude Code MCP" in html
     assert "Dify" in html
     assert "Vercel AI SDK" in html
+    assert "Pinned model" in html
+    assert "Connect an agent" not in html

@@ -1,10 +1,82 @@
 # Integration snippets
 
-Use the router as a local OpenAI-compatible endpoint:
+Use a dedicated harness endpoint when the client should always receive one
+pinned model. Keep the generic endpoint for scripts that intentionally use
+aliases or automatic routing:
 
 ```text
 http://127.0.0.1:9000/v1
 ```
+
+## Hermes
+
+In `%LOCALAPPDATA%\hermes\config.yaml`, keep provider `lmm-router` and change
+both `model.base_url` and `providers.lmm-router.base_url` to the dedicated URL.
+Set `model.default`, `providers.lmm-router.default_model`, and its `models`
+entry to `local`:
+
+```yaml
+model:
+  default: local
+  provider: lmm-router
+  base_url: http://127.0.0.1:9000/harnesses/hermes/v1
+providers:
+  lmm-router:
+    base_url: http://127.0.0.1:9000/harnesses/hermes/v1
+    default_model: local
+    models: [local]
+```
+
+Keep the existing API-key value; use `local` only when router auth is off.
+
+## Pi
+
+In `~/.pi/agent/models.json`, set the `lmm-router` provider's `baseUrl` to:
+
+```text
+http://127.0.0.1:9000/harnesses/pi/v1
+```
+
+Keep `defaultProvider` as `lmm-router` in `~/.pi/agent/settings.json` and set
+`defaultModel` to the provider model ID `local`. The old direct ports
+`8080`/`8088` bypass the router and should be removed from active providers.
+
+```json
+{
+  "providers": {
+    "lmm-router": {
+      "baseUrl": "http://127.0.0.1:9000/harnesses/pi/v1",
+      "api": "openai-completions",
+      "models": [{"id": "local", "name": "LMM Router"}]
+    }
+  }
+}
+```
+
+## Agent Zero
+
+Use two OpenAI-compatible provider entries:
+
+```text
+Chat:    http://host.docker.internal:9000/harnesses/agent_zero/chat/v1
+Utility: http://host.docker.internal:9000/harnesses/agent_zero/utility/v1
+Model:   local
+```
+
+Keep Agent Zero's embedding provider unchanged until the router exposes an
+embeddings endpoint.
+
+## Claude Code local mode (optional)
+
+Do not change the normal cloud Opus configuration. Install and run LiteLLM
+Proxy as the Anthropic-Messages translator, mapping `openai/local` to:
+
+```text
+http://127.0.0.1:9000/harnesses/claude_code_local/v1
+```
+
+Then launch a separate shell with `ANTHROPIC_BASE_URL` pointing to LiteLLM.
+The dashboard's Claude Code (local) card emits both configuration blocks.
 
 Set `A0_LMM_ROUTER_API_KEY` in the router when exposing it beyond loopback,
 then use the same value as the client API key. Prompt bodies are forwarded to

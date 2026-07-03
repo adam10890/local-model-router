@@ -1,109 +1,104 @@
-# Harness Consumption Matrix
+# Harness connections
 
-Source of truth for **which local model serves which role for which harness**.
-This is both the plan ("planning the models") and the data the dashboard's
-Harnesses tab renders. The router is the serving layer beneath each harness;
-this doc makes that layer visible.
+A **harness** is a client runtime such as Hermes, Pi, Agent Zero, or Claude
+Code. An **agent** is a session or persona created inside that runtime. The
+router assigns compute to harness connections; it does not model the
+harness's internal roles.
 
-A harness is any client (Agent Zero, Hermes, n8n, aider…) that talks to the
-router over the OpenAI-compatible surface and identifies via `X-App-Id`.
+## Contract
 
----
+`conf/harnesses.yaml` is the source of truth. A normal harness has one
+`default` connection pinned to one concrete model:
 
-## Agent Zero
-
-Full consumer — uses every role. Foreground chat runs alongside the background
-planner + workers.
-
-| role         | model                | when                                                |
-|--------------|----------------------|-----------------------------------------------------|
-| `chat` (ego) | `gemma-4-12b`        | foreground — what Adam talks to                     |
-| `planner`    | `vibethinker-3b`     | background — decomposes work, emits sub-agent tickets |
-| `sub_agents` | per bundle (below)   | background — ticket runners                          |
-| `scribe`     | `gemma-4-E4B`        | background — super-ego documentation                |
-| `utility`    | `qwen3.5-9b`         | on demand                                           |
-| `embedding`  | `nomic-embed-text`   | on demand                                           |
-
-Sub-agent bundles (from `conf/agent_orchestrator.yaml`):
-
-| bundle     | model                       |
-|------------|-----------------------------|
-| `code`     | `deepseek-coder-v2-lite`    |
-| `research` | `mistral-nemo`              |
-| `docs`     | `gemma-4-E4B` (shared w/ scribe) |
-| `docker`   | `qwen3.5-9b` (shared w/ utility) |
-
-## Hermes
-
-Thin consumer. In Hermes, the model name is set to `LMM ROUTER`; the dashboard
-shows what it actually resolves to locally.
-
-| role   | Hermes sees  | local model     |
-|--------|--------------|-----------------|
-| `chat` | `LMM ROUTER` | `gemma-4-12b`   |
-
----
-
-## Orchestration flow (planner → sub-agents)
-
-`vibethinker-3b` is the planner. The router's `agent_orchestrator` already
-hardcodes it: `DEFAULT_MODEL_HINT = "WeiboAI/VibeThinker-3B"`
-(`local_model_router/service/agent_orchestrator.py`).
-
-```
-  A0 hook ──▶ plan (status: ready_for_planner)
-                  │
-        VibeThinker (planner, background)
-                  │  emits
-                  ▼
-            tickets ── code / research / docs / docker
-                  │  consumed by
-                  ▼
-        sub-agent instances ◀── fleet queue (bounded)
-
-  gemma-4-12b (chat ego) runs concurrently, foreground.
+```yaml
+harnesses:
+  hermes:
+    display_name: Hermes
+    kind: hermes
+    protocol: openai
+    location: host
+    connections:
+      default:
+        model: dmr/huggingface.co/deepreinforce-ai/ornith-1.0-9b-gguf:Q8_0
 ```
 
-The **hook system** is the trigger: an Agent Zero lifecycle hook posts a `plan`
-to the orchestrator; VibeThinker plans it into tickets; workers run them. The
-plan/ticket/instance state machine + SQLite already exist. V1 is observe-first
-— the orchestrator does **not** launch containers yet (see fork #1 below).
+Agent Zero is the current exception because its consumer settings expose
+separate chat and utility providers:
 
-## VRAM coexistence (RTX 4090 / 24 GB)
+```yaml
+  agent_zero:
+    display_name: Agent Zero
+    kind: agent_zero
+    protocol: openai
+    location: docker
+    connections:
+      chat:
+        model: dmr/huggingface.co/deepreinforce-ai/ornith-1.0-9b-gguf:Q8_0
+      utility:
+        model: utility_cpu
+```
 
-| set                                    | approx | fits |
-|----------------------------------------|--------|------|
-| gemma-4-12b + vibethinker + scribe-E4B | ~18 GB | yes  |
-| gemma-4-26b-uncensored + vibethinker   | ~20 GB | yes  |
-| gemma-4-26b + vibethinker + scribe     | ~26 GB | no   |
+IDs use lowercase ASCII letters, digits, `_`, or `-`. API keys never belong
+in this file.
 
-12b is the default ego because it lets all three background+foreground models
-coexist. Swap to 26b only if you accept the scribe time-sharing the GPU.
+## URLs
 
----
+Single-connection host harnesses use:
 
-## Wiring status
+```text
+http://127.0.0.1:9000/harnesses/hermes/v1
+http://127.0.0.1:9000/harnesses/pi/v1
+```
 
-- **Done:** per-harness `roles` map in `conf/apps.yaml`; `app_profiles.apply`
-  resolves a role to the harness's pinned model before the global failover
-  chain (admin pin beats `allowed_models`); `/apps` surfaces it; dashboard
-  **Harnesses** tab renders the matrix.
-- **Done — planner serving:** VibeThinker is served by **Docker Model Runner**
-  (`docker model pull hf.co/mradermacher/VibeThinker-3B-GGUF:Q8_0`), wired as
-  the `dmr` upstream in `conf/upstreams.yaml`; the A0 `planner` pin points at
-  `dmr/huggingface.co/mradermacher/vibethinker-3b-gguf:Q8_0`. Verified
-  end-to-end (`model: planner` → router → DMR → VibeThinker → 42).
-  > Caveat: DMR is a peer compute manager — its VRAM is **not** under the
-  > router's admission control. Fine while `backend: remote`; revisit when
-  > fork #1 lands (migrate the planner into the native managed fleet if it must
-  > coexist in the 24 GB budget).
-- **Open (fork #1) — runtime compute manager:** the router owns the GPU at
-  runtime, not just request routing. The pieces exist — fit engine
-  (`cookbook/engine.py`), fleet control, VRAM budget + `max_concurrent` limits
-  in `conf/llama_cpp_servers.yaml`. Missing is the admission loop that
-  loads/evicts models on demand within the 24 GB budget. Flip
-  `global.backend: docker` + wire that loop and the router self-manages compute
-  as load shifts (chat ↔ planner ↔ sub-agent bursts).
+Agent Zero runs in Docker, so its named connections use:
 
-> Follow-up: VibeThinker emits `<think>…</think>` reasoning in content; add a
-> reasoning-format split when the orchestrator starts consuming planner output.
+```text
+http://host.docker.internal:9000/harnesses/agent_zero/chat/v1
+http://host.docker.internal:9000/harnesses/agent_zero/utility/v1
+```
+
+Each base URL provides `GET /models` and `POST /chat/completions`. Clients may
+send any compatibility model name; the path's pinned model is authoritative.
+An unavailable pinned target returns `503 harness_model_unavailable` and does
+not fail over to a different harness model. Generic `/v1` routing is unchanged.
+
+## Add a harness
+
+1. Choose a stable lowercase harness ID.
+2. Choose `host` or `docker` based on where the harness process runs.
+3. Pin one upstream model name or local fleet `model_id`.
+4. Add it in the dashboard's **Harnesses → Add harness** form.
+5. Copy the generated consumer setup and verify its `/models` endpoint.
+6. Send a real completion and confirm `last_seen` changes.
+
+Dashboard saving is intentionally off by default. To enable it, configure a
+router API key and restart with:
+
+```text
+A0_LMM_ROUTER_API_KEY=<your local secret>
+A0_LMM_ROUTER_ENABLE_CONFIG_WRITES=1
+```
+
+Writes are atomic and retain a timestamped `harnesses.yaml.*.bak` copy. With
+writes disabled the form only generates a YAML preview.
+
+## Compatibility
+
+If `conf/harnesses.yaml` does not exist, one compatibility release derives
+harness connections from the old `roles` entries in `conf/apps.yaml`.
+`conf/apps.yaml` still controls generic `/v1` app policy; new dedicated
+connections must be declared in `conf/harnesses.yaml`.
+
+## Claude Code
+
+Claude Code remains on cloud Opus by default. Its native gateway contract is
+Anthropic Messages (`/v1/messages`), while harness endpoints in this release
+are OpenAI Chat Completions. A separate optional local launcher should put
+LiteLLM Proxy in front of the Claude-local harness; do not replace the normal
+global Claude Code configuration. The router-side connection is:
+
+```text
+http://127.0.0.1:9000/harnesses/claude_code_local/v1
+```
+
+The dashboard emits the LiteLLM model mapping and isolated PowerShell launcher.

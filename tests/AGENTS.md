@@ -16,6 +16,8 @@ forwarding, fleet manager admission, failover, and health checks.
 ## Verification
 
 - `python -m pytest tests/ -q`
+- Harness changes must include `tests/test_harness_profiles.py` and
+  `tests/test_harness_api.py`; they remain fleet- and network-free.
 
 ## Child DOX Index
 

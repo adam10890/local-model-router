@@ -4,6 +4,28 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-03
+
+### Added
+
+- Dedicated OpenAI-compatible URLs and setup manifests for Hermes, Pi, Agent
+  Zero, and optional Claude Code local-mode harness connections.
+- Canonical `conf/harnesses.yaml` profiles, legacy app-profile fallback, and
+  opt-in authenticated atomic config writes with backups.
+- Harness-first dashboard cards with pinned models, copyable setup, endpoint
+  verification, last-seen state, and a guided add-harness form.
+
+### Changed
+
+- Clarified that harnesses own their internal roles; the router supplies one
+  compute path per harness, with Agent Zero's chat/utility split as the only
+  current exception.
+
+### Fixed
+
+- Pi and Hermes no longer need to bypass the router through raw model-server
+  ports or share the generic auto-routing URL.
+
 ## [0.3.0] - 2026-07-03
 
 ### Added

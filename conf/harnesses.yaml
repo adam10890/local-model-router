@@ -1,0 +1,40 @@
+# Dedicated client-runtime connections. Each connection is pinned to one model.
+# API keys stay in the environment and never belong in this file.
+harnesses:
+  hermes:
+    display_name: Hermes
+    kind: hermes
+    protocol: openai
+    location: host
+    connections:
+      default:
+        model: dmr/huggingface.co/deepreinforce-ai/ornith-1.0-9b-gguf:Q8_0
+
+  pi:
+    display_name: Pi
+    kind: pi
+    protocol: openai
+    location: host
+    connections:
+      default:
+        model: utility_cpu
+
+  claude_code_local:
+    display_name: Claude Code (local)
+    kind: claude_code
+    protocol: openai
+    location: host
+    connections:
+      default:
+        model: dmr/huggingface.co/deepreinforce-ai/ornith-1.0-9b-gguf:Q8_0
+
+  agent_zero:
+    display_name: Agent Zero
+    kind: agent_zero
+    protocol: openai
+    location: docker
+    connections:
+      chat:
+        model: dmr/huggingface.co/deepreinforce-ai/ornith-1.0-9b-gguf:Q8_0
+      utility:
+        model: utility_cpu

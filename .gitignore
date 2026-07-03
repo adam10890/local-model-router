@@ -16,6 +16,7 @@ bin/
 # Local runtime state — never commit
 conf/llama_cpp_servers.yaml
 conf/router_state.json
+conf/harnesses.yaml.*.bak
 data/
 *.sqlite
 *.sqlite3

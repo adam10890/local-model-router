@@ -14,6 +14,7 @@ import hmac
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
@@ -26,6 +27,7 @@ from starlette.routing import Route
 
 from local_model_router.a2a.card import agent_card, skill_ids
 from local_model_router.apps.profiles import AppProfiles
+from local_model_router.harnesses import HarnessConfigError, HarnessProfiles, setup_manifest
 from local_model_router.routing.aliases import public_aliases, resolve_alias
 from local_model_router.routing.catalog import (
     build_slot_candidates,
@@ -368,6 +370,7 @@ def create_app(
     models_fetch: Optional[FetchFn] = None,
     upstreams_path: Optional[str] = None,
     apps_path: Optional[str] = None,
+    harnesses_path: Optional[str] = None,
     orchestrator: Optional[AgentOrchestrator] = None,
 ) -> Starlette:
     """Return a configured Starlette app.  Safe to call multiple times (no side-effects)."""
@@ -383,6 +386,13 @@ def create_app(
     conf_dir = Path(observer.config_path).resolve().parent
     upstreams = load_upstreams(upstreams_path or conf_dir / "upstreams.yaml")
     app_profiles = AppProfiles.load(apps_path or conf_dir / "apps.yaml")
+    harness_profiles = HarnessProfiles.load(
+        harnesses_path
+        or os.environ.get("A0_LMM_ROUTER_HARNESSES_CONFIG")
+        or conf_dir / "harnesses.yaml",
+        legacy_path=apps_path or conf_dir / "apps.yaml",
+    )
+    harness_activity: Dict[str, Dict[str, Any]] = {}
     agent_orchestrator = orchestrator or AgentOrchestrator(
         repo_root=str(Path(__file__).resolve().parents[2]),
         bundles_path=str(conf_dir / "agent_orchestrator.yaml"),
@@ -659,6 +669,120 @@ def create_app(
     async def apps_list(request: Request) -> JSONResponse:
         return JSONResponse({"apps": app_profiles.list_profiles()})
 
+    def harness_manifest(profile: Any) -> Dict[str, Any]:
+        activity = {
+            connection_name: harness_activity[f"{profile.harness_id}/{connection_name}"]
+            for connection_name in profile.connections
+            if f"{profile.harness_id}/{connection_name}" in harness_activity
+        }
+        return setup_manifest(
+            profile,
+            auth_required=bool(api_key),
+            verification_by_connection=activity,
+        )
+
+    def resolve_harness_request(request: Request) -> tuple[Any, Any] | JSONResponse:
+        harness_id = request.path_params.get("harness_id", "")
+        connection_name = request.path_params.get("connection")
+        try:
+            profile = harness_profiles.get(harness_id)
+        except (HarnessConfigError, KeyError):
+            return JSONResponse(
+                {"error": "unknown_harness", "harness_id": harness_id},
+                status_code=404,
+            )
+        try:
+            connection = harness_profiles.resolve(harness_id, connection_name)
+        except (HarnessConfigError, KeyError):
+            return JSONResponse(
+                {
+                    "error": "unknown_harness_connection",
+                    "harness_id": harness_id,
+                    "connection": connection_name,
+                },
+                status_code=404,
+            )
+        return profile, connection
+
+    def mark_harness_activity(profile: Any, connection: Any, state: str) -> None:
+        harness_activity[f"{profile.harness_id}/{connection.name}"] = {
+            "state": state,
+            "last_seen": datetime.now(timezone.utc).isoformat(),
+        }
+
+    async def harnesses_list(request: Request) -> JSONResponse:
+        return JSONResponse({
+            "harnesses": [harness_manifest(profile) for profile in harness_profiles.list_profiles()],
+            "source": harness_profiles.source,
+            "config_writes_enabled": os.environ.get("A0_LMM_ROUTER_ENABLE_CONFIG_WRITES") == "1",
+        })
+
+    async def harness_create(request: Request) -> JSONResponse:
+        nonlocal harness_profiles
+        if os.environ.get("A0_LMM_ROUTER_ENABLE_CONFIG_WRITES") != "1":
+            return JSONResponse({"error": "config_writes_disabled"}, status_code=403)
+        if not api_key:
+            return JSONResponse({"error": "config_write_requires_api_key"}, status_code=403)
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid_json"}, status_code=400)
+        if not isinstance(payload, dict):
+            return JSONResponse({"error": "invalid_request_body"}, status_code=400)
+        try:
+            harness_profiles, _backup = harness_profiles.upsert(payload)
+            profile = harness_profiles.get(str(payload.get("harness_id") or ""))
+        except HarnessConfigError as exc:
+            return JSONResponse(
+                {"error": "invalid_harness_config", "detail": str(exc)},
+                status_code=422,
+            )
+        return JSONResponse(harness_manifest(profile), status_code=201)
+
+    async def harness_detail(request: Request) -> JSONResponse:
+        try:
+            profile = harness_profiles.get(request.path_params.get("harness_id", ""))
+        except (HarnessConfigError, KeyError):
+            return JSONResponse(
+                {"error": "unknown_harness", "harness_id": request.path_params.get("harness_id")},
+                status_code=404,
+            )
+        return JSONResponse(harness_manifest(profile))
+
+    async def harness_models(request: Request) -> JSONResponse:
+        resolved = resolve_harness_request(request)
+        if isinstance(resolved, JSONResponse):
+            return resolved
+        profile, connection = resolved
+        mark_harness_activity(profile, connection, "verified")
+        return JSONResponse({
+            "object": "list",
+            "data": [{
+                "id": "local",
+                "object": "model",
+                "created": 0,
+                "owned_by": profile.harness_id,
+                "meta": {
+                    "harness_id": profile.harness_id,
+                    "connection": connection.name,
+                    "pinned_model": connection.model,
+                },
+            }],
+        })
+
+    async def harness_chat(request: Request) -> Response:
+        resolved = resolve_harness_request(request)
+        if isinstance(resolved, JSONResponse):
+            return resolved
+        profile, connection = resolved
+        request.state.harness_connection = {
+            "harness_id": profile.harness_id,
+            "connection": connection.name,
+            "model": connection.model,
+        }
+        mark_harness_activity(profile, connection, "seen")
+        return await chat_completions(request)
+
     def routing_catalog_models() -> list[Dict[str, Any]]:
         slots_with_health: list[Dict[str, Any]] = []
         for slot in observer.get_slots():
@@ -791,7 +915,11 @@ def create_app(
             return _orchestrator_error(exc)
 
     async def forward_to_upstream(
-        upstream: UpstreamConfig, bare_model: str, body: Dict[str, Any]
+        upstream: UpstreamConfig,
+        bare_model: str,
+        body: Dict[str, Any],
+        *,
+        pinned_harness: Optional[Dict[str, str]] = None,
     ) -> Response:
         wants_stream = body.get("stream") is True
         payload = _forward_payload(body, bare_model, stream=wants_stream)
@@ -823,10 +951,10 @@ def create_app(
                     await session.close()
                     return _openai_error(
                         f"upstream {upstream.name} stream request failed",
-                        "upstream_error",
-                        resp.status,
+                        "harness_model_unavailable" if pinned_harness else "upstream_error",
+                        503 if pinned_harness else resp.status,
                         error_type="server_error",
-                        extra={"upstream": upstream_json},
+                        extra={"upstream": upstream_json, **(pinned_harness or {})},
                     )
                 return StreamingResponse(
                     _stream_upstream_response(resp, session),
@@ -853,20 +981,30 @@ def create_app(
                             error_type="server_error",
                             extra={"upstream_status": resp.status, "upstream_body": upstream_text[:1000]},
                         )
+                    if pinned_harness and resp.status >= 400:
+                        return _openai_error(
+                            f"pinned model '{pinned_harness['pinned_model']}' is unavailable",
+                            "harness_model_unavailable",
+                            503,
+                            error_type="server_error",
+                            extra={"upstream_status": resp.status, **pinned_harness},
+                        )
                     return JSONResponse(upstream_json, status_code=resp.status, headers=out_headers)
         except aiohttp.ClientError as exc:
             return _openai_error(
                 f"could not reach upstream {upstream.name}: {exc}",
-                "upstream_unreachable",
-                502,
+                "harness_model_unavailable" if pinned_harness else "upstream_unreachable",
+                503 if pinned_harness else 502,
                 error_type="server_error",
+                extra=pinned_harness,
             )
         except TimeoutError:
             return _openai_error(
                 f"upstream {upstream.name} timed out",
-                "upstream_timeout",
-                504,
+                "harness_model_unavailable" if pinned_harness else "upstream_timeout",
+                503 if pinned_harness else 504,
                 error_type="server_error",
+                extra=pinned_harness,
             )
 
     async def dashboard_page(request: Request) -> HTMLResponse:
@@ -959,19 +1097,37 @@ def create_app(
         if "messages" not in body:
             return _openai_error("missing required field: messages", "missing_messages", 400, param="messages")
 
+        dedicated = getattr(request.state, "harness_connection", None)
+        pinned_slot_id: Optional[str] = None
         try:
             agent = identity_from_headers(request.headers, body)
-            app_id = _app_id_from(request.headers, body, agent)
             requested_model = str(body.get("model") or "auto").strip() or "auto"
-            effective_model, policy_error = app_profiles.apply(app_id, body.get("model"))
-            if policy_error:
-                return _openai_error(
-                    f"model '{effective_model}' is not allowed for app '{app_id}'",
-                    policy_error,
-                    403,
-                    param="model",
-                    extra={"app_id": app_id},
-                )
+            if dedicated:
+                app_id = dedicated["harness_id"]
+                effective_model = dedicated["model"]
+                for slot in observer.get_slots():
+                    if effective_model in {
+                        str(slot.get("id") or ""),
+                        str(slot.get("model_id") or ""),
+                        str(slot.get("router_default_model") or ""),
+                    }:
+                        pinned_slot_id = str(slot.get("id") or "")
+                        body["routing"] = {
+                            "preferred_slot": pinned_slot_id,
+                            "role": str(slot.get("role") or "chat"),
+                        }
+                        break
+            else:
+                app_id = _app_id_from(request.headers, body, agent)
+                effective_model, policy_error = app_profiles.apply(app_id, body.get("model"))
+                if policy_error:
+                    return _openai_error(
+                        f"model '{effective_model}' is not allowed for app '{app_id}'",
+                        policy_error,
+                        403,
+                        param="model",
+                        extra={"app_id": app_id},
+                    )
             body["model"] = effective_model
             intent = _intent_from_chat_body(
                 body,
@@ -998,7 +1154,29 @@ def create_app(
 
         upstream_match = match_upstream_model(effective_model, upstreams)
         if upstream_match is not None:
-            return await forward_to_upstream(upstream_match[0], upstream_match[1], body)
+            pinned_harness = None
+            if dedicated:
+                pinned_harness = {
+                    "harness_id": dedicated["harness_id"],
+                    "connection": dedicated["connection"],
+                    "pinned_model": effective_model,
+                }
+            return await forward_to_upstream(
+                upstream_match[0], upstream_match[1], body, pinned_harness=pinned_harness
+            )
+
+        if dedicated and not pinned_slot_id:
+            return _openai_error(
+                f"pinned model '{effective_model}' is not configured in the local fleet",
+                "harness_model_unavailable",
+                503,
+                error_type="server_error",
+                extra={
+                    "harness_id": dedicated["harness_id"],
+                    "connection": dedicated["connection"],
+                    "pinned_model": effective_model,
+                },
+            )
 
         request_id = store.create_request(agent)
         started = time.monotonic()
@@ -1103,11 +1281,45 @@ def create_app(
         if decision.no_slot_available or not decision.selected_url:
             await finish("failed", error_code="no_slot_available", decision=decision, cache_status="BYPASS")
             return _openai_error(
-                "no healthy local llama.cpp slot is available for this request",
-                "no_slot_available",
+                (
+                    f"pinned model '{effective_model}' is unavailable"
+                    if dedicated
+                    else "no healthy local llama.cpp slot is available for this request"
+                ),
+                "harness_model_unavailable" if dedicated else "no_slot_available",
                 503,
                 error_type="server_error",
-                extra={"routing": decision_body},
+                extra={
+                    "routing": decision_body,
+                    **(
+                        {
+                            "harness_id": dedicated["harness_id"],
+                            "connection": dedicated["connection"],
+                            "pinned_model": effective_model,
+                        }
+                        if dedicated
+                        else {}
+                    ),
+                },
+            )
+
+        if pinned_slot_id and decision.selected_slot_id != pinned_slot_id:
+            await finish(
+                "failed",
+                error_code="harness_model_unavailable",
+                decision=decision,
+                cache_status="BYPASS",
+            )
+            return _openai_error(
+                f"pinned model '{effective_model}' is unavailable",
+                "harness_model_unavailable",
+                503,
+                error_type="server_error",
+                extra={
+                    "harness_id": dedicated["harness_id"],
+                    "connection": dedicated["connection"],
+                    "pinned_model": effective_model,
+                },
             )
 
         url = decision.selected_url.rstrip("/") + "/chat/completions"
@@ -1356,6 +1568,21 @@ def create_app(
         Route("/orchestrator/tickets/{ticket_id}", protected(orchestrator_ticket_detail)),
         Route("/backends", protected(backends)),
         Route("/apps", protected(apps_list)),
+        Route("/harnesses", protected(harnesses_list)),
+        Route("/harnesses", protected(harness_create), methods=["POST"]),
+        Route("/harnesses/{harness_id}/v1/models", protected(harness_models)),
+        Route(
+            "/harnesses/{harness_id}/v1/chat/completions",
+            protected(harness_chat),
+            methods=["POST"],
+        ),
+        Route("/harnesses/{harness_id}/{connection}/v1/models", protected(harness_models)),
+        Route(
+            "/harnesses/{harness_id}/{connection}/v1/chat/completions",
+            protected(harness_chat),
+            methods=["POST"],
+        ),
+        Route("/harnesses/{harness_id}", protected(harness_detail)),
         Route("/cookbook", protected(cookbook)),
         Route("/.well-known/agent-card.json", well_known_agent_card),
         Route("/a2a", protected(a2a_skills), methods=["POST"]),
