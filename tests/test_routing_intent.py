@@ -230,42 +230,22 @@ class TestPrivacyPolicy:
         body = _post(client, {"local_only": False}).json()
         assert body["local_only_enforced"] is False
 
-    def test_cloud_allowed_false_sets_flag(self, tmp_path):
+    def test_cloud_flags_are_not_part_of_local_router_response(self, tmp_path):
         client, _ = _make_client(tmp_path, health_result="healthy")
-        body = _post(client, {"cloud_allowed": False}).json()
-        assert body["cloud_allowed"] is False
-
-    def test_local_only_enforced_disables_cloud(self, tmp_path):
-        client, _ = _make_client(tmp_path, health_result="healthy")
-        body = _post(client, {"local_only": True, "cloud_allowed": True}).json()
-        # local_only overrides cloud_allowed
-        assert body["cloud_allowed"] is False
+        body = _post(client, {"cloud_allowed": True}).json()
+        assert "cloud_allowed" not in body
+        assert not any("cloud_routing" in warning for warning in body["warnings"])
 
 
 # ---------------------------------------------------------------------------
 # Cloud routing warning
 # ---------------------------------------------------------------------------
 
-class TestCloudRoutingWarning:
-    def test_cloud_preferred_mode_adds_warning(self, tmp_path):
+class TestUnknownCloudPolicy:
+    def test_cloud_preferred_is_an_unknown_privacy_mode(self, tmp_path):
         client, _ = _make_client(tmp_path, health_result="healthy")
         body = _post(client, {"privacy_mode": "cloud_preferred"}).json()
-        warnings = body["warnings"]
-        assert any("cloud_routing_not_implemented" in w for w in warnings)
-
-    def test_cloud_allowed_true_adds_warning(self, tmp_path):
-        client, _ = _make_client(tmp_path, health_result="healthy")
-        body = _post(client, {"cloud_allowed": True}).json()
-        assert any("cloud_routing_not_implemented" in w for w in body["warnings"])
-
-    def test_local_only_no_cloud_warning_about_implementation(self, tmp_path):
-        client, _ = _make_client(tmp_path, health_result="healthy")
-        body = _post(client, {"local_only": True}).json()
-        # local_only suppresses effective cloud_allowed, but the
-        # cloud_routing_not_implemented warning is still issued so the
-        # caller knows the flag was received.  Both are acceptable;
-        # the key assertion is that local_only_enforced is True.
-        assert body["local_only_enforced"] is True
+        assert "unknown_privacy_mode:cloud_preferred" in body["warnings"]
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +382,7 @@ class TestRoutingIntentSchema:
         assert req.agent_id == "unknown"
         assert req.task_type == "chat"
         assert req.local_only is False
-        assert req.cloud_allowed is True
+        assert not hasattr(req, "cloud_allowed")
 
     def test_request_validation_error_on_negative_tokens(self):
         from pydantic import ValidationError

@@ -1,125 +1,54 @@
-"""
-router_bridge.py — Bridge between MCP tool calls and the BackendManager.
-
-Uses the existing BackendManager singleton (llama_cpp_manager.py) for
-slot lifecycle and failover, and aiohttp for proxying HTTP requests to
-the appropriate llama.cpp container.
-"""
-
+"""HTTP bridge from MCP tools to the running local model router."""
 from __future__ import annotations
 
-import json
-import logging
 import os
-import sys
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 
-from local_model_router.routing.aliases import public_aliases
-from local_model_router.routing.catalog import build_slot_candidates
 
-logger = logging.getLogger("lmm_router.mcp.bridge")
-
-# Allow running outside the /a0 container for testing.
+def _router_base_url() -> str:
+    return os.environ.get("A0_LMM_ROUTER_BASE_URL", "http://127.0.0.1:9000").strip().rstrip("/")
 
 
-def _get_manager():
-    """Return the BackendManager singleton."""
-    from local_model_router.helpers.llama_cpp_manager import BackendManager  # noqa: PLC0415
-    return BackendManager.get_instance()
-
-
-def _fleet_manager_base_url() -> str:
-    return os.environ.get("A0_FLEET_MANAGER_BASE_URL", "").strip().rstrip("/")
-
-
-def _fleet_manager_headers() -> dict[str, str]:
+def _router_headers() -> dict[str, str]:
     headers = {
         "Content-Type": "application/json",
         "X-Agent-ID": os.environ.get("A0_MCP_AGENT_ID", "mcp-router"),
         "X-Agent-Type": "mcp",
+        "X-App-Id": "mcp",
         "X-Priority": os.environ.get("A0_MCP_PRIORITY", "normal"),
     }
-    api_key = os.environ.get("A0_FLEET_MANAGER_API_KEY", os.environ.get("A0_LMM_ROUTER_API_KEY", "")).strip()
+    api_key = os.environ.get("A0_LMM_ROUTER_API_KEY", "").strip()
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     return headers
 
 
-async def _fleet_manager_get(path: str) -> dict[str, Any] | None:
-    base_url = _fleet_manager_base_url()
-    if not base_url:
-        return None
+async def _router_request(
+    method: str,
+    path: str,
+    payload: dict[str, Any] | None = None,
+    timeout: int = 30,
+) -> dict[str, Any]:
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"{base_url}{path}",
-                headers=_fleet_manager_headers(),
-                timeout=aiohttp.ClientTimeout(total=30),
-            ) as resp:
-                data = await resp.json(content_type=None)
-                if resp.status >= 400 and isinstance(data, dict):
-                    return {"error": data.get("error", data), "status": resp.status}
-                return data
-    except aiohttp.ClientError as exc:
-        return {"error": str(exc)}
-
-
-async def _fleet_manager_post(path: str, payload: dict[str, Any], timeout: int = 120) -> dict[str, Any] | None:
-    base_url = _fleet_manager_base_url()
-    if not base_url:
-        return None
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{base_url}{path}",
+            async with session.request(
+                method,
+                f"{_router_base_url()}{path}",
                 json=payload,
-                headers=_fleet_manager_headers(),
+                headers=_router_headers(),
                 timeout=aiohttp.ClientTimeout(total=timeout),
-            ) as resp:
-                data = await resp.json(content_type=None)
-                if resp.status >= 400 and isinstance(data, dict):
-                    return {"error": data.get("error", data), "status": resp.status}
-                return data
-    except aiohttp.ClientError as exc:
-        return {"error": str(exc)}
-
-
-def _slot_url(role: str, fallback_port_map: dict[str, int] | None = None) -> str | None:
-    """Return the base v1 URL for a slot by role, using failover if needed.
-
-    Synchronous. Used by get_embeddings and any non-async callers.
-    chat_complete uses select_slot_with_failover_async instead.
-    """
-    mgr = _get_manager()
-
-    # select_slot_with_failover returns a decision dict with 'url'
-    decision = mgr.select_slot_with_failover(role)
-    if decision:
-        url = decision.get("url", "")
-        if url:
-            return url
-
-    return _config_fallback_url(role, fallback_port_map)
-
-
-def _config_fallback_url(
-    role: str, fallback_port_map: dict[str, int] | None = None
-) -> str | None:
-    """Return URL for role from lmm_hosts config or static port map.
-
-    Does not perform any health probe. Used as a last resort when
-    slot selection returns no healthy slot.
-    """
-    mgr = _get_manager()
-    hosts: dict[str, str] = mgr.global_config.get("lmm_hosts", {})
-    if role in hosts:
-        return f"http://{hosts[role]}/v1"
-
-    defaults = fallback_port_map or {"chat": 8080, "utility": 8088, "embedding": 8082, "scribe": 8090}
-    port = defaults.get(role)
-    return f"http://localhost:{port}/v1" if port else None
+            ) as response:
+                data = await response.json(content_type=None)
+                if isinstance(data, dict):
+                    if response.status >= 400:
+                        data.setdefault("status", response.status)
+                    return data
+                return {"data": data, "status": response.status}
+    except (aiohttp.ClientError, TimeoutError) as exc:
+        return {"error": "router_unreachable", "detail": str(exc)}
 
 
 async def chat_complete(
@@ -129,148 +58,48 @@ async def chat_complete(
     temperature: float = 0.7,
     stream: bool = False,
 ) -> dict[str, Any]:
-    """Forward a chat completion request to the appropriate slot.
-
-    Uses the async routing path so health probes do not block the event loop.
-    The routing decision is computed once; slot_id is reused in error paths.
-    """
-    fleet_payload = {
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "stream": False,
-        "routing": {"role": role, "agent_type": "mcp"},
-    }
-    fleet_result = await _fleet_manager_post("/v1/chat/completions", fleet_payload)
-    if fleet_result is not None:
-        return fleet_result
-
-    mgr = _get_manager()
-    decision = await mgr.select_slot_with_failover_async(role)
-
-    if decision:
-        url = decision.get("url", "")
-        slot_id = decision.get("slot_id", f"slot_{role}")
-    else:
-        url = _config_fallback_url(role) or ""
-        slot_id = f"slot_{role}"
-
-    if not url:
-        return {"error": f"No healthy slot found for role '{role}'"}
-
-    payload: dict[str, Any] = {
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "stream": False,
-    }
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{url}/chat/completions",
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=aiohttp.ClientTimeout(total=120),
-            ) as resp:
-                data = await resp.json()
-                if resp.status != 200:
-                    mgr.mark_slot_error(slot_id, f"HTTP {resp.status}")
-                return data
-    except aiohttp.ClientError as exc:
-        mgr.mark_slot_error(slot_id, str(exc))
-        return {"error": str(exc)}
+    del stream
+    return await _router_request(
+        "POST",
+        "/v1/chat/completions",
+        {
+            "model": role,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": False,
+            "routing": {"role": role, "agent_type": "mcp"},
+        },
+        timeout=120,
+    )
 
 
 async def get_embeddings(texts: list[str]) -> dict[str, Any]:
-    """Forward an embedding request to slot_embedding."""
-    url = _slot_url("embedding")
-    if not url:
-        return {"error": "No healthy embedding slot found"}
-
-    payload = {"input": texts, "model": "local-embed"}
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{url}/embeddings",
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=aiohttp.ClientTimeout(total=60),
-            ) as resp:
-                return await resp.json()
-    except aiohttp.ClientError as exc:
-        return {"error": str(exc)}
+    return await _router_request(
+        "POST",
+        "/v1/embeddings",
+        {"input": texts, "model": "embedding"},
+        timeout=60,
+    )
 
 
 async def fleet_status() -> dict[str, Any]:
-    """Return current status of all slots."""
-    fleet_result = await _fleet_manager_get("/fleet/status")
-    if fleet_result is not None:
-        return fleet_result
-
-    mgr = _get_manager()
-    try:
-        slots = await mgr.status()
-    except Exception as exc:
-        slots = {}
-        logger.warning("fleet_status async failed: %s", exc)
-
-    failover_info = {}
-    try:
-        failover_info = mgr.get_failover_status()
-    except Exception:
-        pass
-
-    return {
-        "slots": slots,
-        "failover": failover_info,
-        "backend": mgr.backend_type,
-    }
+    return await _router_request("GET", "/fleet/status")
 
 
 async def list_models() -> dict[str, Any]:
-    """Return safe model catalog details for MCP discovery."""
-    fleet_result = await _fleet_manager_get("/routing/models")
-    if fleet_result is not None:
-        return fleet_result
-    models = [_alias_model(alias, role) for alias, role in sorted(public_aliases().items())]
-    models.extend(candidate.public_dict() for candidate in build_slot_candidates(slot_configs().values()))
-    return {"models": models}
+    return await _router_request("GET", "/routing/models")
 
 
 async def model_card(model_id: str) -> dict[str, Any]:
-    """Return one model card by public id, slot id, or model id."""
     safe_id = str(model_id or "").strip()
     if not safe_id:
         return {"error": "model_id_required"}
-    fleet_result = await _fleet_manager_get(f"/routing/models/{safe_id}")
-    if fleet_result is not None:
-        return fleet_result
-    for alias, role in sorted(public_aliases().items()):
-        if safe_id in {alias, f"alias:{alias}"}:
-            return {"model": _alias_model(alias, role)}
-    for candidate in build_slot_candidates(slot_configs().values()):
-        if safe_id in {candidate.id, candidate.model_id, candidate.slot_id}:
-            return {"model": candidate.public_dict()}
-    return {"error": "model_not_found", "model_id": safe_id}
+    return await _router_request("GET", f"/routing/models/{quote(safe_id, safe='')}")
 
 
 async def providers_list() -> dict[str, Any]:
-    """Return backend/provider inventory for MCP discovery."""
-    fleet_result = await _fleet_manager_get("/backends")
-    if fleet_result is not None:
-        return fleet_result
-    mgr = _get_manager()
-    return {
-        "backends": [
-            {
-                "name": "local_fleet",
-                "type": "llama_cpp_fleet",
-                "backend": mgr.backend_type,
-                "serves_inference": True,
-            }
-        ]
-    }
+    return await _router_request("GET", "/backends")
 
 
 async def route_preview(
@@ -283,98 +112,48 @@ async def route_preview(
     routing_strategy: str = "balanced_local",
     local_only: bool = False,
 ) -> dict[str, Any]:
-    """Dry-run route preview through the HTTP Fleet Manager when available."""
-    payload = {
-        "agent_id": "mcp-router",
-        "agent_type": "mcp",
-        "role": role,
-        "task_type": task_type,
-        "requires_tools": requires_tools,
-        "requires_vision": requires_vision,
-        "requires_json_mode": requires_json_mode,
-        "estimated_tokens": estimated_tokens,
-        "routing_strategy": routing_strategy,
-        "local_only": local_only,
-    }
-    fleet_result = await _fleet_manager_post("/routing/request", payload, timeout=30)
-    if fleet_result is not None:
-        return fleet_result
-    mgr = _get_manager()
-    decision = await mgr.select_slot_with_failover_async(role)
-    return decision or {"error": "no_slot_available", "role": role}
+    return await _router_request(
+        "POST",
+        "/routing/request",
+        {
+            "agent_id": "mcp-router",
+            "agent_type": "mcp",
+            "role": role,
+            "task_type": task_type,
+            "requires_tools": requires_tools,
+            "requires_vision": requires_vision,
+            "requires_json_mode": requires_json_mode,
+            "estimated_tokens": estimated_tokens,
+            "routing_strategy": routing_strategy,
+            "local_only": local_only,
+        },
+    )
 
 
 async def start_slot(slot_id: str) -> dict[str, Any]:
-    if _fleet_manager_base_url():
-        return {
-            "ok": False,
-            "error": "Fleet Manager V1 is Docker-socket-free; start_slot belongs to a future fleet-node worker.",
-            "slot_id": slot_id,
-        }
-    return await _get_manager().start_slot(slot_id)
+    return await _router_request(
+        "POST", f"/fleet/slots/{quote(slot_id, safe='')}/start", {}
+    )
 
 
-async def stop_slot(slot_id: str) -> bool:
-    if _fleet_manager_base_url():
-        return False
-    return await _get_manager().stop_slot(slot_id)
+async def stop_slot(slot_id: str) -> dict[str, Any]:
+    return await _router_request(
+        "POST", f"/fleet/slots/{quote(slot_id, safe='')}/stop", {}
+    )
 
 
 async def start_fleet() -> dict[str, Any]:
-    if _fleet_manager_base_url():
-        return {
-            "ok": False,
-            "error": "Fleet Manager V1 is Docker-socket-free; start_fleet belongs to a future fleet-node worker.",
-        }
-    return await _get_manager().start_all()
+    return await _router_request("POST", "/fleet/start", {}, timeout=120)
 
 
-def slot_configs() -> dict[str, Any]:
-    """Return raw slot configs (for resource introspection)."""
-    mgr = _get_manager()
-    return getattr(mgr, "_slot_configs", {})
+async def slot_configs() -> dict[str, dict[str, Any]]:
+    slots = await _router_request("GET", "/slots")
+    rows = slots.get("data", slots) if isinstance(slots, dict) else []
+    if isinstance(rows, list):
+        return {str(row.get("id") or row.get("name")): row for row in rows if isinstance(row, dict)}
+    return {}
 
 
-def hardware_profile() -> dict[str, Any]:
-    """Return hardware info from config."""
-    mgr = _get_manager()
-    try:
-        import yaml  # noqa: PLC0415
-        with open(mgr.config_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-        return data.get("hardware", {})
-    except Exception:
-        return {}
-
-
-def _alias_model(alias: str, role: str) -> dict[str, Any]:
-    return {
-        "id": f"alias:{alias}",
-        "model_id": alias,
-        "source": "alias",
-        "role": role,
-        "backend_type": "router",
-        "slot_id": None,
-        "upstream_name": None,
-        "context_size": 0,
-        "health": "available",
-        "capabilities": {
-            "auto_route": alias == "auto",
-            "tools": role in {"chat", "utility", "scribe", "task-dependent"},
-            "vision": False,
-            "json_mode": role not in {"embed", "embedding"},
-        },
-        "hints": {"latency_ms": None, "quality": 0.0, "resource_cost": 0.0},
-        "metadata": {"kind": "alias", "maps_to_role": role},
-    }
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-def _decision_slot_id(role: str) -> str:
-    """Get the slot id used for the given role (for error marking)."""
-    mgr = _get_manager()
-    decision = mgr.select_slot_with_failover(role)
-    return decision.get("slot_id", f"slot_{role}") if decision else f"slot_{role}"
+async def hardware_profile() -> dict[str, Any]:
+    status = await fleet_status()
+    return status.get("compute") or {}

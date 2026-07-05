@@ -6,10 +6,6 @@ One adapter type (``openai_compatible``) covers all of them because they
 share the ``/v1`` surface; capability differences are declared per entry,
 not pretended away.
 
-``airllm`` is recognized as an *experimental, non-serving* type: it appears
-in ``GET /backends`` with honest capability reporting, but no inference is
-forwarded to it until a real adapter lands.
-
 Config lives in ``conf/upstreams.yaml`` next to the fleet YAML. API keys are
 referenced by environment-variable name (``api_key_env``), never stored in
 the file.
@@ -24,8 +20,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 TYPE_OPENAI_COMPATIBLE = "openai_compatible"
-TYPE_AIRLLM = "airllm"
-_KNOWN_TYPES = frozenset({TYPE_OPENAI_COMPATIBLE, TYPE_AIRLLM})
+_KNOWN_TYPES = frozenset({TYPE_OPENAI_COMPATIBLE})
 
 _SERVING_CAPABILITIES = ("chat", "models")
 
@@ -85,13 +80,10 @@ def _parse_entry(raw: Any) -> Optional[UpstreamConfig]:
 
     capabilities = raw.get("capabilities")
     if not isinstance(capabilities, list):
-        capabilities = list(_SERVING_CAPABILITIES) if type_ == TYPE_OPENAI_COMPATIBLE else []
+        capabilities = list(_SERVING_CAPABILITIES)
 
-    experimental = bool(raw.get("experimental", type_ == TYPE_AIRLLM))
+    experimental = bool(raw.get("experimental", False))
     enabled = bool(raw.get("enabled", False))
-    if type_ == TYPE_AIRLLM:
-        # AirLLM has no serving adapter yet — it may be listed but never serves.
-        capabilities = []
 
     return UpstreamConfig(
         name=name,

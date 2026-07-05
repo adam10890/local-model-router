@@ -28,12 +28,24 @@ if not exist ".venv\Scripts\python.exe" (
     exit /b 1
 )
 
-REM 1) Docker Model Runner - the planner backend (VibeThinker).
+REM 1) Docker Model Runner - primary chat (Ornith) + planner (VibeThinker).
 echo [1/3] Docker Model Runner...
-set "DMR_MODEL=hf.co/mradermacher/VibeThinker-3B-GGUF:Q8_0"
-docker desktop enable model-runner >nul 2>nul
-docker model pull "%DMR_MODEL%"
-".venv\Scripts\python.exe" -c "import urllib.request,json; d=json.dumps({'model':'%DMR_MODEL%','messages':[{'role':'user','content':'hi'}],'max_tokens':1}).encode(); urllib.request.urlopen(urllib.request.Request('http://localhost:12434/engines/v1/chat/completions',data=d,headers={'Content-Type':'application/json'}),timeout=120).read()" >nul 2>nul
+set "DMR_CHAT_MODEL=hf.co/deepreinforce-ai/Ornith-1.0-9B-GGUF:Q8_0"
+set "DMR_PLANNER_MODEL=hf.co/mradermacher/VibeThinker-3B-GGUF:Q8_0"
+docker info >nul 2>nul
+if errorlevel 1 (
+    echo   Docker Desktop is not running - starting it...
+    docker desktop start >nul 2>nul
+    powershell -NoProfile -Command "for($i=0;$i -lt 60;$i++){docker info *> $null;if($LASTEXITCODE -eq 0){exit 0};Start-Sleep 2};exit 1"
+)
+if errorlevel 1 (
+    echo   WARNING: Docker Desktop unavailable - skipping Docker Model Runner.
+) else (
+    docker desktop enable model-runner >nul 2>nul
+    docker model pull "%DMR_CHAT_MODEL%"
+    docker model pull "%DMR_PLANNER_MODEL%"
+    ".venv\Scripts\python.exe" -c "import urllib.request,json; d=json.dumps({'model':'huggingface.co/deepreinforce-ai/ornith-1.0-9b-gguf:Q8_0','messages':[{'role':'user','content':'hi'}],'max_tokens':1}).encode(); urllib.request.urlopen(urllib.request.Request('http://localhost:12434/engines/v1/chat/completions',data=d,headers={'Content-Type':'application/json'}),timeout=120).read()" >nul 2>nul
+)
 
 REM 2) iGPU worker (utility lane on the AMD Radeon via Vulkan), own window.
 echo [2/3] iGPU worker...

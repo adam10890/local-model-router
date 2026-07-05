@@ -210,28 +210,6 @@ def should_recover(state: SlotFailoverState) -> bool:
     return elapsed >= state.recovery_seconds
 
 
-def reset_state(state: SlotFailoverState) -> None:
-    """Reset *state* to its pre-failure defaults."""
-    state.current_slot = state.chain[0] if state.chain else ""
-    state.chain_index = 0 if state.chain else -1
-    state.failed_at = 0.0
-    state.last_failover_reason = ""
-
-
-def record_failover(state: SlotFailoverState, reason: str) -> None:
-    """Record a failover event in the state."""
-    state.failed_at = time.monotonic()
-    state.last_failover_reason = reason
-    state.failover_count += 1
-    next_slot = get_next_in_chain(state.current_slot, state.chain)
-    if next_slot:
-        state.current_slot = next_slot
-        try:
-            state.chain_index = state.chain.index(next_slot)
-        except ValueError:
-            state.chain_index = -1
-
-
 # ---------------------------------------------------------------------------
 # Default chains by role
 # ---------------------------------------------------------------------------
@@ -352,15 +330,3 @@ class CooldownTracker:
     def get_status(self, slot_id: str) -> Optional[Dict[str, Any]]:
         """Get cooldown status for a slot."""
         return self._error_slots.get(slot_id)
-
-
-# Global cooldown tracker instance
-_cooldown_tracker: Optional[CooldownTracker] = None
-
-
-def get_cooldown_tracker() -> CooldownTracker:
-    """Get the global cooldown tracker instance."""
-    global _cooldown_tracker
-    if _cooldown_tracker is None:
-        _cooldown_tracker = CooldownTracker()
-    return _cooldown_tracker

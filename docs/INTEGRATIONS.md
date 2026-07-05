@@ -63,8 +63,8 @@ Utility: http://host.docker.internal:9000/harnesses/agent_zero/utility/v1
 Model:   local
 ```
 
-Keep Agent Zero's embedding provider unchanged until the router exposes an
-embeddings endpoint.
+Agent Zero may use the generic router embedding endpoint at
+`http://host.docker.internal:9000/v1/embeddings` with model `embedding`.
 
 ## Claude Code local mode (optional)
 
@@ -89,6 +89,9 @@ Run the MCP server:
 ```powershell
 python -m local_model_router mcp
 ```
+
+Set `A0_LMM_ROUTER_BASE_URL` when the router is not at
+`http://127.0.0.1:9000`; MCP reuses `A0_LMM_ROUTER_API_KEY` for bearer auth.
 
 Example MCP client entry:
 

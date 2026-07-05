@@ -10,8 +10,6 @@ Design principles:
   - Unknown agent_type / task_type values are accepted; they produce warnings
     rather than hard failures so new agents can integrate without schema updates.
   - Privacy flags are enforced as hard policy before routing.
-  - Cloud routing is acknowledged but not implemented; the response says so
-    explicitly rather than silently pretending.
   - All capability gaps (long context, tools, code) are surfaced as warnings.
   - response.dry_run is always True in this phase.
 """
@@ -46,7 +44,7 @@ _KNOWN_TASK_TYPES = frozenset({
 })
 
 _KNOWN_PRIVACY_MODES = frozenset({
-    "local_only", "prefer_local", "cloud_allowed", "cloud_preferred", "unknown",
+    "local_only", "prefer_local", "unknown",
 })
 
 _KNOWN_PREFERENCES = frozenset({"fast", "normal", "quality"})
@@ -97,9 +95,8 @@ class RoutingIntentRequest(BaseModel):
     role:      Optional[str] = None   # chat | utility | embed; inferred if absent
     task_type: str = "chat"
 
-    privacy_mode:  str = "unknown"    # local_only | prefer_local | cloud_allowed | …
+    privacy_mode:  str = "unknown"    # local_only | prefer_local | unknown
     local_only:    bool = False
-    cloud_allowed: bool = True
 
     requires_long_context:    bool = False
     requires_tools:           bool = False
@@ -162,7 +159,6 @@ class RoutingDecisionResponse(BaseModel):
 
     # Policy flags
     local_only_enforced: bool
-    cloud_allowed:       bool
     no_slot_available:   bool
     fallback_used:       bool
 
@@ -213,19 +209,6 @@ class RoutingIntentHandler:
 
         # ── 3. Privacy policy ──────────────────────────────────────────────
         local_only_enforced = req.local_only or req.privacy_mode == "local_only"
-        # Effective cloud_allowed: False when local-only is enforced.
-        effective_cloud_allowed = req.cloud_allowed and not local_only_enforced
-
-        # Warn about cloud routing — this system is local llama.cpp only.
-        if req.privacy_mode in ("cloud_preferred", "cloud_allowed") or (
-            req.cloud_allowed and not local_only_enforced
-        ):
-            warnings.append(
-                "cloud_routing_not_implemented: "
-                "all routing is local llama.cpp only; "
-                "cloud_allowed flag is noted but no cloud provider is configured"
-            )
-
         # ── 4. Capability warnings ─────────────────────────────────────────
         if req.requires_long_context:
             warnings.append(
@@ -276,7 +259,6 @@ class RoutingIntentHandler:
                 score_inputs={},
                 ranked_candidates=[],
                 local_only_enforced=local_only_enforced,
-                cloud_allowed=effective_cloud_allowed,
                 no_slot_available=True,
                 fallback_used=False,
                 reason_codes=reason_codes + ["manager_init_failed"],
@@ -343,7 +325,6 @@ class RoutingIntentHandler:
                 score_inputs=selected_rank.score_inputs if selected_rank else {},
                 ranked_candidates=ranked_public,
                 local_only_enforced=local_only_enforced,
-                cloud_allowed=effective_cloud_allowed,
                 no_slot_available=True,
                 fallback_used=False,
                 reason_codes=reason_codes,
@@ -409,7 +390,6 @@ class RoutingIntentHandler:
             score_inputs=selected_rank.score_inputs if selected_rank else {},
             ranked_candidates=ranked_public,
             local_only_enforced=local_only_enforced,
-            cloud_allowed=effective_cloud_allowed,
             no_slot_available=False,
             fallback_used=fallback_used,
             reason_codes=reason_codes,

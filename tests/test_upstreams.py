@@ -72,7 +72,7 @@ def _make_app(tmp_path, monkeypatch, fetch=None):
 def test_load_upstreams_parses_and_filters(tmp_path):
     upstreams = load_upstreams(_write(tmp_path, "upstreams.yaml", _UPSTREAMS))
     names = [u.name for u in upstreams]
-    assert names == ["ollama", "vllm", "airllm"]  # unknown type dropped
+    assert names == ["ollama", "vllm"]  # non-serving and unknown types dropped
 
     ollama = upstreams[0]
     assert ollama.serves_inference is True
@@ -81,10 +81,6 @@ def test_load_upstreams_parses_and_filters(tmp_path):
     vllm = upstreams[1]
     assert vllm.serves_inference is False  # disabled
 
-    airllm = upstreams[2]
-    assert airllm.experimental is True
-    assert airllm.serves_inference is False  # never serves without an adapter
-    assert airllm.capabilities == ()
 
 
 def test_load_upstreams_missing_file_yields_empty(tmp_path):
@@ -116,7 +112,7 @@ def test_match_upstream_model(tmp_path):
     assert match[1] == "llama3.3:70b"
 
     assert match_upstream_model("vllm/some-model", upstreams) is None  # disabled
-    assert match_upstream_model("airllm/huge-model", upstreams) is None  # non-serving
+    assert match_upstream_model("airllm/huge-model", upstreams) is None
     assert match_upstream_model("chat", upstreams) is None
     assert match_upstream_model(None, upstreams) is None
 
@@ -134,8 +130,7 @@ def test_backends_endpoint_lists_fleet_and_upstreams(tmp_path, monkeypatch):
     assert by_name["local_fleet"]["type"] == "llama_cpp_fleet"
     assert by_name["local_fleet"]["slots"][0]["id"] == "slot_router"
     assert by_name["ollama"]["serves_inference"] is True
-    assert by_name["airllm"]["experimental"] is True
-    assert by_name["airllm"]["serves_inference"] is False
+    assert "airllm" not in by_name
 
 
 def test_v1_models_includes_namespaced_upstream_models(tmp_path, monkeypatch):

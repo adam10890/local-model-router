@@ -256,8 +256,8 @@ class SubprocessBackend(InferenceBackend):
             # Pre-load default model (set via dashboard)
             default_alias = config.get("router_default_model", "")
             if default_alias and preset:
-                from local_model_router.helpers.llama_cpp_manager import LlamaCppManager  # noqa: PLC0415
-                path = LlamaCppManager._resolve_preset_alias(
+                from local_model_router.helpers.llama_cpp_manager import resolve_preset_alias  # noqa: PLC0415
+                path = resolve_preset_alias(
                     preset if not use_wsl else self._convert_wsl_path(preset),
                     default_alias,
                     rdir,

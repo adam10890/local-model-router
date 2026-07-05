@@ -225,7 +225,6 @@ def _intent_from_chat_body(
         "task_type": _pick_routing_value(body, routing, metadata, "task_type", "chat"),
         "privacy_mode": _pick_routing_value(body, routing, metadata, "privacy_mode", "unknown"),
         "local_only": _pick_routing_value(body, routing, metadata, "local_only", False),
-        "cloud_allowed": _pick_routing_value(body, routing, metadata, "cloud_allowed", True),
         "requires_long_context": _pick_routing_value(
             body, routing, metadata, "requires_long_context", needs.requires_long_context
         ),
@@ -1085,6 +1084,66 @@ def create_app(
         result = await intent_handler.handle(intent)
         return JSONResponse(result.model_dump())
 
+    async def embeddings(request: Request) -> Response:
+        try:
+            body = await request.json()
+        except Exception:
+            return _openai_error("request body is not valid JSON", "invalid_json", 400)
+        if not isinstance(body, dict):
+            return _openai_error("request body must be a JSON object", "invalid_request_body", 400)
+        if "input" not in body:
+            return _openai_error("missing required field: input", "missing_input", 400, param="input")
+
+        routing = _dict_or_empty(body.get("routing"))
+        routing.update({"role": "embed", "task_type": "embedding"})
+        body["routing"] = routing
+        try:
+            agent = identity_from_headers(request.headers, body)
+            intent = _intent_from_chat_body(body, agent, requested_model=str(body.get("model") or "embedding"))
+            decision = await intent_handler.handle(intent)
+        except Exception as exc:
+            return _openai_error(
+                f"embedding routing failed: {type(exc).__name__}: {exc}",
+                "routing_error",
+                500,
+                error_type="server_error",
+            )
+        if decision.no_slot_available or not decision.selected_url:
+            return _openai_error(
+                "no healthy local embedding slot is available",
+                "no_slot_available",
+                503,
+                error_type="server_error",
+                extra={"routing": decision.model_dump()},
+            )
+
+        payload = {key: value for key, value in body.items() if key not in _ROUTING_ONLY_KEYS}
+        payload.pop("stream", None)
+        payload["model"] = _forward_model_for(body, "embedding", decision.selected_model) or "local"
+        url = decision.selected_url.rstrip("/") + "/embeddings"
+        headers = {
+            "x-a0-router-slot-id": decision.selected_slot_id or "",
+            "x-a0-router-model": decision.selected_model or "",
+            "x-a0-router-strategy": decision.routing_strategy,
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=aiohttp.ClientTimeout(total=_FORWARD_TIMEOUT_SECONDS),
+                ) as response:
+                    data = await response.json(content_type=None)
+                    return JSONResponse(data, status_code=response.status, headers=headers)
+        except aiohttp.ClientError as exc:
+            return _openai_error(
+                f"could not reach embedding slot: {exc}",
+                "upstream_unreachable",
+                502,
+                error_type="server_error",
+            )
+
     async def chat_completions(request: Request) -> Response:
         try:
             body = await request.json()
@@ -1589,6 +1648,7 @@ def create_app(
         Route("/ui", dashboard_page),
         Route("/v1/models", protected(v1_models)),
         Route("/v1/chat/completions", protected(chat_completions), methods=["POST"]),
+        Route("/v1/embeddings", protected(embeddings), methods=["POST"]),
     ]
 
     return Starlette(routes=routes)

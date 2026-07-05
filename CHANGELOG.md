@@ -4,6 +4,29 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-05
+
+### Added
+
+- OpenAI-compatible `POST /v1/embeddings`, routed through the same local slot
+  selection used by chat and exposed through MCP.
+
+### Changed
+
+- MCP now acts only as an authenticated HTTP client of the router instead of
+  constructing a second backend manager and routing path.
+- Harness setup and connection guides now live as expandable rows inside the
+  Harnesses dashboard tab.
+- Standalone config lookup now uses an explicit safe override or repository
+  config, without inherited Agent Zero container paths.
+- Removed unused legacy manager, token-budget/VRAM estimates, JSON request
+  accounting, no-op cloud policy, and non-serving AirLLM registration.
+
+### Fixed
+
+- `START.bat` waits for Docker Desktop when available and degrades cleanly when
+  it is not, while configuring Ornith as the primary Docker Model Runner model.
+
 ## [0.4.0] - 2026-07-03
 
 ### Added

@@ -116,8 +116,8 @@ A0_LMM_ROUTER_CONFIG=conf/llama_cpp_servers.yaml
 A0_LMM_ROUTER_API_KEY=change-me
 A0_FLEET_MAX_ACTIVE=1
 A0_FLEET_MAX_QUEUE=32
-# For MCP clients that should call this service instead of BackendManager:
-# A0_FLEET_MANAGER_BASE_URL=http://127.0.0.1:9000
+# Router address used by the MCP bridge:
+A0_LMM_ROUTER_BASE_URL=http://127.0.0.1:9000
 ```
 
 ## Dependency Map
@@ -130,7 +130,7 @@ remain in the `[docker]` and `[mcp]` extras.
 
 ## Update Guide
 
-1. Pull or copy the updated plugin files.
+1. Pull the updated standalone router files.
 2. Re-run `scripts/run_provider.ps1 -InstallDeps` or
    `scripts/run_provider.sh --install-deps` to refresh Python dependencies.
 3. Keep `conf/llama_cpp_servers.yaml` outside automated overwrites if it
