@@ -69,9 +69,7 @@ Invoke-SmokeRequest `
         agent_type = "smoke"
         role = "chat"
         task_type = "smoke"
-        privacy_mode = "local"
         local_only = $true
-        cloud_allowed = $false
     }
 
 Invoke-SmokeRequest `

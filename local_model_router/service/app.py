@@ -619,10 +619,10 @@ def create_app(
         listing = await list_models(observer, fetch=models_fetch)
         fetch_fn = models_fetch or _models_default_fetch
         existing_ids = {row["id"] for row in listing["data"]}
-        for upstream in upstreams:
-            if not upstream.serves_inference:
-                continue
-            rows = await fetch_fn(upstream.base_url) or []
+        serving_upstreams = [upstream for upstream in upstreams if upstream.serves_inference]
+        fetched = await asyncio.gather(*(fetch_fn(upstream.base_url) for upstream in serving_upstreams))
+        for upstream, rows in zip(serving_upstreams, fetched):
+            rows = rows or []
             for row in rows:
                 if not isinstance(row, dict):
                     continue

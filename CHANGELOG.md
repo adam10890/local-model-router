@@ -10,6 +10,9 @@ All notable changes to this project are documented here.
 
 - OpenAI-compatible `POST /v1/embeddings`, routed through the same local slot
   selection used by chat and exposed through MCP.
+- A stdlib-only harness smoke command that verifies `/models` and a short
+  completion for every configured dedicated connection.
+- A minimal GitHub Actions gate for compilation and the hermetic test suite.
 
 ### Changed
 
@@ -26,6 +29,10 @@ All notable changes to this project are documented here.
 
 - `START.bat` waits for Docker Desktop when available and degrades cleanly when
   it is not, while configuring Ornith as the primary Docker Model Runner model.
+- `GET /v1/models` now probes local slots and serving upstreams concurrently,
+  so unavailable targets consume one timeout window instead of accumulating.
+- The development extra now installs `httpx` rather than the unrelated
+  `httpx2` package, and provider smoke payloads omit removed routing fields.
 
 ## [0.4.0] - 2026-07-03
 

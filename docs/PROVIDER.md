@@ -68,6 +68,7 @@ Smoke test:
 
 ```powershell
 .\scripts\smoke_provider.ps1 -ApiKey "change-me"
+python .\scripts\smoke_harnesses.py --api-key "change-me"
 ```
 
 ## WSL Or Linux Server
@@ -92,7 +93,12 @@ Smoke test:
 
 ```bash
 ./scripts/smoke_provider.sh --api-key "change-me"
+python scripts/smoke_harnesses.py --api-key "change-me"
 ```
+
+The harness smoke checks `/models` and one short completion for every
+configured dedicated connection. It fails when a pinned model is unavailable,
+so run it only when the configured harness fleet is expected to be online.
 
 ## Public Bind Safety
 

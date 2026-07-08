@@ -118,7 +118,8 @@ Copy-Item conf\llama_cpp_servers.example.yaml conf\llama_cpp_servers.yaml
 
 Or use the wrapper scripts: `scripts\run_provider.ps1` (Windows),
 `scripts/run_provider.sh` (WSL/Linux), plus `smoke_provider.*` for a
-post-start check.
+post-start check and `scripts/smoke_harnesses.py` to verify every configured
+dedicated harness connection.
 
 ## Calling it from the OpenAI SDK
 
@@ -221,6 +222,9 @@ Vercel AI SDK style setup snippets.
 ```powershell
 .venv\Scripts\python -m pytest tests/ -q     # full suite
 ```
+
+Pull requests and pushes to `main` run the same hermetic suite in GitHub
+Actions; no fleet, GPU, Docker daemon, or network is required.
 
 See `CONTRIBUTING.md` and `docs/development/git-workflow.md` for branch
 naming, merge, cleanup, and agent handoff rules.

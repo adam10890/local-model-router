@@ -1,6 +1,7 @@
 """Tests for upstream backend adapters: registry, listing, and forwarding."""
 from __future__ import annotations
 
+import asyncio
 import sys
 import textwrap
 from pathlib import Path
@@ -150,6 +151,32 @@ def test_v1_models_includes_namespaced_upstream_models(tmp_path, monkeypatch):
     assert by_id["ollama/llama3.3:70b"]["capabilities"]["json_mode"] is True
     # disabled vllm and non-serving airllm contribute nothing
     assert not any(i.startswith("vllm/") or i.startswith("airllm/") for i in ids)
+
+
+def test_v1_models_probes_serving_upstreams_concurrently(tmp_path, monkeypatch):
+    active = 0
+    max_active = 0
+
+    async def fetch(base_url: str):
+        nonlocal active, max_active
+        if base_url.endswith(":8080/v1"):
+            return []
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return []
+
+    upstreams = _UPSTREAMS.replace("enabled: false", "enabled: true", 1)
+    client = TestClient(create_app(
+        _write(tmp_path, "llama_cpp_servers.yaml", _FLEET_CONFIG),
+        models_fetch=fetch,
+        upstreams_path=_write(tmp_path, "upstreams.yaml", upstreams),
+        apps_path=str(tmp_path / "missing-apps.yaml"),
+    ))
+
+    assert client.get("/v1/models").status_code == 200
+    assert max_active == 2
 
 
 def test_chat_completions_forwards_to_matching_upstream(tmp_path, monkeypatch):
