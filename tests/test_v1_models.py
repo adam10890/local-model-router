@@ -1,6 +1,7 @@
 """Tests for GET /v1/models aggregation."""
 from __future__ import annotations
 
+import asyncio
 import sys
 import textwrap
 from pathlib import Path
@@ -12,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from local_model_router.service.app import create_app  # noqa: E402
+from local_model_router.service.models_listing import list_models  # noqa: E402
 
 _CONFIG = textwrap.dedent("""
     active_slots:
@@ -108,3 +110,27 @@ def test_v1_models_requires_key_when_configured(tmp_path, monkeypatch):
     assert client.get("/v1/models").status_code == 401
     ok = client.get("/v1/models", headers={"Authorization": "Bearer sekret"})
     assert ok.status_code == 200
+
+
+def test_model_listing_probes_slots_concurrently():
+    class Observer:
+        def get_slots(self):
+            return [
+                {"id": "one", "enabled": True, "base_url": "http://one/v1"},
+                {"id": "two", "enabled": True, "base_url": "http://two/v1"},
+            ]
+
+    active = 0
+    max_active = 0
+
+    async def slow_fetch(base_url):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return []
+
+    asyncio.run(list_models(Observer(), fetch=slow_fetch))
+
+    assert max_active == 2

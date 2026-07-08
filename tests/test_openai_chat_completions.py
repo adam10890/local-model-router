@@ -33,6 +33,13 @@ active_slots:
     enabled: true
     model_id: utility-model
     context_size: 32768
+  - id: embedding
+    port: 8082
+    host: localhost
+    role: embed
+    enabled: true
+    model_id: embedding-model
+    context_size: 8192
 global:
   backend: remote
 """
@@ -161,6 +168,28 @@ def test_chat_completions_forwards_to_selected_chat_slot(tmp_path, monkeypatch):
     # verbatim so Router Mode fleets can serve the exact requested model.
     assert calls[0]["kwargs"]["json"]["model"] == "local-chat"
     assert calls[0]["kwargs"]["json"]["messages"][0]["content"] == "hello"
+    manager_cls._instance = None
+
+
+def test_embeddings_forwards_through_router_selected_slot(tmp_path, monkeypatch):
+    client, manager_cls = _client(tmp_path, monkeypatch, health_ok=True)
+    calls = _patch_forward(
+        monkeypatch,
+        payload={"object": "list", "data": [{"embedding": [0.1, 0.2], "index": 0}]},
+    )
+
+    response = client.post(
+        "/v1/embeddings",
+        json={"model": "embedding", "input": ["hello"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"][0]["embedding"] == [0.1, 0.2]
+    assert calls[0]["args"][0] == "http://localhost:8082/v1/embeddings"
+    assert calls[0]["kwargs"]["json"] == {
+        "model": "embedding-model",
+        "input": ["hello"],
+    }
     manager_cls._instance = None
 
 

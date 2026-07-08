@@ -33,3 +33,11 @@ def test_unsafe_env_config_is_ignored(tmp_path, monkeypatch):
 
     assert resolved.name == "llama_cpp_servers.yaml"
     assert resolved != unsafe.resolve()
+
+
+def test_standard_candidates_only_use_repository_config():
+    from local_model_router.helpers.conf_resolver import plugin_root, standard_conf_candidates
+
+    assert standard_conf_candidates(__file__) == [
+        (plugin_root(__file__) / "conf" / "llama_cpp_servers.yaml").resolve()
+    ]

@@ -12,6 +12,7 @@ The fetch function is injectable so tests stay hermetic.
 """
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -64,9 +65,10 @@ async def list_models(observer: Any, fetch: Optional[FetchFn] = None) -> Dict[st
     created = int(time.time())
     entries: List[Dict[str, Any]] = []
     by_id: Dict[str, Dict[str, Any]] = {}
+    slots = observer.get_slots()
     catalog_by_slot = {
         candidate.slot_id: candidate.public_dict()
-        for candidate in build_slot_candidates(observer.get_slots())
+        for candidate in build_slot_candidates(slots)
         if candidate.slot_id
     }
 
@@ -86,10 +88,10 @@ async def list_models(observer: Any, fetch: Optional[FetchFn] = None) -> Dict[st
         entries.append(entry)
         by_id[alias] = entry
 
-    for slot in observer.get_slots():
-        if not slot.get("enabled") or not slot.get("base_url"):
-            continue
-        rows = await fetch_fn(slot["base_url"]) or []
+    live_slots = [slot for slot in slots if slot.get("enabled") and slot.get("base_url")]
+    fetched = await asyncio.gather(*(fetch_fn(slot["base_url"]) for slot in live_slots))
+    for slot, rows in zip(live_slots, fetched):
+        rows = rows or []
         for row in rows:
             if not isinstance(row, dict):
                 continue

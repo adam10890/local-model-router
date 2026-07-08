@@ -18,9 +18,8 @@ codebase.
 - `local_model_router/helpers/` — config resolution, context planning, slot
   orchestration, failover, health.
 - `local_model_router/routing/` — model aliases and routing policy.
-- `local_model_router/upstreams/` — upstream backend adapters
-  (`openai_compatible` covers Ollama/vLLM/LocalAI/LM Studio; `airllm` is
-  recognized but experimental and non-serving). Keys via env only.
+- `local_model_router/upstreams/` — OpenAI-compatible upstream adapters for
+  Ollama/vLLM/LocalAI/LM Studio. Keys via env only.
 - `local_model_router/apps/` — app/client profiles (`conf/apps.yaml`):
   default model, allowed models, auto-route policy per `X-App-Id`.
 - `local_model_router/harnesses/` — dedicated harness identities, pinned model
@@ -79,8 +78,8 @@ codebase.
   routing strategies, analytics, MCP discovery, Compare / Routing dashboard,
   and integration snippets inspired by OrcaRouter patterns without vendor
   code or cloud BYOK scope.
-  Future: per-app API keys, rate limits, `/v1/embeddings` passthrough,
-  `/metrics`, `/routing/history`, AirLLM serving adapter, upstream-aware
+  (9) ✅ router-backed `POST /v1/embeddings` and HTTP-only MCP bridge.
+  Future: per-app API keys, rate limits, `/metrics`, `/routing/history`, upstream-aware
   auto-routing, one-click "apply recommendation" (cookbook → fleet
   control).
 - Renaming modules toward a layered layout (`api/`, `routing/`, `backends/`,

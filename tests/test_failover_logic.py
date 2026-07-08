@@ -15,6 +15,14 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 
+def test_failover_module_has_no_unused_global_state_helpers():
+    from local_model_router.helpers.smart_router import failover
+
+    assert not hasattr(failover, "reset_state")
+    assert not hasattr(failover, "record_failover")
+    assert not hasattr(failover, "get_cooldown_tracker")
+
+
 # ---------------------------------------------------------------------------
 # classify_failover_reason
 # ---------------------------------------------------------------------------

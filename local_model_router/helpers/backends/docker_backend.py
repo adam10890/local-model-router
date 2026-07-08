@@ -407,8 +407,8 @@ class DockerBackend(InferenceBackend):
             # Pre-load default model to avoid first-request swap latency
             default_alias = config.get("router_default_model", "")
             if default_alias and preset:
-                from local_model_router.helpers.llama_cpp_manager import LlamaCppManager  # noqa: PLC0415
-                path = LlamaCppManager._resolve_preset_alias(preset, default_alias, rdir)
+                from local_model_router.helpers.llama_cpp_manager import resolve_preset_alias  # noqa: PLC0415
+                path = resolve_preset_alias(preset, default_alias, rdir)
                 if path:
                     cmd.extend(["--model", path])
         else:

@@ -72,9 +72,7 @@ request "routing request" POST "/routing/request" '{
   "agent_type": "smoke",
   "role": "chat",
   "task_type": "smoke",
-  "privacy_mode": "local",
-  "local_only": true,
-  "cloud_allowed": false
+  "local_only": true
 }' "200"
 
 request "chat completions" POST "/v1/chat/completions" '{

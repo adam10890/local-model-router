@@ -44,6 +44,14 @@
          border-radius:0; padding:.45rem .9rem; font-weight:600; }
   .tab.active { color:var(--text); border-bottom-color:var(--accent); }
   .snippet-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:.4rem; }
+  .harness-stack { display:grid; gap:.75rem; }
+  .harness-row { background:var(--card); border:1px solid var(--line); border-radius:10px; }
+  .harness-row summary { cursor:pointer; padding:.75rem 1rem; }
+  .harness-row[open] summary { border-bottom:1px solid var(--line); }
+  .harness-summary { display:inline-flex; justify-content:space-between; align-items:center;
+                     gap:1rem; width:calc(100% - 1.25rem); margin-left:.35rem; }
+  .harness-body { padding:.75rem 1rem 1rem; }
+  .harness-meta { display:flex; gap:.8rem; align-items:center; font-size:.76rem; }
   .reasons { font-size:.76rem; color:var(--dim); padding:.3rem .4rem .5rem; }
 </style>
 </head>
@@ -267,8 +275,8 @@
 
 <!-- ORCHESTRATION -->
 <!-- ════════════════════ HARNESSES ════════════════════ -->
-<div class="grid" x-show="tab==='harnesses'" x-cloak>
-  <div class="card" style="grid-column:1/-1">
+<div class="harness-stack" data-dashboard-section="harnesses" x-show="tab==='harnesses'" x-cloak>
+  <div class="card">
     <h2>Dedicated harness connections</h2>
     <p style="margin:.2rem 0">
       A harness is a client runtime. Each connection below has its own URL and one
@@ -278,11 +286,17 @@
   </div>
 
   <template x-for="harness in harnesses" :key="harness.harness_id">
-    <div class="card">
-      <h2 style="display:flex; justify-content:space-between; align-items:center;">
-        <span x-text="harness.display_name"></span>
-        <span class="dim" x-text="harness.kind + ' · ' + harness.location"></span>
-      </h2>
+    <details class="harness-row" :data-harness-id="harness.harness_id">
+      <summary>
+        <span class="harness-summary">
+          <strong x-text="harness.display_name"></strong>
+          <span class="harness-meta dim">
+            <span x-text="harness.connections.length + (harness.connections.length === 1 ? ' connection' : ' connections')"></span>
+            <span x-text="harness.kind + ' · ' + harness.location"></span>
+          </span>
+        </span>
+      </summary>
+      <div class="harness-body">
       <template x-for="connection in harness.connections" :key="connection.name">
         <div style="border-top:1px solid var(--line); padding:.6rem 0">
           <div class="row"><span class="dim">connection</span><strong x-text="connection.name"></strong></div>
@@ -308,16 +322,18 @@
         </button>
       </div>
       <pre x-text="harness.setup.content"></pre>
-    </div>
+      </div>
+    </details>
   </template>
 
   <div class="card" x-show="!harnesses.length">
     <div class="dim">No harnesses configured in <code>conf/harnesses.yaml</code>.</div>
   </div>
 
-  <div class="card" style="grid-column:1/-1">
-    <h2>Add harness</h2>
-    <div class="grid">
+  <details class="harness-row" data-dashboard-panel="add-harness">
+    <summary><span class="harness-summary"><strong>Add harness</strong><span class="dim">guided setup</span></span></summary>
+    <div class="harness-body">
+      <div class="grid">
       <label>Harness ID<input x-model="newHarness.harness_id" placeholder="my_harness"></label>
       <label>Display name<input x-model="newHarness.display_name" placeholder="My Harness"></label>
       <label>Template
@@ -336,24 +352,51 @@
         <input x-model="newHarness.utility_model" placeholder="utility_cpu">
       </label>
     </div>
-    <div style="display:flex; gap:.5rem; margin-top:.7rem">
-      <button @click="previewHarness()">Generate setup</button>
-      <button class="btn-ghost" @click="saveHarness()" :disabled="!harnessMeta.config_writes_enabled">Save</button>
+      <div style="display:flex; gap:.5rem; margin-top:.7rem">
+        <button @click="previewHarness()">Generate setup</button>
+        <button class="btn-ghost" @click="saveHarness()" :disabled="!harnessMeta.config_writes_enabled">Save</button>
+      </div>
+      <div class="dim" x-show="!harnessMeta.config_writes_enabled" style="margin-top:.5rem">
+        Preview only. Saving requires an API key and A0_LMM_ROUTER_ENABLE_CONFIG_WRITES=1.
+      </div>
+      <div class="dim" x-text="harnessMessage" style="margin-top:.5rem"></div>
+      <pre x-show="harnessPreview" x-text="harnessPreview"></pre>
     </div>
-    <div class="dim" x-show="!harnessMeta.config_writes_enabled" style="margin-top:.5rem">
-      Preview only. Saving requires an API key and A0_LMM_ROUTER_ENABLE_CONFIG_WRITES=1.
-    </div>
-    <div class="dim" x-text="harnessMessage" style="margin-top:.5rem"></div>
-    <pre x-show="harnessPreview" x-text="harnessPreview"></pre>
-  </div>
+  </details>
 
-  <div class="card" style="grid-column:1/-1">
-    <h2>Generic API (advanced)</h2>
-    <p class="dim">Unregistered tools can still use <code>/v1</code> with aliases and automatic routing.</p>
-    <template x-for="s in snippets" :key="s.id">
-      <details><summary x-text="s.title"></summary><pre x-text="snippetText(s.id)"></pre></details>
-    </template>
-  </div>
+  <details class="harness-row" data-dashboard-panel="generic-api">
+    <summary><span class="harness-summary"><strong>Generic API (advanced)</strong><span class="dim">Connection guides</span></span></summary>
+    <div class="harness-body">
+      <p style="margin:.2rem 0 .6rem">
+      Point any OpenAI-compatible tool at this base URL. Send an alias as the
+      model name (<code>auto</code>, <code>chat</code>, <code>coder</code>,
+      <code>fast</code>, <code>deep</code>, <code>embedding</code>) and the
+      router picks the slot; any other model id passes through verbatim.
+      If no API key is configured, any key value (e.g. <code>local</code>) works.
+    </p>
+      <div class="row"><span class="dim">from this machine</span>
+        <strong x-text="base + '/v1'"></strong></div>
+      <div class="row"><span class="dim">from inside Docker (Agent Zero, Open WebUI…)</span>
+        <strong x-text="dockerBase + '/v1'"></strong></div>
+      <div class="row"><span class="dim">identify your client (optional, enables per-app policy)</span>
+        <strong>X-App-Id: &lt;name&gt;</strong></div>
+      <template x-for="s in snippets" :key="s.id">
+        <details class="harness-row" :data-guide-id="s.id" style="margin-top:.6rem">
+          <summary>
+            <span class="harness-summary"><strong x-text="s.title"></strong><span class="dim">setup</span></span>
+          </summary>
+          <div class="harness-body">
+            <div class="snippet-head">
+              <span class="dim">OpenAI-compatible connection</span>
+              <button class="btn-sm btn-ghost" @click="copy(s.id)"
+                      x-text="copied === s.id ? 'copied!' : 'copy'"></button>
+            </div>
+            <pre x-text="snippetText(s.id)"></pre>
+          </div>
+        </details>
+      </template>
+      </div>
+  </details>
 </div>
 
 <div class="grid" x-show="tab==='orchestration'" x-cloak>

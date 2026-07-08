@@ -8,8 +8,6 @@ fleet management (status, start/stop, assign model), and model discovery.
 
 from __future__ import annotations
 
-import asyncio
-import json
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -127,18 +125,17 @@ def register_tools(mcp: FastMCP, allow_mutating_tools: bool = False) -> None:
 
             Returns True on success, False on failure.
             """
-            ok = await bridge.stop_slot(slot_id)
-            return {"stopped": ok, "slot_id": slot_id}
+            return await bridge.stop_slot(slot_id)
 
     # ── Model discovery ────────────────────────────────────────────────────
 
     @mcp.tool()
-    def list_slots() -> dict:
+    async def list_slots() -> dict:
         """List all configured slots with their role, port, and model_id.
 
         Does not require slots to be running.
         """
-        configs = bridge.slot_configs()
+        configs = await bridge.slot_configs()
         result = {}
         for name, cfg in configs.items():
             result[name] = {

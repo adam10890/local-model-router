@@ -29,7 +29,7 @@ Agent Zero is client #1, not the owner.
 
 ## Status
 
-**0.4.0 - Dedicated harness connections.** What works today:
+**0.5.0 - One router path, smaller core.** What works today:
 
 | Surface | Endpoint | Notes |
 |---|---|---|
@@ -39,7 +39,7 @@ Agent Zero is client #1, not the owner.
 | Routing preview | `GET /routing/preview` | which slot a role would get |
 | Routing catalog | `GET /routing/models`, `GET /routing/models/{id}`, `GET /routing/analytics` | safe model cards, recent decisions, latency/fallback/cache stats |
 | Agent orchestration | `POST /orchestrator/plans`, `GET /orchestrator/plans`, `GET /orchestrator/summary`, `GET /orchestrator/instances`, `POST /orchestrator/instances/{id}`, `POST /orchestrator/tickets/{id}/submit` | observe-first plan/ticket packets, sub-agent instance heartbeats, DOX reports, artifacts, wake markers |
-| OpenAI-compatible | `GET /v1/models`, `POST /v1/chat/completions` | aliases + live/upstream models; capabilities metadata; streaming + non-streaming forwarding |
+| OpenAI-compatible | `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/embeddings` | aliases + live/upstream models; chat streaming and local embedding forwarding |
 | Harnesses | `GET /harnesses`, `GET /harnesses/{id}`, dedicated `.../v1/models` + `.../v1/chat/completions` | one authoritative model per connection; Agent Zero has chat + utility |
 | Fleet Manager | `GET /fleet/status`, `GET /fleet/agents`, `POST /fleet/agents/register` | agent identity, bounded queueing, SQLite + cached GPU/CPU/RAM telemetry |
 | Fleet control (opt-in) | `POST /fleet/start`, `POST /fleet/stop`, `POST /fleet/slots/{id}/start` + `/stop` | start/stop slots; off unless `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1` |
@@ -61,8 +61,7 @@ router picks the slot and model. Send any other model id and it passes through
 verbatim to the selected slot (Router Mode fleets can hot-swap to it). Send
 `<upstream>/<model>` (e.g. `ollama/llama3.3:70b`) to target an upstream
 backend configured in `conf/upstreams.yaml` — one `openai_compatible`
-adapter covers Ollama, vLLM, LocalAI, and LM Studio. AirLLM is recognized as
-an experimental, non-serving entry.
+adapter covers Ollama, vLLM, LocalAI, and LM Studio.
 
 **Routing strategies:** `auto` uses the local catalog to rank slots by
 capabilities (`tools`, vision payloads, JSON mode, context size), health,
@@ -94,8 +93,8 @@ does not run Docker.
 
 **CLI:** `python -m local_model_router [serve|doctor|list-models|test-route|config-check]`
 
-Roadmap (see `AGENTS.md`): per-app API keys, rate limits, `/v1/embeddings`
-passthrough, Prometheus-style `/metrics`, upstream-aware auto-routing, and
+Roadmap (see `AGENTS.md`): per-app API keys, rate limits,
+Prometheus-style `/metrics`, upstream-aware auto-routing, and
 one-click cookbook recommendations.
 
 ## Quickstart
@@ -119,7 +118,8 @@ Copy-Item conf\llama_cpp_servers.example.yaml conf\llama_cpp_servers.yaml
 
 Or use the wrapper scripts: `scripts\run_provider.ps1` (Windows),
 `scripts/run_provider.sh` (WSL/Linux), plus `smoke_provider.*` for a
-post-start check.
+post-start check and `scripts/smoke_harnesses.py` to verify every configured
+dedicated harness connection.
 
 ## Calling it from the OpenAI SDK
 
@@ -211,6 +211,8 @@ Tools: `chat_completion`, `utility_completion`, `route_completion`,
 (`start_fleet`, `start_slot`, `stop_slot`) **only** when
 `MCP_ALLOW_MUTATING_TOOLS=1`. Bearer auth is on by default; inspect with
 `npx @modelcontextprotocol/inspector http://127.0.0.1:8095/mcp`.
+MCP calls the router at `A0_LMM_ROUTER_BASE_URL` (default
+`http://127.0.0.1:9000`) and reuses `A0_LMM_ROUTER_API_KEY`.
 
 See `docs/INTEGRATIONS.md` for Claude Code MCP, Open WebUI, Dify, Aider, and
 Vercel AI SDK style setup snippets.
@@ -220,6 +222,9 @@ Vercel AI SDK style setup snippets.
 ```powershell
 .venv\Scripts\python -m pytest tests/ -q     # full suite
 ```
+
+Pull requests and pushes to `main` run the same hermetic suite in GitHub
+Actions; no fleet, GPU, Docker daemon, or network is required.
 
 See `CONTRIBUTING.md` and `docs/development/git-workflow.md` for branch
 naming, merge, cleanup, and agent handoff rules.

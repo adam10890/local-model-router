@@ -62,6 +62,15 @@ send any compatibility model name; the path's pinned model is authoritative.
 An unavailable pinned target returns `503 harness_model_unavailable` and does
 not fail over to a different harness model. Generic `/v1` routing is unchanged.
 
+Verify every configured connection from the router host with:
+
+```powershell
+python .\scripts\smoke_harnesses.py
+```
+
+Pass `--api-key <key>` when router authentication is enabled. The command
+checks `/models` and sends one short completion per connection.
+
 ## Add a harness
 
 1. Choose a stable lowercase harness ID.

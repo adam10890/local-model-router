@@ -56,6 +56,10 @@ def test_dashboard_page_loads(tmp_path, monkeypatch):
     assert "Add harness" in html
     assert "Copy setup" in html
     assert "Verify" in html
+    assert "@click=\"openTab('connect')\"" not in html
+    assert 'data-dashboard-section="harnesses"' in html
+    assert '<details class="harness-row"' in html
+    assert "Connection guides" in html
 
 
 # ---------------------------------------------------------------------------
@@ -141,3 +145,13 @@ def test_mcp_app_factory_registers_tools():
     mcp_admin = create_mcp_app(enable_auth=False, allow_mutating_tools=True)
     admin_names = {tool.name for tool in asyncio.run(mcp_admin.list_tools())}
     assert "start_fleet" in admin_names
+
+
+def test_mcp_token_paths_are_explicit(monkeypatch):
+    pytest.importorskip("mcp", reason="mcp extra not installed")
+    from local_model_router.mcp.server import _token_candidate_paths
+
+    monkeypatch.delenv("MCP_TOKEN_PATH", raising=False)
+    assert _token_candidate_paths() == []
+    monkeypatch.setenv("MCP_TOKEN_PATH", "C:/secure/router.key")
+    assert _token_candidate_paths() == ["C:/secure/router.key"]

@@ -35,6 +35,8 @@ control (`fleet_control.py`). Agent ticket coordination lives in
   reports or explicit unchanged reasons.
 - OpenAI-compatible endpoints reuse the routing decision path and forward to
   the selected llama.cpp slot; no duplicate routing policy.
+- `POST /v1/embeddings` selects the local `embed` lane through that same
+  routing decision path; MCP must call this endpoint rather than a slot directly.
 - `/harnesses/{id}/v1` and named-connection variants pin one configured model.
   Client model/role hints cannot escape the path, and an unavailable target
   returns `503 harness_model_unavailable` without cross-model failover.

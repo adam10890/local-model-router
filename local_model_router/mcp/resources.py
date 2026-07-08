@@ -24,13 +24,13 @@ def register_resources(mcp: FastMCP) -> None:
         return json.dumps(data, indent=2)
 
     @mcp.resource("models://{slot_id}/info")
-    def slot_info_resource(slot_id: str) -> str:
+    async def slot_info_resource(slot_id: str) -> str:
         """Configuration info for a specific slot (does not require it to be running).
 
         slot_id: e.g. slot_chat, slot_utility, slot_embedding
         Returns: role, port, model_id, context_size, enabled flag.
         """
-        configs = bridge.slot_configs()
+        configs = await bridge.slot_configs()
         cfg = configs.get(slot_id)
         if cfg is None:
             return json.dumps({"error": f"Slot '{slot_id}' not found"})
@@ -45,22 +45,22 @@ def register_resources(mcp: FastMCP) -> None:
         }, indent=2)
 
     @mcp.resource("models://hardware/profile")
-    def hardware_profile_resource() -> str:
+    async def hardware_profile_resource() -> str:
         """Hardware inventory declared in llama_cpp_servers.yaml.
 
         Includes GPUs (VRAM, CUDA cores), CPUs, RAM, and model concurrency limits.
         """
-        data = bridge.hardware_profile()
+        data = await bridge.hardware_profile()
         return json.dumps(data, indent=2)
 
     @mcp.resource("models://slots/list")
-    def slots_list_resource() -> str:
+    async def slots_list_resource() -> str:
         """Flat list of all configured slots with role and model_id.
 
         Useful for clients that want to enumerate available models without
         knowing slot ids in advance.
         """
-        configs = bridge.slot_configs()
+        configs = await bridge.slot_configs()
         slots = [
             {
                 "id": name,

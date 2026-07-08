@@ -41,12 +41,7 @@ def _truthy(value: object) -> bool:
 
 def _token_candidate_paths() -> list[str]:
     env_path = os.environ.get("MCP_TOKEN_PATH", "").strip()
-    candidates = [
-        env_path,
-        "/host/a0_lmm_host.key",
-        "/a0/tmp/lmm_host_token",
-    ]
-    return [p for p in candidates if p]
+    return [env_path] if env_path else []
 
 
 def _resolve_mcp_host(cfg: dict) -> str:
@@ -84,7 +79,7 @@ class StaticFileTokenVerifier:
         expected = self._read_expected_token()
         if not expected or not hmac.compare_digest(token or "", expected):
             return None
-        return AccessToken(token=token, client_id="a0_lmm_router", scopes=["mcp"])
+        return AccessToken(token=token, client_id="local_model_router", scopes=["mcp"])
 
 
 def _load_mcp_config() -> dict:
