@@ -279,6 +279,121 @@ class TestBackendManagerHealthIntegration:
 
 
 # ---------------------------------------------------------------------------
+# Probe-result TTL cache
+# ---------------------------------------------------------------------------
+
+class TestSlotHealthCheckerCache:
+    def _counting_checker(self, ttl):
+        from local_model_router.helpers.smart_router.health import SlotHealthChecker
+        calls = []
+
+        def probe(url, timeout):
+            calls.append(url)
+            return {"ok": True}
+
+        return SlotHealthChecker(timeout=1, probe_fn=probe, cache_ttl=ttl), calls
+
+    def test_second_check_within_ttl_skips_probe(self):
+        checker, calls = self._counting_checker(ttl=60)
+        slot = {"host": "h", "port": 8080}
+        assert checker.check(slot) == "healthy"
+        assert checker.check(slot) == "healthy"
+        assert len(calls) == 1
+
+    def test_ttl_zero_probes_every_check(self):
+        checker, calls = self._counting_checker(ttl=0)
+        slot = {"host": "h", "port": 8080}
+        checker.check(slot)
+        checker.check(slot)
+        assert len(calls) == 2
+
+    def test_expired_entry_reprobes(self, monkeypatch):
+        import local_model_router.helpers.smart_router.health as health_mod
+        checker, calls = self._counting_checker(ttl=5)
+        slot = {"host": "h", "port": 8080}
+        now = [1000.0]
+        monkeypatch.setattr(health_mod.time, "monotonic", lambda: now[0])
+        checker.check(slot)
+        now[0] += 10  # past the 5s TTL
+        checker.check(slot)
+        assert len(calls) == 2
+
+    def test_cache_keyed_per_url(self):
+        checker, calls = self._counting_checker(ttl=60)
+        checker.check({"host": "h", "port": 8080})
+        checker.check({"host": "h", "port": 8088})
+        assert len(calls) == 2
+
+    def test_unhealthy_result_is_cached_too(self):
+        from local_model_router.helpers.smart_router.health import SlotHealthChecker
+        calls = []
+
+        def probe(url, timeout):
+            calls.append(url)
+            return {"ok": False}
+
+        checker = SlotHealthChecker(timeout=1, probe_fn=probe, cache_ttl=60)
+        slot = {"host": "h", "port": 8080}
+        assert checker.check(slot) == "unhealthy"
+        assert checker.check(slot) == "unhealthy"
+        assert len(calls) == 1
+
+    def test_invalidate_forces_reprobe(self):
+        checker, calls = self._counting_checker(ttl=60)
+        slot = {"host": "h", "port": 8080}
+        checker.check(slot)
+        checker.invalidate()
+        checker.check(slot)
+        assert len(calls) == 2
+
+    def test_sync_and_async_share_cache(self):
+        import asyncio
+        from local_model_router.helpers.smart_router.health import SlotHealthChecker
+        sync_calls, async_calls = [], []
+
+        def probe(url, timeout):
+            sync_calls.append(url)
+            return {"ok": True}
+
+        async def async_probe(url, timeout):
+            async_calls.append(url)
+            return {"ok": True}
+
+        checker = SlotHealthChecker(
+            timeout=1, probe_fn=probe, async_probe_fn=async_probe, cache_ttl=60
+        )
+        slot = {"host": "h", "port": 8080}
+        checker.check(slot)
+        asyncio.run(checker.check_async(slot))
+        assert len(sync_calls) == 1
+        assert len(async_calls) == 0  # served from the sync probe's cached result
+
+    def test_ttl_from_env(self, monkeypatch):
+        from local_model_router.helpers.smart_router.health import (
+            CACHE_TTL_ENV, SlotHealthChecker,
+        )
+        monkeypatch.setenv(CACHE_TTL_ENV, "7.5")
+        assert SlotHealthChecker().cache_ttl == 7.5
+
+    def test_ttl_env_invalid_falls_back_to_default(self, monkeypatch):
+        from local_model_router.helpers.smart_router.health import (
+            CACHE_TTL_ENV, DEFAULT_CACHE_TTL, SlotHealthChecker,
+        )
+        monkeypatch.setenv(CACHE_TTL_ENV, "not-a-number")
+        assert SlotHealthChecker().cache_ttl == DEFAULT_CACHE_TTL
+
+    def test_ttl_from_manager_config(self, tmp_path):
+        from local_model_router.helpers.llama_cpp_manager import BackendManager
+        BackendManager._instance = None
+        cfg = tmp_path / "llama_cpp_servers.yaml"
+        cfg.write_text(
+            "active_slots: []\nglobal:\n  backend: remote\n  health_cache_ttl: 0\n"
+        )
+        manager = BackendManager(str(cfg))
+        assert manager._health_checker.cache_ttl == 0.0
+
+
+# ---------------------------------------------------------------------------
 # check_async tests (all inject async_probe_fn — no real network)
 # ---------------------------------------------------------------------------
 

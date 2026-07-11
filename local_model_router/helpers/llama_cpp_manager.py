@@ -294,6 +294,7 @@ class BackendManager:
         from local_model_router.helpers.smart_router.health import SlotHealthChecker
         self._health_checker = SlotHealthChecker(
             timeout=self.global_config.get('health_check_timeout', 2),
+            cache_ttl=self.global_config.get('health_cache_ttl'),
         )
 
         # Cooldown probes are started lazily in start_all() to avoid
