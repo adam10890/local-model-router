@@ -302,7 +302,18 @@ class RoutingIntentHandler:
         else:
             reason_codes.append("no_candidate_satisfies_requirements")
 
-        decision = await mgr.select_slot_with_failover_async(route_role, preferred_slot)
+        # The ranked order IS the failover chain: capability scoring drives the
+        # forward target, with the static role chain only as a rankless fallback.
+        ranked_chain: List[str] = []
+        for item in ranked:
+            slot_id_rc = item.candidate.slot_id
+            if slot_id_rc and slot_id_rc not in ranked_chain:
+                ranked_chain.append(slot_id_rc)
+        reason_codes.append("failover_chain:ranked" if ranked_chain else "failover_chain:config")
+
+        decision = await mgr.select_slot_with_failover_async(
+            route_role, preferred_slot, chain=ranked_chain or None
+        )
 
         if not decision:
             reason_codes.append("no_healthy_slot_in_chain")
