@@ -265,6 +265,55 @@ def build_slot_candidates(slots: Iterable[dict[str, Any]]) -> list[ModelCandidat
     return candidates
 
 
+def build_upstream_candidates(upstream_rows: Iterable[dict[str, Any]]) -> list[ModelCandidate]:
+    """Candidates for upstream models declared eligible for auto-routing.
+
+    *upstream_rows* are ``UpstreamConfig.describe()`` dicts (plain data — this
+    module stays import-free of the registry). Only serving upstreams with an
+    explicit ``models`` list yield candidates; capabilities come from the
+    declared list, never guessed. ``local_score`` stays 0 for these, so a
+    healthy local slot always outranks them under every strategy.
+    """
+    candidates: list[ModelCandidate] = []
+    for row in upstream_rows:
+        if not isinstance(row, dict) or not row.get("serves_inference"):
+            continue
+        name = str(row.get("name") or "").strip()
+        base_url = str(row.get("base_url") or "").strip()
+        models = row.get("models")
+        if not name or not base_url or not isinstance(models, (list, tuple)):
+            continue
+        capabilities = row.get("capabilities")
+        capabilities = set(capabilities) if isinstance(capabilities, (list, tuple)) else set()
+        for model in models:
+            model_id = str(model).strip()
+            if not model_id:
+                continue
+            candidates.append(
+                ModelCandidate(
+                    id=f"{name}/{model_id}",
+                    model_id=model_id,
+                    source="upstream",
+                    role="chat",
+                    backend_type=str(row.get("type") or "openai_compatible"),
+                    slot_id=None,
+                    upstream_name=name,
+                    base_url=base_url,
+                    context_size=0,
+                    supports_tools="tools" in capabilities,
+                    supports_vision="vision" in capabilities,
+                    supports_json_mode="json_mode" in capabilities,
+                    health="unknown",
+                    latency_hint_ms=None,
+                    quality_hint=_role_quality_default("chat"),
+                    # Upstreams spend no local VRAM; low local resource cost.
+                    resource_cost_hint=0.25,
+                    metadata={"upstream": name},
+                )
+            )
+    return candidates
+
+
 def _target_context(needs: RoutingNeeds) -> int:
     targets = [0]
     if needs.estimated_tokens:

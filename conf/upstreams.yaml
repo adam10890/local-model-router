@@ -6,6 +6,12 @@
 #
 # API keys are read from the environment variable named in api_key_env.
 # Never put key material in this file.
+#
+# Auto-routing (opt-in): set A0_LMM_ROUTER_AUTO_UPSTREAMS=1 and declare a
+# "models:" list of bare model ids on an upstream to let `model: auto` fall
+# back to those models when no healthy local slot can serve the request.
+# Local slots always win while healthy; without a models list the upstream
+# stays reachable only by explicit "<name>/<model>" addressing.
 
 upstreams:
   - name: dmr

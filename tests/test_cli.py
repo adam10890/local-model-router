@@ -97,7 +97,7 @@ def test_test_route_resolves_alias(tmp_path, monkeypatch, capsys):
             return {"no_slot_available": True}
 
     class _Handler:
-        def __init__(self, observer):
+        def __init__(self, observer, upstream_rows_fn=None):
             pass
 
         async def handle(self, intent):

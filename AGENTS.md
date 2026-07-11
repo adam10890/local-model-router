@@ -79,9 +79,12 @@ codebase.
   and integration snippets inspired by OrcaRouter patterns without vendor
   code or cloud BYOK scope.
   (9) ✅ router-backed `POST /v1/embeddings` and HTTP-only MCP bridge.
-  Future: per-app API keys, rate limits, `/metrics`, `/routing/history`, upstream-aware
-  auto-routing, one-click "apply recommendation" (cookbook → fleet
-  control).
+  (10) ✅ ranked-candidate failover chains, health-probe TTL cache
+  (`global.health_cache_ttl` / `A0_LMM_ROUTER_HEALTH_CACHE_TTL`), and opt-in
+  upstream-aware auto-routing (`A0_LMM_ROUTER_AUTO_UPSTREAMS=1` + declared
+  `models:` per upstream; local-first preserved, embeddings stay local).
+  Future: per-app API keys, rate limits, `/metrics`, `/routing/history`,
+  one-click "apply recommendation" (cookbook → fleet control).
 - Renaming modules toward a layered layout (`api/`, `routing/`, `backends/`,
   `telemetry/`) is allowed once tests cover the seam being moved — never as a
   big-bang rewrite.
