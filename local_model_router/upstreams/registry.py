@@ -36,6 +36,9 @@ class UpstreamConfig:
     enabled: bool = False
     experimental: bool = False
     capabilities: tuple[str, ...] = field(default_factory=tuple)
+    # Models declared eligible for auto-routing (bare ids, no "<name>/" prefix).
+    # Empty means the upstream is reachable only by explicit "<name>/<model>".
+    models: tuple[str, ...] = field(default_factory=tuple)
     notes: str = ""
 
     @property
@@ -65,6 +68,7 @@ class UpstreamConfig:
             "experimental": self.experimental,
             "serves_inference": self.serves_inference,
             "capabilities": list(self.capabilities),
+            "models": list(self.models),
             "auth_configured": bool(self.api_key_env),
             "notes": self.notes,
         }
@@ -82,6 +86,10 @@ def _parse_entry(raw: Any) -> Optional[UpstreamConfig]:
     if not isinstance(capabilities, list):
         capabilities = list(_SERVING_CAPABILITIES)
 
+    models = raw.get("models")
+    if not isinstance(models, list):
+        models = []
+
     experimental = bool(raw.get("experimental", False))
     enabled = bool(raw.get("enabled", False))
 
@@ -93,6 +101,7 @@ def _parse_entry(raw: Any) -> Optional[UpstreamConfig]:
         enabled=enabled,
         experimental=experimental,
         capabilities=tuple(str(c) for c in capabilities),
+        models=tuple(str(m).strip() for m in models if str(m).strip()),
         notes=str(raw.get("notes") or ""),
     )
 

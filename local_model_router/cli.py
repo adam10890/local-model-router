@@ -136,8 +136,17 @@ def cmd_test_route(args: argparse.Namespace) -> int:
         role = resolution.role
         print(f"alias '{args.model}' -> role {role} (recognized={resolution.recognized})")
 
-    observer = ObserverBackend(_resolve_config())
-    handler = RoutingIntentHandler(observer)
+    from pathlib import Path
+
+    from local_model_router.upstreams.registry import load_upstreams
+
+    config_path = _resolve_config()
+    observer = ObserverBackend(config_path)
+    upstreams = load_upstreams(Path(config_path).resolve().parent / "upstreams.yaml")
+    handler = RoutingIntentHandler(
+        observer,
+        upstream_rows_fn=lambda: [upstream.describe() for upstream in upstreams],
+    )
     intent = RoutingIntentRequest(
         agent_id="cli",
         agent_type="custom",

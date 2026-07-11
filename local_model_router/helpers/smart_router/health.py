@@ -14,13 +14,29 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Callable, Dict, Optional
+import os
+import time
+from typing import Any, Callable, Dict, Optional, Tuple
 
 logger = logging.getLogger("lmm_router.health")
 
 HEALTHY = "healthy"
 UNHEALTHY = "unhealthy"
 UNKNOWN = "unknown"
+
+DEFAULT_CACHE_TTL = 3.0
+CACHE_TTL_ENV = "A0_LMM_ROUTER_HEALTH_CACHE_TTL"
+
+
+def _resolve_cache_ttl(cache_ttl: Optional[float]) -> float:
+    """Resolve the probe-result TTL: explicit arg > env > default. <=0 disables."""
+    if cache_ttl is None:
+        raw = os.environ.get(CACHE_TTL_ENV, "")
+        try:
+            cache_ttl = float(raw) if raw.strip() else DEFAULT_CACHE_TTL
+        except ValueError:
+            cache_ttl = DEFAULT_CACHE_TTL
+    return max(0.0, float(cache_ttl))
 
 
 def _urllib_probe(url: str, timeout: int) -> Dict:
@@ -69,6 +85,11 @@ class SlotHealthChecker:
     async_probe_fn:
         Async callable(url: str, timeout: int) -> {"ok": bool, ...}.
         Defaults to the aiohttp probe.  Inject an async stub in tests.
+    cache_ttl:
+        Seconds a probe result stays fresh before the slot is probed again.
+        Shared between the sync and async paths, keyed by probe URL.
+        None → A0_LMM_ROUTER_HEALTH_CACHE_TTL env, else 3.0. <=0 disables
+        caching (every check probes), preserving pre-cache behavior.
     """
 
     def __init__(
@@ -76,10 +97,37 @@ class SlotHealthChecker:
         timeout: int = 2,
         probe_fn: Optional[Callable[[str, int], Dict]] = None,
         async_probe_fn: Optional[Any] = None,
+        cache_ttl: Optional[float] = None,
     ) -> None:
         self.timeout = timeout
         self._probe = probe_fn or _urllib_probe
         self._async_probe = async_probe_fn  # None → resolved at call time
+        self.cache_ttl = _resolve_cache_ttl(cache_ttl)
+        self._cache: Dict[str, Tuple[float, str]] = {}  # url -> (expires_at, status)
+
+    def _cached_status(self, url: str) -> Optional[str]:
+        if self.cache_ttl <= 0:
+            return None
+        entry = self._cache.get(url)
+        if entry is None:
+            return None
+        expires_at, status = entry
+        if time.monotonic() >= expires_at:
+            self._cache.pop(url, None)
+            return None
+        return status
+
+    def _store_status(self, url: str, status: str) -> str:
+        if self.cache_ttl > 0:
+            self._cache[url] = (time.monotonic() + self.cache_ttl, status)
+        return status
+
+    def invalidate(self, url: Optional[str] = None) -> None:
+        """Drop cached probe results (all of them, or one URL's)."""
+        if url is None:
+            self._cache.clear()
+        else:
+            self._cache.pop(url, None)
 
     def check(self, slot_config: Dict) -> str:
         """Return HEALTHY, UNHEALTHY, or UNKNOWN for the given slot config.
@@ -93,12 +141,15 @@ class SlotHealthChecker:
             return UNKNOWN
 
         url = f"http://{host}:{port}/health"
+        cached = self._cached_status(url)
+        if cached is not None:
+            return cached
         try:
             result = self._probe(url, self.timeout)
-            return HEALTHY if result.get("ok") else UNHEALTHY
+            return self._store_status(url, HEALTHY if result.get("ok") else UNHEALTHY)
         except Exception:
             logger.debug("Health probe raised unexpectedly for %s:%s", host, port)
-            return UNHEALTHY
+            return self._store_status(url, UNHEALTHY)
 
     async def check_async(self, slot_config: Dict) -> str:
         """Async version of check(). Does not block the event loop.
@@ -112,10 +163,13 @@ class SlotHealthChecker:
             return UNKNOWN
 
         url = f"http://{host}:{port}/health"
+        cached = self._cached_status(url)
+        if cached is not None:
+            return cached
         probe = self._async_probe or _aiohttp_probe
         try:
             result = await probe(url, self.timeout)
-            return HEALTHY if result.get("ok") else UNHEALTHY
+            return self._store_status(url, HEALTHY if result.get("ok") else UNHEALTHY)
         except Exception:
             logger.debug("Async health probe raised unexpectedly for %s:%s", host, port)
-            return UNHEALTHY
+            return self._store_status(url, UNHEALTHY)

@@ -294,6 +294,7 @@ class BackendManager:
         from local_model_router.helpers.smart_router.health import SlotHealthChecker
         self._health_checker = SlotHealthChecker(
             timeout=self.global_config.get('health_check_timeout', 2),
+            cache_ttl=self.global_config.get('health_cache_ttl'),
         )
 
         # Cooldown probes are started lazily in start_all() to avoid
@@ -358,9 +359,18 @@ class BackendManager:
             except Exception as e:
                 self.logger.error(f"Cooldown probe error: {e}")
 
-    def select_slot_with_failover(self, role: str, preferred_slot: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def select_slot_with_failover(
+        self,
+        role: str,
+        preferred_slot: Optional[str] = None,
+        chain: Optional[List[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
         """
         Select a slot for a given role, following failover chain if needed.
+
+        When *chain* is provided (e.g. the ranked-candidate order from
+        rank_candidates), it replaces the static role chain so capability
+        scoring drives the actual failover order.
 
         Returns dict with:
             - slot_id: str
@@ -372,7 +382,7 @@ class BackendManager:
             get_chain_for_role, get_next_in_chain, SlotFailoverState, create_decision
         )
 
-        chain = get_chain_for_role(role, self._failover_chains)
+        chain = [str(s) for s in chain if s] if chain else get_chain_for_role(role, self._failover_chains)
 
         # If preferred_slot specified, start from there; otherwise use first in chain
         start_slot = preferred_slot or (chain[0] if chain else None)
@@ -412,13 +422,16 @@ class BackendManager:
                     from local_model_router.helpers.stats_tracker import record_failover
                     record_failover(start_slot, next_slot, reason)
 
-                    return create_decision(
+                    decision = create_decision(
                         slot_id=next_slot,
                         url=url,
                         role=role,
                         reason=f"failover from '{start_slot}' to '{next_slot}'",
                         chain=chain,
-                    ).__dict__
+                    )
+                    decision.is_failover = True
+                    decision.failover_reason = reason
+                    return decision.__dict__
 
             current = next_slot
             reason = f"slot '{current}' unhealthy, continuing chain"
@@ -462,19 +475,23 @@ class BackendManager:
         return await self._health_checker.check_async(config)
 
     async def select_slot_with_failover_async(
-        self, role: str, preferred_slot: Optional[str] = None
+        self,
+        role: str,
+        preferred_slot: Optional[str] = None,
+        chain: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Async version of select_slot_with_failover. Does not block the event loop.
 
         Preserves identical chain-walking, cooldown, and preferred_slot logic.
-        The sync select_slot_with_failover() is unchanged and still works.
+        When *chain* is provided it replaces the static role chain (see the
+        sync variant). The sync select_slot_with_failover() still works.
         """
         from local_model_router.helpers.smart_router.failover import (
             get_chain_for_role, get_next_in_chain, create_decision,
         )
         from local_model_router.helpers.stats_tracker import record_failover
 
-        chain = get_chain_for_role(role, self._failover_chains)
+        chain = [str(s) for s in chain if s] if chain else get_chain_for_role(role, self._failover_chains)
         start_slot = preferred_slot or (chain[0] if chain else None)
         if not start_slot:
             return None
@@ -511,13 +528,16 @@ class BackendManager:
                 if config:
                     url = self._get_slot_url(next_slot, config)
                     record_failover(start_slot, next_slot, reason)
-                    return create_decision(
+                    decision = create_decision(
                         slot_id=next_slot,
                         url=url,
                         role=role,
                         reason=f"failover from '{start_slot}' to '{next_slot}'",
                         chain=chain,
-                    ).__dict__
+                    )
+                    decision.is_failover = True
+                    decision.failover_reason = reason
+                    return decision.__dict__
 
             current = next_slot
             reason = f"slot '{current}' unhealthy, continuing chain"

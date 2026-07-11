@@ -96,7 +96,8 @@ def test_primary_unhealthy_uses_secondary(tmp_path, monkeypatch):
 
     assert result is not None
     assert result["slot_id"] == "utility"
-    assert result["is_failover"] is False  # create_decision sets is_failover via SlotDecision default
+    assert result["is_failover"] is True
+    assert result["failover_reason"]
 
 
 def test_primary_unhealthy_secondary_url_correct(tmp_path, monkeypatch):

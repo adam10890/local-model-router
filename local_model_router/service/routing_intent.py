@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field, field_validator
 from local_model_router.routing.catalog import (
     RoutingNeeds,
     build_slot_candidates,
+    build_upstream_candidates,
     rank_candidates,
 )
 from local_model_router.helpers.context_calculator import ContextUtilization
@@ -49,6 +50,15 @@ _KNOWN_PRIVACY_MODES = frozenset({
 
 _KNOWN_PREFERENCES = frozenset({"fast", "normal", "quality"})
 DRY_RUN_MODE = os.environ.get("A0_ROUTING_DRY_RUN", "1") != "0"
+
+# Opt-in: let `auto` fall back to declared upstream models when no healthy
+# local slot can serve the request. Off by default — read at call time so
+# behavior can be toggled without restarting tests.
+AUTO_UPSTREAMS_ENV = "A0_LMM_ROUTER_AUTO_UPSTREAMS"
+
+
+def _auto_upstreams_enabled() -> bool:
+    return os.environ.get(AUTO_UPSTREAMS_ENV, "0").strip().lower() in {"1", "true", "yes", "on"}
 
 # Role inferred from task_type when role is not explicitly provided.
 _TASK_TO_ROLE: Dict[str, str] = {
@@ -152,6 +162,7 @@ class RoutingDecisionResponse(BaseModel):
     selected_model:        Optional[str]
     selected_source:       Optional[str] = None
     selected_candidate_id: Optional[str] = None
+    selected_upstream:     Optional[str] = None
     routing_strategy:      str = "balanced_local"
     score:                 Optional[float] = None
     score_inputs:          Dict[str, Any] = Field(default_factory=dict)
@@ -178,10 +189,28 @@ class RoutingIntentHandler:
 
     Never forwards the prompt.  Never mutates config or state.
     Uses the observer's _make_manager() seam so tests can inject stubs.
+
+    *upstream_rows_fn* returns UpstreamConfig.describe() dicts; when provided
+    and A0_LMM_ROUTER_AUTO_UPSTREAMS=1, declared upstream models join the
+    candidate pool as a fallback lane behind the local fleet.
     """
 
-    def __init__(self, observer: Any) -> None:
+    def __init__(self, observer: Any, upstream_rows_fn: Optional[Any] = None) -> None:
         self._observer = observer
+        self._upstream_rows_fn = upstream_rows_fn
+
+    def _upstream_candidates(self, role: str, local_only: bool) -> list:
+        if (
+            self._upstream_rows_fn is None
+            or local_only
+            or role in {"embed", "embedding"}
+            or not _auto_upstreams_enabled()
+        ):
+            return []
+        try:
+            return build_upstream_candidates(self._upstream_rows_fn())
+        except Exception:
+            return []
 
     async def handle(self, req: RoutingIntentRequest) -> RoutingDecisionResponse:
         decision_id = str(uuid.uuid4())
@@ -289,7 +318,12 @@ class RoutingIntentHandler:
             strategy=req.routing_strategy,
             preferred_slot=req.preferred_slot,
         )
-        ranked = rank_candidates(needs, build_slot_candidates(slot_rows), strategy=req.routing_strategy)
+        candidates = build_slot_candidates(slot_rows)
+        upstream_candidates = self._upstream_candidates(role, local_only_enforced)
+        if upstream_candidates:
+            candidates = candidates + upstream_candidates
+            reason_codes.append("auto_upstreams_considered")
+        ranked = rank_candidates(needs, candidates, strategy=req.routing_strategy)
         ranked_public = [item.public_dict() for item in ranked[:5]]
         selected_rank = ranked[0] if ranked else None
         preferred_slot = req.preferred_slot
@@ -302,9 +336,67 @@ class RoutingIntentHandler:
         else:
             reason_codes.append("no_candidate_satisfies_requirements")
 
-        decision = await mgr.select_slot_with_failover_async(route_role, preferred_slot)
+        # The ranked order IS the failover chain: capability scoring drives the
+        # forward target, with the static role chain only as a rankless fallback.
+        ranked_chain: List[str] = []
+        for item in ranked:
+            slot_id_rc = item.candidate.slot_id
+            if slot_id_rc and slot_id_rc not in ranked_chain:
+                ranked_chain.append(slot_id_rc)
+        reason_codes.append("failover_chain:ranked" if ranked_chain else "failover_chain:config")
+
+        decision = await mgr.select_slot_with_failover_async(
+            route_role, preferred_slot, chain=ranked_chain or None
+        )
 
         if not decision:
+            # Local-first exhausted. When auto-upstreams is on, the best-ranked
+            # declared upstream model becomes the fallback target — explicitly
+            # reasoned, never silent.
+            upstream_rank = next(
+                (item for item in ranked if item.candidate.source == "upstream"),
+                None,
+            )
+            if upstream_rank is not None:
+                cand = upstream_rank.candidate
+                had_local_candidates = bool(ranked_chain)
+                reason_codes.append(
+                    "no_healthy_local_slot_upstream_fallback"
+                    if had_local_candidates
+                    else "no_local_candidate"
+                )
+                reason_codes.append("upstream_auto_selected")
+                warnings.append(
+                    "auto_upstream_selected: no healthy local slot could serve this "
+                    f"request; routing to declared upstream model '{cand.id}'"
+                )
+                return RoutingDecisionResponse(
+                    decision_id=decision_id,
+                    dry_run=DRY_RUN_MODE,
+                    agent_id=req.agent_id,
+                    agent_type=req.agent_type,
+                    role=role,
+                    task_type=req.task_type,
+                    privacy_mode=req.privacy_mode,
+                    selected_slot_id=None,
+                    selected_url=cand.base_url,
+                    selected_backend_type=cand.backend_type,
+                    selected_model=cand.model_id,
+                    selected_source="upstream",
+                    selected_candidate_id=cand.id,
+                    selected_upstream=cand.upstream_name,
+                    routing_strategy=req.routing_strategy,
+                    score=round(upstream_rank.score, 4),
+                    score_inputs=upstream_rank.score_inputs,
+                    ranked_candidates=ranked_public,
+                    local_only_enforced=local_only_enforced,
+                    no_slot_available=False,
+                    fallback_used=had_local_candidates,
+                    reason_codes=reason_codes,
+                    warnings=warnings,
+                    health_snapshot=None,
+                )
+
             reason_codes.append("no_healthy_slot_in_chain")
             return RoutingDecisionResponse(
                 decision_id=decision_id,

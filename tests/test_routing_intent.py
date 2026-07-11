@@ -392,3 +392,45 @@ class TestRoutingIntentSchema:
             assert False, "should have raised"
         except ValidationError:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Ranked-candidate order drives the failover chain
+# ---------------------------------------------------------------------------
+
+class TestRankedFailoverChain:
+    def test_reason_codes_name_ranked_chain(self, tmp_path):
+        client, _ = _make_client(tmp_path, health_result="healthy")
+        body = _post(client, {"task_type": "chat"}).json()
+        assert "failover_chain:ranked" in body["reason_codes"]
+
+    def test_reason_codes_name_config_chain_when_no_candidates(self, tmp_path):
+        client, _ = _make_client(tmp_path, yaml_content=_EMPTY_CONFIG, health_result="healthy")
+        body = _post(client, {"task_type": "chat"}).json()
+        assert "failover_chain:config" in body["reason_codes"]
+
+    def test_walk_falls_to_second_ranked_candidate(self, tmp_path):
+        """Top-ranked slot turns unhealthy between ranking and the chain walk;
+        the walk must continue to the next ranked candidate and flag fallback."""
+        client, mgr = _make_client(tmp_path, health_result="healthy")
+        calls = {}
+
+        class FlakyChecker:
+            async def check_async(self, config):
+                port = config.get("port")
+                n = calls.get(port, 0)
+                calls[port] = n + 1
+                if port == 8080:  # chat slot: healthy at ranking, then down
+                    return "healthy" if n == 0 else "unhealthy"
+                return "healthy"
+
+            def check(self, config):
+                return "healthy"
+
+        mgr._health_checker = FlakyChecker()
+        body = _post(client, {"task_type": "chat"}).json()
+
+        assert body["no_slot_available"] is False
+        assert body["selected_slot_id"] == "utility"
+        assert body["fallback_used"] is True
+        assert "primary_slot_unavailable_failover_used" in body["reason_codes"]

@@ -374,7 +374,6 @@ def create_app(
 ) -> Starlette:
     """Return a configured Starlette app.  Safe to call multiple times (no side-effects)."""
     observer = ObserverBackend(config_path)
-    intent_handler = RoutingIntentHandler(observer)
     api_key = _configured_api_key()
     store = fleet_store or FleetStore()
     queue = fleet_queue or FleetQueue()
@@ -384,6 +383,10 @@ def create_app(
 
     conf_dir = Path(observer.config_path).resolve().parent
     upstreams = load_upstreams(upstreams_path or conf_dir / "upstreams.yaml")
+    intent_handler = RoutingIntentHandler(
+        observer,
+        upstream_rows_fn=lambda: [upstream.describe() for upstream in upstreams],
+    )
     app_profiles = AppProfiles.load(apps_path or conf_dir / "apps.yaml")
     harness_profiles = HarnessProfiles.load(
         harnesses_path
@@ -919,6 +922,7 @@ def create_app(
         body: Dict[str, Any],
         *,
         pinned_harness: Optional[Dict[str, str]] = None,
+        strategy_label: str = "explicit_upstream",
     ) -> Response:
         wants_stream = body.get("stream") is True
         payload = _forward_payload(body, bare_model, stream=wants_stream)
@@ -928,7 +932,7 @@ def create_app(
             "x-a0-router-model": bare_model,
             "x-a0-router-requested-model": str(body.get("model") or ""),
             "x-a0-router-resolved-model": bare_model,
-            "x-a0-router-strategy": "explicit_upstream",
+            "x-a0-router-strategy": strategy_label,
             "x-a0-router-cache": "BYPASS",
         }
         try:
@@ -1379,6 +1383,45 @@ def create_app(
                     "connection": dedicated["connection"],
                     "pinned_model": effective_model,
                 },
+            )
+
+        if decision.selected_upstream:
+            # Auto-routing fell back to a declared upstream model. Upstream
+            # requests do not hold the fleet queue (it guards local VRAM), so
+            # release the admission before forwarding.
+            upstream_cfg = next(
+                (
+                    upstream
+                    for upstream in upstreams
+                    if upstream.name == decision.selected_upstream and upstream.serves_inference
+                ),
+                None,
+            )
+            if upstream_cfg is None or not decision.selected_model:
+                await finish(
+                    "failed",
+                    error_code="upstream_not_configured",
+                    decision=decision,
+                    cache_status="BYPASS",
+                )
+                return _openai_error(
+                    f"auto-selected upstream '{decision.selected_upstream}' is not configured",
+                    "upstream_not_configured",
+                    503,
+                    error_type="server_error",
+                    extra={"routing": decision_body},
+                )
+            await finish(
+                "forwarded_upstream",
+                model=decision.selected_model,
+                decision=decision,
+                cache_status="BYPASS",
+            )
+            return await forward_to_upstream(
+                upstream_cfg,
+                decision.selected_model,
+                body,
+                strategy_label="auto_upstream_fallback",
             )
 
         url = decision.selected_url.rstrip("/") + "/chat/completions"

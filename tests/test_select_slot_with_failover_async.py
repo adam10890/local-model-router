@@ -183,6 +183,59 @@ def test_async_custom_chain_overrides_default(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Explicit chain (ranked-candidate order) overrides config chains
+# ---------------------------------------------------------------------------
+
+def test_async_explicit_chain_overrides_config_chain(tmp_path):
+    """Config puts utility first for chat, but the explicit chain wins."""
+    manager = _make_manager(tmp_path, _CUSTOM_CHAIN_CONFIG)
+    manager._health_checker = _AsyncStubChecker({8080: "healthy", 8088: "healthy"})
+
+    result = asyncio.run(
+        manager.select_slot_with_failover_async("chat", chain=["chat", "utility"])
+    )
+
+    assert result is not None
+    assert result["slot_id"] == "chat"
+    assert result["fallback_chain"] == ["chat", "utility"]
+
+
+def test_async_explicit_chain_walked_in_order(tmp_path):
+    manager = _make_manager(tmp_path)
+    manager._health_checker = _AsyncStubChecker({8080: "unhealthy", 8088: "healthy"})
+
+    result = asyncio.run(
+        manager.select_slot_with_failover_async("chat", chain=["chat", "utility"])
+    )
+
+    assert result is not None
+    assert result["slot_id"] == "utility"
+    assert result["is_failover"] is True
+    assert result["failover_reason"]
+
+
+def test_async_empty_chain_falls_back_to_config(tmp_path):
+    manager = _make_manager(tmp_path)
+    manager._health_checker = _AsyncStubChecker({8080: "healthy", 8088: "healthy"})
+
+    result = asyncio.run(manager.select_slot_with_failover_async("chat", chain=[]))
+
+    assert result is not None
+    assert result["slot_id"] == "chat"  # DEFAULT_CHAINS["chat"] starts at chat
+
+
+def test_sync_explicit_chain_walked_in_order(tmp_path):
+    manager = _make_manager(tmp_path)
+    manager._health_checker = _AsyncStubChecker({8080: "unhealthy", 8088: "healthy"})
+
+    result = manager.select_slot_with_failover("chat", chain=["chat", "utility"])
+
+    assert result is not None
+    assert result["slot_id"] == "utility"
+    assert result["is_failover"] is True
+
+
+# ---------------------------------------------------------------------------
 # No slots configured
 # ---------------------------------------------------------------------------
 
