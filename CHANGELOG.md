@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-11
+
+### Added
+
+- Built-in `GET /agents` catalog and `POST /agents/{id}/runs` endpoint backed
+  by Pydantic AI through the router's own OpenAI-compatible Chat Completions
+  surface.
+- Per-agent routing intent, including local-only sovereignty, bounded input,
+  and timeout handling. Agent traffic remains identifiable in routing
+  analytics, including auto-upstream fallback records.
+
+### Changed
+
+- Windows setup/start/stop scripts now install the agent runner, derive its
+  loopback self-call URL, and honor a configured router port when stopping.
+
 ## [0.5.0] - 2026-07-05
 
 ### Added

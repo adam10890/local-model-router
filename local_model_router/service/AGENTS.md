@@ -24,6 +24,10 @@ control (`fleet_control.py`). Agent ticket coordination lives in
 ## Local Contracts
 
 - `POST /routing/request` is dry-run intent routing.
+- `GET /agents` exposes only public metadata for the built-in catalog;
+  `POST /agents/{id}/runs` calls this service's `/v1/chat/completions` endpoint
+  asynchronously. It must pass configured role/task/local-only intent through
+  the normal routing path and must never expose or telemetry-store prompts.
 - `GET /routing/models`, `GET /routing/models/{id}`, and
   `GET /routing/analytics` are safe discovery/telemetry surfaces. They must
   never return API keys, prompt bodies, or raw request content.

@@ -28,7 +28,7 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 echo Installing dependencies...
-".venv\Scripts\python.exe" -m pip install -e ".[dev,mcp]"
+".venv\Scripts\python.exe" -m pip install -e ".[dev,mcp,agents]"
 if errorlevel 1 (
     echo ERROR: dependency install failed.
     pause

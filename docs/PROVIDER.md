@@ -11,6 +11,9 @@ fleet control is explicitly enabled.
 - `POST /routing/request` returns the routing decision for an intent payload.
 - `POST /v1/chat/completions` forwards non-streaming and streaming requests to
   the selected llama.cpp slot.
+- `GET /agents` lists built-in prompt-backed agents without their prompts;
+  `POST /agents/{id}/runs` executes one through the router's own Chat
+  Completions endpoint.
 - `GET /harnesses` and `GET /harnesses/{id}` emit secret-free setup manifests.
   Dedicated `.../v1/models` and `.../v1/chat/completions` paths pin one model
   per connection; see `HARNESSES.md`.
@@ -71,6 +74,11 @@ Smoke test:
 python .\scripts\smoke_harnesses.py --api-key "change-me"
 ```
 
+`SETUP.bat` installs the agent runner extra. `START.bat` derives
+`A0_LMM_ROUTER_AGENT_BASE_URL` from the configured bind URL unless `.env`
+overrides it; `STOP.bat` reads the same `OBSERVER_PORT` before stopping the
+router.
+
 ## WSL Or Linux Server
 
 From the repository root:
@@ -124,6 +132,8 @@ A0_FLEET_MAX_ACTIVE=1
 A0_FLEET_MAX_QUEUE=32
 # Router address used by the MCP bridge:
 A0_LMM_ROUTER_BASE_URL=http://127.0.0.1:9000
+# Full OpenAI-compatible URL used by built-in agent runs:
+A0_LMM_ROUTER_AGENT_BASE_URL=http://127.0.0.1:9000/v1
 ```
 
 ## Dependency Map
@@ -132,7 +142,17 @@ Runtime dependencies are declared in `pyproject.toml` and installed by
 `pip install -e .`: `aiohttp` for upstream forwarding, Starlette/Uvicorn for
 HTTP serving, Pydantic for schemas, PyYAML for fleet configuration, and
 `psutil` for cross-platform CPU/RAM telemetry. Optional Docker and MCP support
-remain in the `[docker]` and `[mcp]` extras.
+remain in the `[docker]` and `[mcp]` extras. Install `.[agents]` to enable the
+Pydantic AI runner used by `POST /agents/{id}/runs`.
+
+## Agent library
+
+Agent runs call the router asynchronously through
+`A0_LMM_ROUTER_AGENT_BASE_URL`, carry the configured role/task intent, and
+have a 64 KiB input limit plus a 120-second timeout. When auto-upstreams is
+enabled, non-local-only agents may be recorded as `forwarded_upstream` in
+`GET /routing/analytics`; those records retain `app_id=agent_library` and the
+agent id. Agent prompts are never returned by `/agents` or saved in telemetry.
 
 ## Update Guide
 
