@@ -46,6 +46,14 @@ from .fleet_control import (
     fleet_control_enabled,
 )
 from .agent_orchestrator import AgentOrchestrator, OrchestratorError
+from .agent_library import (
+    AGENT_INPUT_MAX_BYTES,
+    AgentCatalog,
+    AgentRunFailed,
+    AgentRunTimeout,
+    AgentRunnerUnavailable,
+    run_agent,
+)
 from .fleet_manager import (
     AgentIdentity,
     FleetQueue,
@@ -370,6 +378,7 @@ def create_app(
     upstreams_path: Optional[str] = None,
     apps_path: Optional[str] = None,
     harnesses_path: Optional[str] = None,
+    agents_path: Optional[str] = None,
     orchestrator: Optional[AgentOrchestrator] = None,
 ) -> Starlette:
     """Return a configured Starlette app.  Safe to call multiple times (no side-effects)."""
@@ -388,6 +397,7 @@ def create_app(
         upstream_rows_fn=lambda: [upstream.describe() for upstream in upstreams],
     )
     app_profiles = AppProfiles.load(apps_path or conf_dir / "apps.yaml")
+    agent_catalog = AgentCatalog.load(agents_path or conf_dir / "agents.yaml")
     harness_profiles = HarnessProfiles.load(
         harnesses_path
         or os.environ.get("A0_LMM_ROUTER_HARNESSES_CONFIG")
@@ -853,6 +863,42 @@ def create_app(
         except ValueError:
             limit = 50
         return JSONResponse(store.routing_analytics(limit=limit))
+
+    async def agents_list(request: Request) -> JSONResponse:
+        return JSONResponse({"agents": agent_catalog.public_list()})
+
+    async def agent_run(request: Request) -> JSONResponse:
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid_json"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "invalid_agent_input"}, status_code=400)
+
+        agent_id = str(request.path_params.get("agent_id") or "").strip()
+        definition = agent_catalog.get(agent_id)
+        if definition is None:
+            return JSONResponse({"error": "agent_not_found", "agent_id": agent_id}, status_code=404)
+
+        user_input = body.get("input")
+        if not isinstance(user_input, str) or not user_input.strip():
+            return JSONResponse({"error": "invalid_agent_input"}, status_code=400)
+        try:
+            input_size = len(user_input.encode("utf-8"))
+        except UnicodeEncodeError:
+            return JSONResponse({"error": "invalid_agent_input"}, status_code=400)
+        if input_size > AGENT_INPUT_MAX_BYTES:
+            return JSONResponse({"error": "input_too_large"}, status_code=413)
+
+        try:
+            output = await run_agent(definition, user_input)
+        except AgentRunnerUnavailable:
+            return JSONResponse({"error": "agent_runner_unavailable"}, status_code=503)
+        except AgentRunTimeout:
+            return JSONResponse({"error": "agent_timeout"}, status_code=504)
+        except AgentRunFailed:
+            return JSONResponse({"error": "agent_model_error"}, status_code=502)
+        return JSONResponse({"agent_id": definition.id, "output": output})
 
     def _orchestrator_error(exc: OrchestratorError) -> JSONResponse:
         return JSONResponse({"error": exc.code, "detail": exc.message}, status_code=exc.status_code)
@@ -1670,6 +1716,8 @@ def create_app(
         Route("/orchestrator/tickets/{ticket_id}", protected(orchestrator_ticket_detail)),
         Route("/backends", protected(backends)),
         Route("/apps", protected(apps_list)),
+        Route("/agents", protected(agents_list)),
+        Route("/agents/{agent_id}/runs", protected(agent_run), methods=["POST"]),
         Route("/harnesses", protected(harnesses_list)),
         Route("/harnesses", protected(harness_create), methods=["POST"]),
         Route("/harnesses/{harness_id}/v1/models", protected(harness_models)),

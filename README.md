@@ -29,7 +29,7 @@ Agent Zero is client #1, not the owner.
 
 ## Status
 
-**0.5.0 - One router path, smaller core.** What works today:
+**0.7.0 - Router-backed built-in agents.** What works today:
 
 | Surface | Endpoint | Notes |
 |---|---|---|
@@ -39,6 +39,7 @@ Agent Zero is client #1, not the owner.
 | Routing preview | `GET /routing/preview` | which slot a role would get |
 | Routing catalog | `GET /routing/models`, `GET /routing/models/{id}`, `GET /routing/analytics` | safe model cards, recent decisions, latency/fallback/cache stats |
 | Agent orchestration | `POST /orchestrator/plans`, `GET /orchestrator/plans`, `GET /orchestrator/summary`, `GET /orchestrator/instances`, `POST /orchestrator/instances/{id}`, `POST /orchestrator/tickets/{id}/submit` | observe-first plan/ticket packets, sub-agent instance heartbeats, DOX reports, artifacts, wake markers |
+| Agent library | `GET /agents`, `POST /agents/{id}/runs` | built-in prompt-backed agents through router-selected models; `[agents]` extra required to run |
 | OpenAI-compatible | `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/embeddings` | aliases + live/upstream models; chat streaming and local embedding forwarding |
 | Harnesses | `GET /harnesses`, `GET /harnesses/{id}`, dedicated `.../v1/models` + `.../v1/chat/completions` | one authoritative model per connection; Agent Zero has chat + utility |
 | Fleet Manager | `GET /fleet/status`, `GET /fleet/agents`, `POST /fleet/agents/register` | agent identity, bounded queueing, SQLite + cached GPU/CPU/RAM telemetry |
@@ -90,6 +91,36 @@ instance status/heartbeats for the dashboard and Agent Zero through
 persona metadata (`persona_id`, `persona_name`, `persona_prompt_path`) so a
 runner can prepend a fixed role prompt before task-specific instructions. It
 does not run Docker.
+
+## Built-in agent library
+
+Install the optional runner and point its self-call at this router:
+
+```powershell
+.venv\Scripts\pip install -e ".[agents]"
+$env:A0_LMM_ROUTER_AGENT_BASE_URL = "http://127.0.0.1:9000/v1"
+```
+
+On Windows, `SETUP.bat` installs the `[agents]` extra and `START.bat` derives
+that self-call URL from `OBSERVER_HOST` and `OBSERVER_PORT` when it is not
+already set in `.env`.
+
+List the built-in agents and run one with input supplied in the request:
+
+```powershell
+curl http://127.0.0.1:9000/agents
+curl -X POST http://127.0.0.1:9000/agents/code-review/runs `
+  -H "Content-Type: application/json" `
+  -d '{"input":"Review this diff: ..."}'
+```
+
+The catalog supplies each agent's role, task type, routing strategy, and
+optional `local_only` policy. Calls carry `X-App-Id: agent_library` and the
+agent id through normal routing analytics. With
+`A0_LMM_ROUTER_AUTO_UPSTREAMS=1`, agents without `local_only` may use a
+declared upstream only after local routing is exhausted; local-only agents
+never leave the fleet. Input is limited to 64 KiB and a run times out after
+120 seconds. Prompts are not exposed by the catalog or stored in telemetry.
 
 **CLI:** `python -m local_model_router [serve|doctor|list-models|test-route|config-check]`
 

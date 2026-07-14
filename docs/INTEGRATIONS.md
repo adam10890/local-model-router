@@ -8,6 +8,30 @@ aliases or automatic routing:
 http://127.0.0.1:9000/v1
 ```
 
+## Built-in agent library
+
+Install the optional runner with `pip install -e ".[agents]"` and set the
+router's self-call URL before starting the service:
+
+```text
+A0_LMM_ROUTER_AGENT_BASE_URL=http://127.0.0.1:9000/v1
+```
+
+Discover the built-in agents through `GET /agents`, then send supplied task
+context to `POST /agents/{id}/runs`:
+
+```powershell
+curl http://127.0.0.1:9000/agents
+curl -X POST http://127.0.0.1:9000/agents/implementation-plan/runs `
+  -H "Content-Type: application/json" `
+  -d '{"input":"Plan this change: ..."}'
+```
+
+The runner sends `X-App-Id: agent_library` and the configured routing intent
+to `/v1/chat/completions`. `local_only: true` in `conf/agents.yaml` prevents
+auto-upstream fallback; otherwise it remains subject to the router's
+local-first `A0_LMM_ROUTER_AUTO_UPSTREAMS=1` policy.
+
 ## Hermes
 
 In `%LOCALAPPDATA%\hermes\config.yaml`, keep provider `lmm-router` and change

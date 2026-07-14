@@ -83,6 +83,9 @@ codebase.
   (`global.health_cache_ttl` / `A0_LMM_ROUTER_HEALTH_CACHE_TTL`), and opt-in
   upstream-aware auto-routing (`A0_LMM_ROUTER_AUTO_UPSTREAMS=1` + declared
   `models:` per upstream; local-first preserved, embeddings stay local).
+  (11) ✅ router-backed built-in agent library (`GET /agents`,
+  `POST /agents/{id}/runs`, `[agents]` extra); agent prompts remain out of
+  telemetry and per-agent `local_only` preserves fleet-only handling.
   Future: per-app API keys, rate limits, `/metrics`, `/routing/history`,
   one-click "apply recommendation" (cookbook → fleet control).
 - Renaming modules toward a layered layout (`api/`, `routing/`, `backends/`,

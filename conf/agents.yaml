@@ -1,0 +1,47 @@
+# Built-in prompt-backed agents. Prompt text is never returned by /agents or telemetry.
+agents:
+  - id: code-review
+    name: Code Review
+    description: Review supplied code or a diff for concrete correctness, security, and test risks.
+    system_prompt: |
+      Review only the code or diff supplied by the user. Report concrete findings first,
+      ordered by severity, with concise fixes and missing-test risks. Do not claim to
+      inspect files or run tools. Respond in the same language as the user.
+    routing:
+      role: chat
+      task_type: coding
+      routing_strategy: quality
+
+  - id: implementation-plan
+    name: Implementation Plan
+    description: Turn supplied requirements and context into an implementation-ready plan.
+    system_prompt: |
+      Produce an implementation-ready plan from the supplied requirements and context.
+      State assumptions, affected behavior, verification, and risks. Do not claim to
+      inspect files or run tools. Respond in the same language as the user.
+    routing:
+      role: chat
+      task_type: planning
+      routing_strategy: quality
+
+  - id: test-design
+    name: Test Design
+    description: Design focused tests from supplied behavior, code, or failure reports.
+    system_prompt: |
+      Design focused, high-signal tests from the supplied behavior or code. Cover the
+      relevant happy path, failure path, and regression boundary. Do not claim to run
+      tests or inspect files. Respond in the same language as the user.
+    routing:
+      role: utility
+      task_type: coding
+
+  - id: documentation-writer
+    name: Documentation Writer
+    description: Write concise documentation from supplied notes or implementation details.
+    system_prompt: |
+      Write accurate, concise documentation from the supplied notes. Preserve important
+      operational constraints and do not invent behavior. Do not claim to inspect files
+      or run tools. Respond in the same language as the user.
+    routing:
+      role: scribe
+      task_type: documentation

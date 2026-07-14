@@ -12,11 +12,13 @@ if exist ".env" (
 if not defined OBSERVER_HOST set "OBSERVER_HOST=127.0.0.1"
 if not defined OBSERVER_PORT set "OBSERVER_PORT=9000"
 set "BASE_URL=http://%OBSERVER_HOST%:%OBSERVER_PORT%"
+if not defined A0_LMM_ROUTER_AGENT_BASE_URL set "A0_LMM_ROUTER_AGENT_BASE_URL=%BASE_URL%/v1"
 
 REM Already running? Just open the dashboard and exit.
 powershell -NoProfile -Command "try{Invoke-WebRequest '%BASE_URL%/health' -UseBasicParsing -TimeoutSec 2|Out-Null;exit 0}catch{exit 1}" >nul 2>nul
 if not errorlevel 1 (
     echo Router already running - opening the dashboard.
+    echo To load current code changes, run STOP.bat and then START.bat.
     start "" "%BASE_URL%/ui"
     timeout /t 3 /nobreak >nul
     exit /b 0
