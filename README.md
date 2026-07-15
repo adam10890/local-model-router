@@ -29,7 +29,7 @@ Agent Zero is client #1, not the owner.
 
 ## Status
 
-**0.7.0 - Router-backed built-in agents.** What works today:
+**0.8.0 - Guided local AI from first launch.** What works today:
 
 | Surface | Endpoint | Notes |
 |---|---|---|
@@ -38,8 +38,8 @@ Agent Zero is client #1, not the owner.
 | Routing (dry-run) | `POST /routing/request` | explainable capability-aware intent routing |
 | Routing preview | `GET /routing/preview` | which slot a role would get |
 | Routing catalog | `GET /routing/models`, `GET /routing/models/{id}`, `GET /routing/analytics` | safe model cards, recent decisions, latency/fallback/cache stats |
-| Agent orchestration | `POST /orchestrator/plans`, `GET /orchestrator/plans`, `GET /orchestrator/summary`, `GET /orchestrator/instances`, `POST /orchestrator/instances/{id}`, `POST /orchestrator/tickets/{id}/submit` | observe-first plan/ticket packets, sub-agent instance heartbeats, DOX reports, artifacts, wake markers |
-| Agent library | `GET /agents`, `POST /agents/{id}/runs` | built-in prompt-backed agents through router-selected models; `[agents]` extra required to run |
+| Legacy orchestration | protected `/orchestrator/*` | deprecated compatibility API; hidden from the dashboard, with no removal date assigned |
+| Agent library | `GET /agents`, `POST /agents/{id}/runs` | four built-in prompt-backed agents through router-selected models; runner included in Windows bundles |
 | OpenAI-compatible | `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/embeddings` | aliases + live/upstream models; chat streaming and local embedding forwarding |
 | Harnesses | `GET /harnesses`, `GET /harnesses/{id}`, dedicated `.../v1/models` + `.../v1/chat/completions` | one authoritative model per connection; Agent Zero has chat + utility |
 | Fleet Manager | `GET /fleet/status`, `GET /fleet/agents`, `POST /fleet/agents/register` | agent identity, bounded queueing, SQLite + cached GPU/CPU/RAM telemetry |
@@ -47,7 +47,10 @@ Agent Zero is client #1, not the owner.
 | Backends | `GET /backends` | local fleet + configured upstreams with capabilities |
 | App profiles | `GET /apps` | per-client routing policy |
 | Config preview | `GET /config/preview` | secrets redacted |
-| Dashboard | `GET /ui` | Chat, Overview, Harnesses, Compare / Routing, Orchestration, Cookbook |
+| Simple dashboard | `GET /ui` | Home, Chat, Models, and Connections; light/dark, English/Hebrew, LTR/RTL |
+| Advanced dashboard | `GET /ui#/advanced/fleet` | Fleet, Routing, Configuration, and Diagnostics |
+| Readiness | `GET /ui/status` | stable blocking/optional issues and one recommended next action |
+| First-run setup | loopback-only `/setup/*` | hardware discovery, reviewed plan, managed downloads, progress, cancellation, and smoke test |
 | Cookbook | `GET /cookbook` | scans your GGUF folder, VRAM fit math, per-role model recommendations with confidence grades |
 | A2A | `GET /.well-known/agent-card.json`, `POST /a2a` | agent card + skills for agent-to-agent use |
 | MCP | `python -m local_model_router mcp` | Streamable HTTP MCP server (port 8095, `[mcp]` extra) |
@@ -82,19 +85,22 @@ enable an in-memory deterministic cache for non-streaming requests with
 `temperature=0` or a fixed `seed`. Cache data is process-local and prompt
 bodies are never written to telemetry.
 
-**Agent orchestration:** V1 is coordination only. It writes plan/ticket
-workspaces under `A0_AGENT_ORCH_DIR` (or temp by default), creates draft
+**Legacy orchestration:** V1 coordination remains available for compatibility
+and returns `Deprecation: true`, but it is no longer shown in the dashboard.
+It writes plan/ticket workspaces under `A0_AGENT_ORCH_DIR` (or temp by default), creates draft
 `compose.plan.yaml` files, snapshots relevant DOX chains, and writes
 `WAKE.json` when the planner should resume. Sub-agent runners can report
 instance status/heartbeats for the dashboard and Agent Zero through
 `POST /orchestrator/instances/{id}`. Tickets and instances may carry
 persona metadata (`persona_id`, `persona_name`, `persona_prompt_path`) so a
 runner can prepend a fixed role prompt before task-specific instructions. It
-does not run Docker.
+does not run Docker. See `docs/future-orchestration.md` for the replacement
+gates; the `/agents` library below is separate and is not deprecated.
 
 ## Built-in agent library
 
-Install the optional runner and point its self-call at this router:
+Source installations can add the optional runner and point its self-call at
+this router. Self-contained Windows bundles already include it:
 
 ```powershell
 .venv\Scripts\pip install -e ".[agents]"
@@ -122,29 +128,53 @@ declared upstream only after local routing is exhausted; local-only agents
 never leave the fleet. Input is limited to 64 KiB and a run times out after
 120 seconds. Prompts are not exposed by the catalog or stored in telemetry.
 
-**CLI:** `python -m local_model_router [serve|doctor|list-models|test-route|config-check]`
+**CLI:** `imperium [serve|setup|doctor|list-models|test-route|config-check|update|rollback]`
 
-Roadmap (see `AGENTS.md`): per-app API keys, rate limits,
-Prometheus-style `/metrics`, upstream-aware auto-routing, and
-one-click cookbook recommendations.
+Roadmap (see `AGENTS.md`): first-run stabilization, per-app API keys, rate
+limits, Prometheus-style `/metrics`, and one-click cookbook recommendations.
 
-## Quickstart
+## Windows first run
 
-Requires Python 3.10+ and a running llama.cpp fleet (Router Mode or
-multi-slot) — the router routes to it, it does not start it.
+Download the Windows release ZIP, extract it, and run
+`Install-Imperium.bat`. The bundle supplies a private Python runtime and opens
+a six-stage browser wizard. Native llama.cpp is recommended; Docker is
+optional and is never started automatically. Every download shows its source,
+license, size, destination, estimated fit, and configuration preview before
+consent. Qwen3 1.7B Q8 is the first-run default with a conservative managed
+4K context. If current free memory is too low, setup asks the user to close
+other model servers or applications and scan again before it starts llama.cpp.
+
+The application installs under `%LOCALAPPDATA%\Programs\Imperium`. Models,
+state, backups, and managed configuration live under
+`%LOCALAPPDATA%\Imperium`. The previous application version is retained for
+rollback. Run `Rollback-Imperium.bat` from an extracted release or installed
+folder to atomically swap the active and previous application versions.
+
+Useful recovery commands:
+
+```powershell
+imperium setup --status
+imperium setup --repair
+imperium doctor --json
+imperium update --check
+imperium update --yes
+imperium rollback               # managed llama.cpp runtime
+.\Rollback-Imperium.bat          # Imperium application
+```
+
+## Developer quickstart
+
+Source development requires Python 3.10+. Existing repository configuration
+is preserved; otherwise `START.bat` opens the first-run wizard.
 
 ```powershell
 # 1. install
 python -m venv .venv
-.venv\Scripts\pip install -e ".[dev]"
+.venv\Scripts\pip install -e ".[dev,mcp,agents]"
 
-# 2. configure — describe your fleet
-Copy-Item conf\llama_cpp_servers.example.yaml conf\llama_cpp_servers.yaml
-# edit conf\llama_cpp_servers.yaml (slots, hosts, ports)
-
-# 3. run
-.venv\Scripts\python -m local_model_router
-# → http://127.0.0.1:9000  (OBSERVER_HOST / OBSERVER_PORT to change)
+# 2. start or continue setup
+.venv\Scripts\imperium setup
+# → http://127.0.0.1:9000/ui#/setup
 ```
 
 Or use the wrapper scripts: `scripts\run_provider.ps1` (Windows),

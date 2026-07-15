@@ -14,6 +14,10 @@ Durable documentation for operators, contributors, and coding agents.
 - `1.0-beta-roadmap.html` owns the accepted living product roadmap toward
   the standalone Imperium beta; keep decisions, gates, and deferred ideas
   current.
+- `future-orchestration.md` owns the legacy-orchestration deprecation and the
+  gates for any replacement execution surface.
+- `needle-bootstrap-evaluation.md` records why Needle remains an Advanced,
+  experimental candidate rather than the Windows bootstrap default.
 - `development/` owns Git workflow, branch catalog rules, and collaboration
   process.
 
