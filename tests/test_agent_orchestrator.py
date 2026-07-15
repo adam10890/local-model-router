@@ -104,6 +104,7 @@ def test_create_plan_writes_sqlite_rows_workspace_files_and_dox_chain(tmp_path, 
     resp = client.post("/orchestrator/plans", json=_plan_payload())
 
     assert resp.status_code == 200
+    assert resp.headers["Deprecation"] == "true"
     body = resp.json()
     assert body["plan"]["status"] == "open"
     assert body["tickets"][0]["status"] == "ready"
@@ -301,15 +302,9 @@ def test_instance_stale_and_finish_counts(tmp_path, monkeypatch):
     assert summary["instances"]["stale"] == 0
 
 
-def test_dashboard_exposes_observe_only_orchestration_tab():
+def test_dashboard_hides_legacy_orchestration_surface():
     from local_model_router.dashboard import dashboard_html
 
     html = dashboard_html()
-    assert "Orchestration" in html
-    assert "/orchestrator/plans" in html
-    assert "/orchestrator/instances" in html
-    assert "/orchestrator/summary" in html
-    assert "Sub-agent instances" in html
-    assert "persona" in html
-    assert "orchestration.ticket" in html
-    assert "Create plan" not in html
+    assert 'request("/orchestrator/' not in html
+    assert '["advanced/orchestration"' not in html

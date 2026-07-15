@@ -49,17 +49,40 @@ def test_dashboard_page_loads(tmp_path, monkeypatch):
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
     html = resp.text
-    assert "local-model-router" in html
-    assert "Routing test panel" in html
+    assert "Imperium" in html
+    assert "/ui/status" in html
+    assert "/setup/plan" in html
     assert "/v1/models" in html  # the page consumes the router's own API
-    assert 'get("/harnesses")' in html
-    assert "Add harness" in html
-    assert "Copy setup" in html
-    assert "Verify" in html
-    assert "@click=\"openTab('connect')\"" not in html
-    assert 'data-dashboard-section="harnesses"' in html
-    assert '<details class="harness-row"' in html
-    assert "Connection guides" in html
+    assert 'request("/harnesses")' in html
+    assert "Add custom harness" in html
+    assert "Verify connection" in html
+    assert "Connections" in html
+    assert "Advanced" in html
+    assert 'localStorage.getItem("imperium.chat")' in html
+    assert 'localStorage.setItem("imperium.chat"' in html
+    assert "if(state.setupRunning)return" in html
+    assert "__IMPERIUM_SETUP_TOKEN__" not in html
+
+
+def test_dashboard_has_six_resumable_setup_stages_and_simple_model_aliases(tmp_path, monkeypatch):
+    client = TestClient(_make_app(tmp_path, monkeypatch))
+    html = client.get("/ui").text
+
+    assert 'const labels=["stepWelcome","stepHardware","stepRuntime","stepModel","stepReview","stepInstall"]' in html
+    assert 'localStorage.getItem("imperium.setup")' in html
+    assert 'localStorage.setItem("imperium.setup"' in html
+    assert 'const simpleModelAliases=["auto","chat","fast","coder"]' in html
+    assert 'state.mode==="advanced"?all:all.filter' in html
+    assert 'min-height: 52px' in html
+    assert 'reportedGraphicsMemory' in html
+    assert 'data-action="finish-setup"' in html
+    assert 'state.setupFailure={code:error.payload?.error' in html
+    assert 'state.setupFailure?.remediation?.includes("rescan")' in html
+    assert 'await scanSystem()' in html
+    assert 'closeAppsRescan="Close other apps, then scan again"' in html
+    assert "stepBackend" not in html
+    assert 'request("/agents")' not in html
+    assert 'request("/orchestrator/' not in html
 
 
 # ---------------------------------------------------------------------------
