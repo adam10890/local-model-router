@@ -12,12 +12,20 @@ venv/
 
 # Downloaded llama.cpp binaries (Vulkan build for the iGPU worker)
 bin/
+runtime/
+models/
+*.gguf
+*.zip
+*.zip.sha256
 
 # Local runtime state — never commit
 conf/llama_cpp_servers.yaml
+conf/*.bak-*
 conf/router_state.json
 conf/harnesses.yaml.*.bak
 data/
+logs/
+*.log
 *.sqlite
 *.sqlite3
 *.db
@@ -25,7 +33,11 @@ data/
 # Secrets
 .env
 *.key
+*.token
 
 # OS / editor
 .DS_Store
 Thumbs.db
+codex-clipboard-*.png
+Screenshot*.png
+screenshots/

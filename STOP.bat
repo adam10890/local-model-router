@@ -1,28 +1,32 @@
 @echo off
 setlocal
-title Stop Local Model Router
 cd /d "%~dp0"
+title Stop Imperium
 
-REM Load .env (KEY=VALUE lines; # comments ignored)
 if exist ".env" (
-  for /f "usebackq eol=# tokens=1,* delims==" %%A in (".env") do (
-    if not "%%A"=="" set "%%A=%%B"
-  )
+    for /f "usebackq eol=# tokens=1,* delims==" %%A in (".env") do (
+        if not "%%A"=="" if not defined %%A set "%%A=%%B"
+    )
+)
+
+if not defined IMPERIUM_HOME set "IMPERIUM_HOME=%LOCALAPPDATA%\Imperium"
+if exist "%IMPERIUM_HOME%\.env" (
+    for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%IMPERIUM_HOME%\.env") do (
+        if not "%%A"=="" if not defined %%A set "%%A=%%B"
+    )
+)
+if not defined A0_LMM_ROUTER_CONFIG (
+    if exist "conf\llama_cpp_servers.yaml" (
+        set "A0_LMM_ROUTER_CONFIG=%CD%\conf\llama_cpp_servers.yaml"
+    ) else (
+        set "A0_LMM_ROUTER_CONFIG=%IMPERIUM_HOME%\conf\llama_cpp_servers.yaml"
+    )
 )
 if not defined OBSERVER_PORT set "OBSERVER_PORT=9000"
+set "PYTHON=.venv\Scripts\python.exe"
+if exist "runtime\python\python.exe" set "PYTHON=runtime\python\python.exe"
 
-echo Stopping the Local Model Router stack...
-
-REM START.bat titles its windows "Local Model Router*" (router + iGPU worker).
-REM /T takes their children (python serve, llama-server).
-taskkill /F /T /FI "WINDOWTITLE eq Local Model Router*" >nul 2>nul
-
-REM Belt-and-suspenders: free the configured router port and iGPU worker :8089.
-for %%P in (%OBSERVER_PORT% 8089) do (
-  for /f "tokens=5" %%I in ('netstat -ano ^| findstr "LISTENING" ^| findstr ":%%P"') do (
-    taskkill /F /PID %%I >nul 2>nul
-  )
-)
-
-echo Done. (Docker Model Runner is a service - it idle-unloads; Hermes runs separately.)
+if exist "%PYTHON%" "%PYTHON%" -m local_model_router setup --stop-runtime >nul 2>nul
+taskkill /F /T /FI "WINDOWTITLE eq Imperium - Local Model Router" >nul 2>nul
+echo Imperium stopped. Other applications and model servers were left untouched.
 timeout /t 2 /nobreak >nul

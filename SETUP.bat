@@ -1,57 +1,30 @@
 @echo off
 setlocal
-title Local Model Router - Setup
+title Imperium - Developer Setup
 cd /d "%~dp0"
 
-echo.
-echo =====================================================
-echo  Local Model Router - Setup
-echo =====================================================
-echo.
+echo Imperium developer setup
+echo This source checkout uses Python only for development. Release packages include a private runtime.
 
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo ERROR: Python 3.10+ was not found.
-    echo Install Python from https://python.org and run this again.
+    echo Python was not found. Download a self-contained Imperium release, or install Python 3.10+ for development.
     pause
     exit /b 1
 )
 
 if not exist ".venv\Scripts\python.exe" (
-    echo Creating virtual environment...
     python -m venv .venv
-    if errorlevel 1 (
-        echo ERROR: virtual environment creation failed.
-        pause
-        exit /b 1
-    )
+    if errorlevel 1 exit /b 1
 )
 
-echo Installing dependencies...
 ".venv\Scripts\python.exe" -m pip install -e ".[dev,mcp,agents]"
 if errorlevel 1 (
-    echo ERROR: dependency install failed.
+    echo Dependency installation failed.
     pause
     exit /b 1
 )
 
-if not exist ".env" (
-    if exist ".env.example" (
-        echo Creating .env from .env.example...
-        copy ".env.example" ".env" >nul
-    ) else (
-        echo Creating minimal .env...
-        > ".env" echo OBSERVER_HOST=127.0.0.1
-        >> ".env" echo OBSERVER_PORT=9000
-        >> ".env" echo # A0_LMM_ROUTER_API_KEY=change-me
-    )
-)
-
-echo.
-echo Optional config check:
-".venv\Scripts\python.exe" -m local_model_router config-check
-
-echo.
-echo Setup complete. Start with: START.bat
-echo.
+if not exist ".env" if exist ".env.example" copy ".env.example" ".env" >nul
+echo Setup complete. START.bat will open the first-run wizard when no configuration exists.
 pause
