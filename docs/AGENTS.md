@@ -16,6 +16,8 @@ Durable documentation for operators, contributors, and coding agents.
   current.
 - `future-orchestration.md` owns the legacy-orchestration deprecation and the
   gates for any replacement execution surface.
+- `future-improvements.md` owns the deferred improvement-ideas backlog
+  (candidate directions only; labeled deferred until selected).
 - `needle-bootstrap-evaluation.md` records why Needle remains an Advanced,
   experimental candidate rather than the Windows bootstrap default.
 - `development/` owns Git workflow, branch catalog rules, and collaboration
