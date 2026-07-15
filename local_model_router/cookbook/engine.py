@@ -53,6 +53,45 @@ _FOLDER_ROLES = {
 _EMBED_NAME_HINTS = ("embed", "bge-", "nomic", "minilm", "gte-")
 
 
+def assess_catalog_model(
+    model: Dict[str, Any],
+    hardware: Dict[str, Any],
+    backend: str,
+) -> Dict[str, Any]:
+    """Use the Cookbook memory rules for a first-run catalog entry."""
+    gpus = (hardware or {}).get("gpus") or []
+    vram_mb = max(
+        [
+            int(gpu.get("dedicated_vram_mb") or gpu.get("total_vram_mb") or 0)
+            for gpu in gpus
+            if isinstance(gpu, dict)
+        ]
+        or [0]
+    )
+    ram = (hardware or {}).get("ram") or {}
+    ram_gb = float(ram.get("total_mb") or 0) / 1024
+    size_gb = float(model.get("size_bytes") or 0) / GIB or float(model.get("size_gb") or 0)
+    kv_gb = float(model.get("estimated_kv_cache_gb") or 0)
+    gpu_required = max(float(model.get("min_vram_gb") or 0), size_gb + kv_gb + 0.8)
+    ram_required = max(float(model.get("min_ram_gb") or 0), size_gb + kv_gb + 3.0)
+    gpu_backend = backend not in {"cpu", "existing"}
+    if gpu_backend and vram_mb and vram_mb / 1024 >= gpu_required:
+        fit = "full_gpu"
+        reason = f"Fits {vram_mb / 1024:.1f} GB detected VRAM on {backend}"
+    elif ram_gb >= ram_required:
+        fit = "cpu" if backend == "cpu" else "partial_offload"
+        reason = f"Fits {ram_gb:.1f} GB detected RAM with CPU offload"
+    else:
+        fit = "incompatible"
+        reason = f"Needs about {ram_required:.1f} GB RAM or {gpu_required:.1f} GB VRAM"
+    return {
+        "fit": fit,
+        "fit_reason": reason,
+        "estimated_runtime_memory_gb": round(gpu_required if gpu_backend else ram_required, 2),
+        "fit_confidence": "high" if ram_gb and (vram_mb or backend == "cpu") else "medium" if ram_gb else "low",
+    }
+
+
 @dataclass
 class ModelReport:
     """Fit assessment for one GGUF model."""

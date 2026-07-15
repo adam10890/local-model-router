@@ -4,6 +4,46 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-14
+
+### Added
+
+- A resumable Windows-first wizard that discovers hardware, existing model
+  servers, llama.cpp installations, GGUF files, occupied ports, and prior
+  Imperium configuration before proposing changes.
+- Managed, versioned llama.cpp and Qwen3 1.7B Q8 installation with explicit
+  consent, checksums, progress, smoke tests, repair, and rollback.
+- A conservative 4K first-run context and live available-memory preflight that
+  asks users to close other model servers or applications before retrying.
+- A self-contained per-user Windows bundle and isolated clean-room validation
+  path for systems without Python, Git, or Docker.
+- An explicit application rollback launcher, release checksum verification,
+  and third-party license notices for bundled/offline assets.
+- A unified `GET /ui/status` readiness response and task-oriented Simple
+  dashboard with a separate Advanced workspace.
+
+### Changed
+
+- Rebuilt first run as a six-stage flow and made native llama.cpp the default;
+  Docker and existing servers remain optional.
+- Added consistent icons, light/dark themes, English/Hebrew localization, RTL,
+  responsive states, and browser-local chat persistence.
+- Kept the authenticated `/orchestrator/*` API for compatibility, marked its
+  responses deprecated, and removed it from dashboard navigation.
+- Bundled the Agent Library dependency and an immutable fallback catalog so
+  packaged installations expose the same four agents as source checkouts.
+
+### Fixed
+
+- Windows-reported adapter memory is no longer described as dedicated VRAM,
+  and inferred Vulkan support retains its real evidence and confidence.
+- Existing repository-local configuration is preserved during upgrade instead
+  of incorrectly opening first-run onboarding.
+- Setup storage and runtime failures return actionable remediation instead of
+  unhandled errors or silent backend changes.
+- Persisted runtime PIDs are verified against their executable, creation time,
+  and model command before Imperium will stop them.
+
 ## [0.7.0] - 2026-07-11
 
 ### Added
@@ -19,6 +59,22 @@ All notable changes to this project are documented here.
 
 - Windows setup/start/stop scripts now install the agent runner, derive its
   loopback self-call URL, and honor a configured router port when stopping.
+
+## [0.6.0] - 2026-07-11
+
+### Added
+
+- Ranked local candidate chains for deterministic failover when the preferred
+  slot is unhealthy or cannot serve the request.
+- A configurable health-probe TTL cache shared by routing and failover.
+- Opt-in upstream-aware auto-routing that preserves local-first behavior and
+  requires each upstream to declare its available models.
+
+### Changed
+
+- Routing decisions record ordered candidates, failover reason codes, and
+  upstream forwarding outcomes without storing prompt bodies.
+- Embeddings remain local even when automatic upstream fallback is enabled.
 
 ## [0.5.0] - 2026-07-05
 

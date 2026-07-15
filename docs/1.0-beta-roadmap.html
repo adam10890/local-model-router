@@ -161,7 +161,7 @@
     </p>
     <div class="meta">
       <span class="pill">סטטוס: חי ומתעדכן</span>
-      <span class="pill">עודכן: 2026-06-20</span>
+      <span class="pill">עודכן: 2026-07-14 · Imperium 0.8.0</span>
       <span class="pill">שם מוצר: Imperium</span>
       <span class="pill">כיוון מאושר: Native Imperium Studio</span>
       <span class="pill">עיקרון: Ponytail - מינימום שעובד</span>
@@ -282,10 +282,11 @@
       <ul>
         <li>OpenAI-compatible router: <code>/v1/models</code>, <code>/v1/chat/completions</code>.</li>
         <li>Routing מוסבר: aliases, auto, strategies, analytics.</li>
-        <li>Dashboard קיים: Overview, Connect, Compare/Routing, Orchestration, Cookbook.</li>
+        <li>Dashboard קיים: Home, Chat, Models, Connections, Fleet, Routing ו-Diagnostics.</li>
         <li>Cookbook סורק GGUF ומחשב התאמה ל-VRAM.</li>
         <li>Fleet control קיים אך כבוי כברירת מחדל.</li>
-        <li>Orchestrator: plans, tickets, instances, personas, DOX, WAKE.</li>
+        <li>Agent Library מובנה. API ה-Orchestrator הישן נשמר כתאימות deprecated ומוסתר מה-UI.</li>
+        <li>התקנת Windows עצמאית, managed llama.cpp ו-Setup מונחה בן שישה שלבים.</li>
         <li>בדיקות hermetic רחבות.</li>
       </ul>
     </article>
@@ -293,12 +294,10 @@
     <article class="card half">
       <h2>מה עדיין חסר לבטא אמיתית</h2>
       <ul>
-        <li>Onboarding שמסתיר קבצי config.</li>
         <li>Runner מינימלי שמריץ תתי-סוכנים בפועל.</li>
-        <li>Model setup בטוח: לא להוריד עשרות GB בלי אישור מפורש.</li>
-        <li>Readiness UX: מה קריטי, מה אופציונלי, ומה לתקן עכשיו.</li>
-        <li>Release/versioning: הגרסה בקוד, README והדשבורד חייבים להיות מסונכרנים.</li>
-        <li>Browser smoke לדשבורד, מעבר ל-string tests.</li>
+        <li>אימות clean-machine רחב על NVIDIA, AMD, Intel ו-CPU בלבד.</li>
+        <li>חתימה, update/rollback release-tested ויציבות חוזה API לקראת 1.0.</li>
+        <li>Browser smoke מלא לדשבורד בשתי השפות ובשתי ערכות הנושא.</li>
       </ul>
     </article>
   </section>
@@ -352,15 +351,12 @@
     <div class="phase">
       <div class="phase-id">0.6.0</div>
       <div>
-        <h3>Runner מינימלי לתתי-סוכנים</h3>
-        <p>זה השלב שבו orchestration מפסיק להיות observe-only בלבד.</p>
+        <h3>Routing core אמין</h3>
+        <p>שרשראות failover מדורגות, cache לבדיקות health ו-auto-upstream אופציונלי.</p>
         <ul>
-          <li>Local runner ראשון: subprocess שמפעיל PI למשימות קוד; loop פנימי פשוט למשימות לא-קוד.</li>
-          <li>Bounded concurrency לפי חומרה: כמה workers רצים במקביל.</li>
-          <li>כל worker מקבל חבילה: persona + loop + DOX + ticket prompt + artifact folder + success checks.</li>
-          <li>Package Preview בדשבורד לפני הרצה: מודל, runner, allowed paths, tools ובדיקות הצלחה.</li>
-          <li>ה-runner מדווח דרך <code>/orchestrator/instances/{id}</code>.</li>
-          <li>Stop/cancel task בסיסי.</li>
+          <li>Ordered local candidates ו-reason codes לכל fallback.</li>
+          <li>Health cache עם TTL מוגדר.</li>
+          <li>Upstream fallback נשאר opt-in ו-local-first.</li>
         </ul>
       </div>
     </div>
@@ -368,27 +364,26 @@
     <div class="phase">
       <div class="phase-id">0.7.0</div>
       <div>
-        <h3>חוויה ויזואלית של העבודה</h3>
-        <p>לא LangFlow עדיין. תצוגה פשוטה שמסבירה מה קורה.</p>
+        <h3>Agent Library דרך ה-router</h3>
+        <p>ארבעה סוכנים מובנים משתמשים באותו Chat Completions ובאותה מדיניות routing.</p>
         <ul>
-          <li>Flow view: Planner -> Tickets -> Workers -> Review -> Result.</li>
-          <li>Timeline לאירועים: created, running, blocked, completed.</li>
-          <li>Artifact browser לתוצרים.</li>
-          <li>התראות ברורות: blocked, failed, model unavailable, no capacity.</li>
+          <li>Metadata ציבורי בלי system prompts.</li>
+          <li>local_only, strategy, task type ו-agent id עוברים ל-routing ולטלמטריה בטוחה.</li>
+          <li>Runner אופציונלי מבוסס Pydantic AI.</li>
         </ul>
       </div>
     </div>
 
     <div class="phase">
-      <div class="phase-id">0.8.0</div>
+      <div class="phase-id">0.8.0 · current</div>
       <div>
-        <h3>Task UX למשתמש לא טכני</h3>
-        <p>המסך הראשי צריך להיות "מה תרצה להשיג?", לא "בחר endpoint".</p>
+        <h3>Windows first-run ו-Desktop רגוע</h3>
+        <p>משתמש מפעיל קובץ אחד ומגיע לצ'אט מקומי בלי Docker, YAML או Python חיצוני.</p>
         <ul>
-          <li>Task composer פשוט עם goal, files/context, output type.</li>
-          <li>Agent loops במקום templates: research, coding, docs, planning, local files.</li>
-          <li>Preview של plan לפני הרצה.</li>
-          <li>תצוגת privacy: מה נשאר מקומי ומה נשלח למודל.</li>
+          <li>Setup בן שישה שלבים: חומרה, runtime, מודל, אישור, התקנה ובדיקה.</li>
+          <li>Qwen3 1.7B Q8 כברירת מחדל עם התאמה מוסברת לחומרה.</li>
+          <li>Simple Home/Chat/Models/Connections ו-Advanced תפעולי נפרד.</li>
+          <li>Agent Library עובד גם מתוך חבילת Windows; orchestration ישן אינו מוצג.</li>
         </ul>
       </div>
     </div>
@@ -411,13 +406,13 @@
       <div class="phase-id">1.0.0-beta</div>
       <div>
         <h3>בטא ציבורית</h3>
-        <p>קריטריון: משתמש לא טכני יחסית יכול להפעיל, להריץ משימה, לראות סוכנים, ולקבל תוצר.</p>
+        <p>קריטריון: משתמש לא טכני יחסית יכול להתקין, לבחור מודל, לנהל שיחה ולחבר אפליקציה בלי עריכת YAML.</p>
         <ul>
           <li>אפליקציה נפתחת לדשבורד, לא לטרמינל בלבד.</li>
           <li>Setup guided עובד ללא עריכת YAML ידנית.</li>
           <li>מודל חזק נבחר או מומלץ באופן ברור.</li>
-          <li>רשת תתי-סוכנים רצה במגבלת משאבים.</li>
-          <li>תוצרי העבודה נשמרים וניתנים לפתיחה מהדשבורד.</li>
+          <li>Update, repair, rollback ו-uninstall עוברים בדיקות release.</li>
+          <li>חוזי API ציבוריים יציבים ומתועדים; orchestration עתידי נשאר אופציונלי.</li>
         </ul>
       </div>
     </div>
@@ -477,8 +472,8 @@
         </tr>
         <tr>
           <td>סוכנים</td>
-          <td>Planner ו-workers רצים ומדווחים status.</td>
-          <td>End-to-end local task.</td>
+          <td>ארבעת סוכני הספרייה רצים דרך אותו router; orchestration מתקדם נשאר אופציונלי.</td>
+          <td>Agent Library source + bundled smoke.</td>
         </tr>
         <tr>
           <td>דשבורד</td>

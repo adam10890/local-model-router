@@ -62,16 +62,21 @@ class ObserverBackend:
     endpoint.  Never mutates runtime state.
     """
 
-    def __init__(self, config_path: Optional[str] = None) -> None:
-        self.config_path = config_path or resolve_conf_path(__file__)
+    def __init__(self, config_path: Optional[str | os.PathLike[str]] = None) -> None:
+        self.config_path = os.fspath(config_path) if config_path is not None else resolve_conf_path(__file__)
         self._raw: Dict[str, Any] = {}
         self._load()
 
     def _load(self) -> None:
+        self._raw = {}
         if not os.path.exists(self.config_path):
             return
         with open(self.config_path, encoding="utf-8") as f:
             self._raw = yaml.safe_load(f) or {}
+
+    def reload(self) -> None:
+        """Reload the observer after an explicit setup/configuration write."""
+        self._load()
 
     def _make_manager(self):
         """Instantiate a fresh BackendManager from config (not the singleton)."""

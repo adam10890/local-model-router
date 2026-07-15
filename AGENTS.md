@@ -26,8 +26,9 @@ codebase.
   connections, setup manifests, and atomic `conf/harnesses.yaml` persistence.
 - `conf/` — fleet description. `llama_cpp_servers.yaml` is local-only
   (gitignored); the `.example` variant is the committed reference.
-  `upstreams.yaml`, `apps.yaml`, and `harnesses.yaml` are committed defaults
-  (no secrets).
+  `upstreams.yaml`, `apps.yaml`, `harnesses.yaml`, and `agents.yaml` are
+  committed defaults (no secrets). Packaged installs also carry an immutable
+  fallback agent catalog.
 - `docs/` — durable runbooks and development workflow docs.
 - `CONTRIBUTING.md` — public Git and contribution workflow; keep it aligned
   with `docs/development/git-workflow.md`.
@@ -86,8 +87,13 @@ codebase.
   (11) ✅ router-backed built-in agent library (`GET /agents`,
   `POST /agents/{id}/runs`, `[agents]` extra); agent prompts remain out of
   telemetry and per-agent `local_only` preserves fleet-only handling.
-  Future: per-app API keys, rate limits, `/metrics`, `/routing/history`,
-  one-click "apply recommendation" (cookbook → fleet control).
+  (12) Imperium 0.8.0 Windows-first setup: managed llama.cpp, hardware-aware
+  Qwen3 bootstrap, readiness API, self-contained installer, and task-oriented
+  Simple/Advanced dashboard. The legacy `/orchestrator/*` API remains
+  authenticated and deprecated but is hidden from the dashboard.
+  Future: orchestration replacement after first-run stability, per-app API
+  keys, rate limits, `/metrics`, `/routing/history`, and one-click "apply
+  recommendation" (cookbook → fleet control).
 - Renaming modules toward a layered layout (`api/`, `routing/`, `backends/`,
   `telemetry/`) is allowed once tests cover the seam being moved — never as a
   big-bang rewrite.

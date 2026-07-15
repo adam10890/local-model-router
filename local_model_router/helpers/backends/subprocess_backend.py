@@ -92,11 +92,18 @@ class SubprocessBackend(InferenceBackend):
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
                 )
             else:
-                creation = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+                visible = bool(config.get("visible_terminal"))
+                creation = (
+                    subprocess.CREATE_NEW_CONSOLE
+                    if visible and sys.platform == "win32"
+                    else subprocess.CREATE_NEW_PROCESS_GROUP
+                    if sys.platform == "win32"
+                    else 0
+                )
                 proc = subprocess.Popen(
                     cmd,
-                    stdout=log_file,
-                    stderr=subprocess.STDOUT,
+                    stdout=None if visible else log_file,
+                    stderr=None if visible else subprocess.STDOUT,
                     env=env,
                     creationflags=creation,
                 )
@@ -277,8 +284,12 @@ class SubprocessBackend(InferenceBackend):
             "-t", str(threads),
             "-np", str(parallel),
             "--port", str(port),
-            "--host", "0.0.0.0",
+            "--host", str(config.get("host") or "127.0.0.1"),
         ]
+
+        alias = str(config.get("model_id") or "").strip()
+        if alias:
+            cmd.extend(["--alias", alias])
 
         if gpu_layers != 0:
             cmd.extend(["-ngl", str(gpu_layers)])
@@ -302,7 +313,9 @@ class SubprocessBackend(InferenceBackend):
         if rf:
             cmd.extend(["--reasoning-format", rf])
 
-        if config.get("jinja") is False:
+        if config.get("jinja") is True:
+            cmd.append("--jinja")
+        elif config.get("jinja") is False:
             cmd.append("--no-jinja")
 
         # Extra args passthrough

@@ -17,6 +17,10 @@ control (`fleet_control.py`). Agent ticket coordination lives in
 - `fleet_manager.py` owns agent identity, bounded admission, SQLite state.
 - `fleet_control.py` owns the opt-in start/stop facade over
   `helpers/llama_cpp_manager.BackendManager`.
+- `readiness.py` turns setup, runtime, model, and fleet state into the stable
+  Simple-dashboard status and next-action contract.
+- `agent_library.py` owns the safe built-in agent catalog and self-routed
+  Pydantic AI runner.
 - `agent_orchestrator.py` owns observe-first plan/ticket state, workspace
   packets, DOX chain snapshots, and wake markers. It must not launch
   containers or edit `AGENTS.md` files directly.
@@ -36,7 +40,11 @@ control (`fleet_control.py`). Agent ticket coordination lives in
   workspaces, not fleet telemetry; list/summary endpoints must not expose
   prompt bodies. Persona prompts live as workspace files referenced by
   `persona_prompt_path`, not as list payload text. Sub agents submit DOX
-  reports or explicit unchanged reasons.
+  reports or explicit unchanged reasons. The surface is retained for
+  compatibility, hidden from the dashboard, and returns `Deprecation: true`.
+- `/setup/*` is loopback-only, protected by an ephemeral setup token, and may
+  download or write only after explicit reviewed consent. `GET /ui/status`
+  uses stable issue/action codes instead of asking the UI to infer remedies.
 - OpenAI-compatible endpoints reuse the routing decision path and forward to
   the selected llama.cpp slot; no duplicate routing policy.
 - `POST /v1/embeddings` selects the local `embed` lane through that same

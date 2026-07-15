@@ -1,895 +1,658 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" dir="ltr" data-theme="light">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Imperium - local-model-router</title>
-<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-<style>
-  :root { --bg:#0f1115; --card:#181b22; --line:#262a33; --text:#e6e8ee; --dim:#8b93a3;
-          --ok:#3fb950; --warn:#d29922; --err:#f85149; --accent:#58a6ff; }
-  * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--text);
-         font:14px/1.5 system-ui, "Segoe UI", sans-serif; padding:1.2rem; }
-  h1 { font-size:1.15rem; margin:0 0 1rem; display:flex; align-items:center; gap:.6rem; }
-  h2 { font-size:.8rem; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); margin:0 0 .6rem; }
-  .grid { display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(330px,1fr)); }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:1rem; }
-  .row { display:flex; justify-content:space-between; gap:.5rem; padding:.25rem 0;
-         border-bottom:1px dashed var(--line); }
-  .row:last-child { border-bottom:none; }
-  .dim { color:var(--dim); }
-  .badge { display:inline-block; padding:.05rem .55rem; border-radius:99px; font-size:.75rem; }
-  .ok   { background:rgba(63,185,80,.15);  color:var(--ok); }
-  .warn { background:rgba(210,153,34,.15); color:var(--warn); }
-  .err  { background:rgba(248,81,73,.15);  color:var(--err); }
-  input, select, textarea { background:#0d1016; color:var(--text); border:1px solid var(--line);
-          border-radius:6px; padding:.45rem .6rem; font:inherit; width:100%; }
-  button { background:var(--accent); color:#08111f; border:0; border-radius:6px;
-           padding:.45rem 1rem; font:inherit; font-weight:600; cursor:pointer; }
-  button:hover { filter:brightness(1.1); }
-  .btn-sm { padding:.12rem .55rem; font-size:.72rem; font-weight:600; text-transform:none; letter-spacing:0; }
-  .btn-stop { background:rgba(248,81,73,.85); color:#fff; }
-  .btn-ghost { background:transparent; color:var(--accent); border:1px solid var(--line); }
-  pre { background:#0d1016; border:1px solid var(--line); border-radius:6px; padding:.7rem;
-        overflow:auto; font-size:.78rem; max-height:300px; white-space:pre-wrap; }
-  .key-bar { display:flex; gap:.5rem; align-items:center; margin-bottom:1rem; max-width:560px; }
-  .pulse { width:.6rem; height:.6rem; border-radius:50%; background:var(--err); }
-  .pulse.up { background:var(--ok); }
-  table { width:100%; border-collapse:collapse; font-size:.82rem; }
-  td, th { text-align:left; padding:.3rem .4rem; border-bottom:1px solid var(--line); }
-  th { color:var(--dim); font-weight:500; }
-  .tabs { display:flex; gap:.4rem; margin-bottom:1rem; border-bottom:1px solid var(--line); }
-  .tab { background:transparent; color:var(--dim); border:0; border-bottom:2px solid transparent;
-         border-radius:0; padding:.45rem .9rem; font-weight:600; }
-  .tab.active { color:var(--text); border-bottom-color:var(--accent); }
-  .snippet-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:.4rem; }
-  .harness-stack { display:grid; gap:.75rem; }
-  .harness-row { background:var(--card); border:1px solid var(--line); border-radius:10px; }
-  .harness-row summary { cursor:pointer; padding:.75rem 1rem; }
-  .harness-row[open] summary { border-bottom:1px solid var(--line); }
-  .harness-summary { display:inline-flex; justify-content:space-between; align-items:center;
-                     gap:1rem; width:calc(100% - 1.25rem); margin-left:.35rem; }
-  .harness-body { padding:.75rem 1rem 1rem; }
-  .harness-meta { display:flex; gap:.8rem; align-items:center; font-size:.76rem; }
-  .reasons { font-size:.76rem; color:var(--dim); padding:.3rem .4rem .5rem; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="application-name" content="Imperium">
+  <link rel="icon" href="/ui/icons/cube.svg" type="image/svg+xml">
+  <title>Imperium — Local model router</title>
+  <style>
+    :root {
+      --font: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+      --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+      --bg: #f7f8fa;
+      --surface: #ffffff;
+      --surface-subtle: #f2f4f8;
+      --surface-raised: #ffffff;
+      --sidebar: #fbfbfc;
+      --text: #171a21;
+      --text-soft: #5f6674;
+      --text-faint: #858c98;
+      --border: #dfe2e8;
+      --border-strong: #c9ced8;
+      --primary: #3157c8;
+      --primary-hover: #2448b8;
+      --primary-soft: #edf1ff;
+      --success: #378f43;
+      --success-soft: #edf8ef;
+      --warning: #c96c00;
+      --warning-soft: #fff5e8;
+      --danger: #b83a42;
+      --danger-soft: #fff0f1;
+      --focus: #6c8cff;
+      --shadow: 0 14px 38px rgba(26, 34, 57, .08);
+      --radius-sm: 8px;
+      --radius: 12px;
+      --radius-lg: 18px;
+      --sidebar-width: 276px;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --space-5: 24px;
+      --space-6: 32px;
+      --space-7: 48px;
+      --space-8: 64px;
+    }
+    html[data-theme="dark"] {
+      --bg: #11141a;
+      --surface: #191d25;
+      --surface-subtle: #202630;
+      --surface-raised: #1d222b;
+      --sidebar: #151920;
+      --text: #f3f5f8;
+      --text-soft: #b0b7c4;
+      --text-faint: #858e9e;
+      --border: #303641;
+      --border-strong: #434b59;
+      --primary: #809cff;
+      --primary-hover: #99afff;
+      --primary-soft: #212c4f;
+      --success: #6fc27a;
+      --success-soft: #1d3323;
+      --warning: #f2a13d;
+      --warning-soft: #3a2a18;
+      --danger: #ef7c83;
+      --danger-soft: #3c2226;
+      --focus: #9cb0ff;
+      --shadow: 0 18px 44px rgba(0, 0, 0, .24);
+    }
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: var(--bg); }
+    body { margin: 0; min-height: 100vh; color: var(--text); background: var(--bg); font: 15px/1.5 var(--font); }
+    button, input, select, textarea { font: inherit; }
+    button, a, input, select, textarea { outline: none; }
+    :focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 35%, transparent); border-color: var(--focus) !important; }
+    button { color: inherit; }
+    a { color: var(--primary); text-decoration: none; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: 10px; font-size: clamp(34px, 4vw, 52px); line-height: 1.08; letter-spacing: -.035em; }
+    h2 { margin-bottom: 8px; font-size: 26px; line-height: 1.18; letter-spacing: -.02em; }
+    h3 { margin-bottom: 6px; font-size: 18px; line-height: 1.3; }
+    .muted { color: var(--text-soft); }
+    .faint { color: var(--text-faint); }
+    .mono, code { direction: ltr; unicode-bidi: isolate; font-family: var(--mono); font-size: .9em; }
+    .shell { display: grid; grid-template-columns: var(--sidebar-width) minmax(0,1fr); min-height: 100vh; }
+    .sidebar { position: sticky; inset-block-start: 0; height: 100vh; display: flex; flex-direction: column; padding: 28px 16px 18px; overflow-y: auto; background: var(--sidebar); border-inline-end: 1px solid var(--border); }
+    .brand { display: flex; align-items: center; gap: 12px; padding: 0 12px 30px; }
+    .brand-mark { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 13px; background: #172549; }
+    .brand-mark img { filter: invert(1); width: 25px; height: 25px; }
+    .brand strong { display: block; font-size: 20px; line-height: 1.15; letter-spacing: -.015em; }
+    .brand span { color: var(--text-soft); font-size: 13px; }
+    .version { display: inline-flex; margin-top: 4px; padding: 1px 7px; border-radius: 5px; background: var(--surface-subtle); color: var(--text-soft); font-size: 11px; }
+    .nav { display: grid; gap: 5px; }
+    .nav-button, .advanced-toggle { width: 100%; display: flex; align-items: center; gap: 13px; min-height: 46px; padding: 0 13px; border: 0; border-radius: 10px; color: var(--text-soft); background: transparent; cursor: pointer; text-align: start; }
+    .nav-button:hover, .advanced-toggle:hover { color: var(--text); background: var(--surface-subtle); }
+    .nav-button.active { color: var(--primary); background: var(--primary-soft); font-weight: 600; }
+    .nav-button img, .advanced-toggle img, .side-control img { width: 22px; height: 22px; opacity: .82; }
+    .nav-button.active img { filter: invert(37%) sepia(73%) saturate(1200%) hue-rotate(200deg); }
+    html[data-theme="dark"] .nav-button img, html[data-theme="dark"] .advanced-toggle img, html[data-theme="dark"] .side-control img, html[data-theme="dark"] .icon { filter: invert(1); }
+    .advanced { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
+    .advanced-toggle .caret { margin-inline-start: auto; width: 16px; transition: transform .18s ease; }
+    .advanced-toggle[aria-expanded="true"] .caret { transform: rotate(180deg); }
+    .advanced-items { display: none; padding: 5px 0 0 15px; }
+    .advanced-items.open { display: grid; gap: 3px; }
+    .advanced-items .nav-button { min-height: 38px; font-size: 13px; }
+    .sidebar-footer { margin-top: auto; padding-top: 26px; }
+    .side-control { width: 100%; display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 10px; min-height: 42px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--text-soft); cursor: pointer; text-align: start; }
+    .side-control:hover { background: var(--surface-subtle); color: var(--text); }
+    .side-value { color: var(--text); font-size: 13px; }
+    .system-time { display: flex; align-items: flex-start; gap: 12px; margin-top: 16px; padding: 18px 12px 0; border-top: 1px solid var(--border); font-size: 12px; }
+    .status-dot { flex: 0 0 auto; width: 10px; height: 10px; margin-top: 4px; border-radius: 99px; background: var(--success); }
+    .main { min-width: 0; padding: 64px clamp(28px, 5vw, 76px); }
+    .page { width: min(1120px,100%); margin: 0 auto; animation: enter .18s ease; }
+    @keyframes enter { from { opacity: .45; transform: translateY(4px); } }
+    .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 36px; }
+    .page-header p { max-width: 720px; margin-bottom: 0; color: var(--text-soft); font-size: 17px; }
+    .eyebrow { margin-bottom: 8px; color: var(--primary); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 42px; padding: 0 17px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface); color: var(--text); font-weight: 600; cursor: pointer; }
+    .button:hover { border-color: var(--primary); color: var(--primary); }
+    .button.primary { border-color: var(--primary); background: var(--primary); color: #fff; }
+    html[data-theme="dark"] .button.primary { color: #111722; }
+    .button.primary:hover { background: var(--primary-hover); color: #fff; }
+    .button.danger { border-color: var(--danger); color: var(--danger); }
+    .button.ghost { border-color: transparent; background: transparent; }
+    .button.small { min-height: 34px; padding: 0 12px; font-size: 13px; }
+    .button img { width: 18px; height: 18px; }
+    .button.primary img { filter: invert(1); }
+    .button:disabled { opacity: .5; cursor: not-allowed; }
+    .status-banner { display: flex; gap: 14px; margin-bottom: 26px; padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    .status-banner.warning { border-color: color-mix(in srgb,var(--warning) 35%,var(--border)); background: var(--warning-soft); }
+    .status-banner.success { border-color: color-mix(in srgb,var(--success) 30%,var(--border)); background: var(--success-soft); }
+    .status-banner img { width: 22px; height: 22px; }
+    .readiness { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); margin: 56px 0 64px; }
+    .stage { position: relative; min-width: 0; padding-inline-end: 34px; }
+    .stage:not(:last-child)::after { content: ""; position: absolute; inset-block-start: 20px; inset-inline-start: 50px; width: calc(100% - 58px); height: 1px; background: var(--border-strong); }
+    .stage-head { position: relative; z-index: 1; display: flex; align-items: center; gap: 12px; min-height: 42px; }
+    .stage-icon { display: grid; flex: 0 0 auto; width: 42px; height: 42px; place-items: center; border: 2px solid var(--border-strong); border-radius: 50%; background: var(--bg); }
+    .stage-icon img { width: 20px; height: 20px; }
+    .stage.complete .stage-icon { border-color: var(--success); }
+    .stage.complete .stage-title { color: var(--success); }
+    .stage.current .stage-icon { border-color: var(--warning); }
+    .stage.current .stage-title { color: var(--warning); }
+    .stage-title { font-weight: 650; }
+    .stage-detail { margin: 8px 0 0 54px; color: var(--text-soft); font-size: 13px; }
+    .section-title { margin-bottom: 28px; }
+    .section-title p { margin: 0; color: var(--text-soft); }
+    .model-recommendation { padding: 0; border-bottom: 1px solid var(--border); }
+    .model-row { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 22px; padding: 10px 0 24px; }
+    .model-symbol { display: grid; width: 58px; height: 58px; place-items: center; border-radius: 50%; background: var(--primary); }
+    .model-symbol img { width: 31px; height: 31px; filter: invert(1); }
+    .model-name { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
+    .badge { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 2px 8px; border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text-soft); font-size: 12px; font-weight: 600; }
+    .badge.primary { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+    .badge.success { border-color: color-mix(in srgb,var(--success) 45%,var(--border)); color: var(--success); background: var(--success-soft); }
+    .badge.warning { border-color: color-mix(in srgb,var(--warning) 45%,var(--border)); color: var(--warning); background: var(--warning-soft); }
+    .meta-line { display: flex; flex-wrap: wrap; gap: 10px 20px; color: var(--text-soft); font-size: 13px; }
+    .meta-item { display: inline-flex; align-items: center; gap: 7px; }
+    .meta-item img { width: 17px; height: 17px; opacity: .75; }
+    .why { display: flex; align-items: flex-start; gap: 10px; padding: 18px 2px; color: var(--text-soft); font-size: 13px; }
+    .why img { width: 20px; height: 20px; }
+    .why strong { color: var(--text); }
+    .facts { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); margin-top: 92px; padding: 16px 0 28px; border-bottom: 1px solid var(--border); }
+    .fact { display: grid; grid-template-columns: 34px 1fr; gap: 12px; min-width: 0; padding: 0 26px; border-inline-start: 1px solid var(--border); }
+    .fact:first-child { padding-inline-start: 0; border: 0; }
+    .fact img { width: 30px; height: 30px; }
+    .fact strong, .fact span { display: block; }
+    .fact strong { font-size: 12px; }
+    .fact span { overflow: hidden; color: var(--text-soft); font-size: 13px; text-overflow: ellipsis; }
+    .additional { margin-top: 28px; }
+    .issue-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 13px 0; border-top: 1px solid var(--border); }
+    .quick-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit,minmax(250px,1fr)); gap: 18px; }
+    .card { padding: 22px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    .card:hover { border-color: var(--border-strong); }
+    .card-icon { display: grid; width: 42px; height: 42px; margin-bottom: 18px; place-items: center; border-radius: 10px; background: var(--surface-subtle); }
+    .card-icon img { width: 23px; height: 23px; }
+    .card-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; }
+    .tabs { display: flex; gap: 4px; margin: -10px 0 28px; padding-bottom: 1px; border-bottom: 1px solid var(--border); }
+    .tab { min-height: 42px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-soft); cursor: pointer; }
+    .tab.active { border-color: var(--primary); color: var(--primary); font-weight: 650; }
+    .field { display: grid; gap: 7px; margin-bottom: 16px; }
+    .field label { font-size: 13px; font-weight: 600; }
+    .input, .select, .textarea { width: 100%; min-height: 42px; padding: 9px 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--text); }
+    .textarea { min-height: 92px; resize: vertical; }
+    .copy-field { display: grid; grid-template-columns: minmax(0,1fr) auto; }
+    .copy-field .input { border-start-end-radius: 0; border-end-end-radius: 0; }
+    .copy-field .button { border-inline-start: 0; border-start-start-radius: 0; border-end-start-radius: 0; }
+    .chat-layout { display: grid; grid-template-rows: auto minmax(360px,1fr) auto; min-height: calc(100vh - 128px); }
+    .chat-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+    .chat-messages { display: flex; flex-direction: column; gap: 18px; padding: 28px 0; overflow-y: auto; }
+    .empty { display: grid; place-items: center; min-height: 360px; text-align: center; color: var(--text-soft); }
+    .empty img { width: 48px; height: 48px; margin-bottom: 16px; opacity: .55; }
+    .prompt-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; }
+    .prompt-chip { padding: 8px 12px; border: 1px solid var(--border); border-radius: 99px; background: var(--surface); color: var(--text-soft); cursor: pointer; }
+    .message { max-width: min(760px,88%); padding: 14px 17px; border-radius: 14px; white-space: pre-wrap; }
+    .message.user { align-self: flex-end; background: var(--primary); color: #fff; border-end-end-radius: 4px; }
+    .message.assistant { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-end-start-radius: 4px; }
+    .routing-detail { margin-top: 10px; color: var(--text-faint); font-size: 11px; }
+    .composer { position: sticky; inset-block-end: 0; padding: 14px 0 0; background: linear-gradient(transparent,var(--bg) 18%); }
+    .composer-box { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 10px; padding: 10px; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
+    .composer textarea { min-height: 48px; max-height: 160px; padding: 10px; border: 0; resize: vertical; background: transparent; color: var(--text); }
+    .icon-button { display: grid; width: 42px; height: 42px; place-items: center; border: 0; border-radius: 9px; background: var(--primary); cursor: pointer; }
+    .icon-button img { width: 20px; height: 20px; filter: invert(1); }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 13px 15px; border-bottom: 1px solid var(--border); text-align: start; vertical-align: top; }
+    th { color: var(--text-soft); background: var(--surface-subtle); font-size: 12px; font-weight: 650; }
+    tr:last-child td { border-bottom: 0; }
+    .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
+    .search { width: min(320px,100%); }
+    .wizard-shell { display: grid; grid-template-columns: 210px minmax(0,1fr); min-height: 520px; border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; background: var(--surface); box-shadow: var(--shadow); }
+    .wizard-side { padding: 24px 18px; background: var(--surface-subtle); border-inline-end: 1px solid var(--border); }
+    .wizard-side h2 { font-size: 18px; }
+    .wizard-progress { display: grid; gap: 9px; margin-top: 22px; }
+    .wizard-step { display: grid; grid-template-columns: 25px 1fr; align-items: center; gap: 10px; color: var(--text-soft); font-size: 12px; }
+    .wizard-step-number { display: grid; width: 25px; height: 25px; place-items: center; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--surface); }
+    .wizard-step.active { color: var(--primary); font-weight: 700; }
+    .wizard-step.active .wizard-step-number { border-color: var(--primary); background: var(--primary); color: #fff; }
+    .wizard-step.done .wizard-step-number { border-color: var(--success); color: var(--success); }
+    .wizard-body { display: flex; flex-direction: column; min-width: 0; padding: 28px 36px 24px; }
+    .wizard-content { max-width: 620px; }
+    .wizard-content > h1 { font-size: clamp(28px,3vw,40px); }
+    .wizard-content > p { color: var(--text-soft); font-size: 15px; }
+    .wizard-options { display: grid; gap: 8px; margin-top: 18px; }
+    .option { display: grid; grid-template-columns: auto 20px minmax(0,1fr); align-items: center; gap: 10px; min-height: 52px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 9px; cursor: pointer; }
+    .option:hover, .option.selected { border-color: var(--primary); background: var(--primary-soft); }
+    .option.disabled { opacity: .58; cursor: not-allowed; background: var(--surface-subtle); }
+    .option > img { width: 19px; height: 19px; }
+    .option > input + span { grid-column: 2 / -1; }
+    .option input { width: 18px; height: 18px; }
+    .option strong, .option span { display: block; }
+    .option span { color: var(--text-soft); font-size: 13px; }
+    .language-choice { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+    .language-choice .button[aria-pressed="true"] { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); }
+    .choice-group { margin: 20px 0 0; padding: 0; border: 0; }
+    .choice-group legend { margin-bottom: 8px; font-size: 13px; font-weight: 650; }
+    .acceleration { display: flex; align-items: flex-start; gap: 10px; margin-top: 18px; padding: 13px 14px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-subtle); }
+    .acceleration > img { width: 20px; height: 20px; }
+    .technical-details { margin-top: 12px; color: var(--text-soft); font-size: 13px; }
+    .technical-details summary { width: fit-content; cursor: pointer; color: var(--primary); }
+    .technical-details .detail-body { margin-top: 10px; padding: 12px 14px; border-inline-start: 2px solid var(--border-strong); }
+    .wizard-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: auto; padding-top: 24px; }
+    .progress-bar { width: 100%; height: 8px; overflow: hidden; border-radius: 99px; background: var(--surface-subtle); }
+    .progress-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--primary); transition: width .25s ease; }
+    .log { max-height: 220px; margin-top: 18px; padding: 14px; overflow: auto; border-radius: 8px; background: #10141c; color: #d8dfec; font: 12px/1.6 var(--mono); direction: ltr; text-align: left; }
+    [dir="rtl"] img[src$="arrow-right.svg"], [dir="rtl"] img[src$="arrow-left.svg"] { transform: scaleX(-1); }
+    .two-col { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 18px; }
+    .drawer { position: fixed; z-index: 40; inset: 0; display: none; background: rgba(7,10,16,.42); }
+    .drawer.open { display: block; }
+    .drawer-panel { position: absolute; inset-block: 0; inset-inline-end: 0; width: min(560px,94vw); padding: 26px; overflow-y: auto; background: var(--surface); box-shadow: var(--shadow); }
+    .drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
+    .json { padding: 16px; overflow: auto; border-radius: 9px; background: #10141c; color: #d8dfec; font: 12px/1.55 var(--mono); white-space: pre-wrap; direction: ltr; text-align: left; }
+    .toast-region { position: fixed; z-index: 80; inset-inline-end: 22px; inset-block-end: 22px; display: grid; gap: 10px; width: min(360px,calc(100vw - 44px)); }
+    .toast { padding: 13px 15px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface-raised); box-shadow: var(--shadow); }
+    .skeleton { min-height: 20px; border-radius: 6px; background: linear-gradient(90deg,var(--surface-subtle),var(--border),var(--surface-subtle)); background-size: 200% 100%; animation: pulse 1.3s infinite; }
+    @keyframes pulse { to { background-position: -200% 0; } }
+    .mobile-menu { display: none; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    @media (max-width: 920px) {
+      .shell { grid-template-columns: 1fr; }
+      .sidebar { position: fixed; z-index: 50; inset-block: 0; inset-inline-start: 0; width: min(var(--sidebar-width),86vw); transform: translateX(-105%); box-shadow: var(--shadow); transition: transform .2s ease; }
+      [dir="rtl"] .sidebar { transform: translateX(105%); }
+      .sidebar.open { transform: translateX(0); }
+      .main { padding: 88px 22px 40px; }
+      .mobile-menu { position: fixed; z-index: 45; inset-block-start: 18px; inset-inline-start: 18px; display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+      .mobile-menu img { width: 22px; height: 22px; }
+      .readiness { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 24px 0; }
+      .stage:nth-child(2)::after { display: none; }
+      .facts { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 24px 0; margin-top: 56px; }
+      .fact:nth-child(3) { border-inline-start: 0; padding-inline-start: 0; }
+      .wizard-shell { grid-template-columns: 1fr; }
+      .wizard-side { border-inline-end: 0; border-bottom: 1px solid var(--border); }
+      .wizard-progress { grid-template-columns: repeat(6,1fr); }
+      .wizard-step { display: none; }
+      .wizard-step.active { display: flex; }
+    }
+    @media (max-width: 620px) {
+      .main { padding-inline: 16px; }
+      .page-header, .toolbar { align-items: stretch; flex-direction: column; }
+      .readiness, .facts, .two-col { grid-template-columns: 1fr; }
+      .stage { padding-bottom: 8px; }
+      .stage::after { display: none; }
+      .fact { padding: 18px 0; border-inline-start: 0; border-top: 1px solid var(--border); }
+      .model-row { grid-template-columns: auto minmax(0,1fr); }
+      .model-row .button { grid-column: 1 / -1; width: 100%; }
+      .wizard-shell { min-height: 0; }
+      .wizard-body { padding: 24px 18px 20px; }
+      .wizard-actions { align-items: stretch; flex-direction: column-reverse; }
+      .wizard-actions .button { width: 100%; }
+      .issue-row { align-items: flex-start; flex-direction: column; }
+    }
+    @media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+  </style>
 </head>
-<body x-data="dashboard()" x-init="boot()">
-
-<h1><span class="pulse" :class="health.status === 'ok' ? 'up' : ''"></span>
-    Imperium <span class="dim">(local-model-router)</span>
-    <span class="dim" x-text="health.version ? 'v' + health.version : ''"></span></h1>
-
-<div class="key-bar">
-  <input type="password" placeholder="API key (only if configured)" x-model="apiKey"
-         @change="saveKey(); refresh()">
-  <button @click="refresh()">Refresh</button>
-</div>
-
-<nav class="tabs">
-  <button class="tab" :class="tab==='chat' && 'active'" @click="openTab('chat')">Chat</button>
-  <button class="tab" :class="tab==='overview' && 'active'" @click="openTab('overview')">Overview</button>
-  <button class="tab" :class="tab==='harnesses' && 'active'" @click="openTab('harnesses')">Harnesses</button>
-  <button class="tab" :class="tab==='compare' && 'active'" @click="openTab('compare')">Compare / Routing</button>
-  <button class="tab" :class="tab==='orchestration' && 'active'" @click="openTab('orchestration')">Orchestration</button>
-  <button class="tab" :class="tab==='cookbook' && 'active'" @click="openTab('cookbook')">Cookbook</button>
-</nav>
-
-<!-- ════════════════════ CHAT ════════════════════ -->
-<div x-show="tab==='chat'" x-cloak style="max-width:820px;">
-  <div class="card">
-    <h2 style="display:flex; justify-content:space-between; align-items:center;">
-      <span>Chat <span class="dim" style="text-transform:none; letter-spacing:0;">· talk to the router directly, no other harness</span></span>
-      <span style="display:flex; gap:.4rem; align-items:center;">
-        <select x-model="chat.model" style="width:auto; max-width:340px;">
-          <option value="auto">auto</option>
-          <template x-for="m in models" :key="m.id">
-            <option x-show="m.id !== 'auto'" :value="m.id" x-text="m.id"></option>
-          </template>
-        </select>
-        <button class="btn-sm btn-ghost" @click="chat.messages=[]; chat.error=''">clear</button>
-      </span>
-    </h2>
-
-    <div x-ref="chatlog" style="display:flex; flex-direction:column; gap:.6rem; min-height:200px;
-         max-height:55vh; overflow:auto; padding:.3rem 0;">
-      <template x-for="(m,i) in chat.messages" :key="i">
-        <div style="border:1px solid var(--line); border-radius:10px; padding:.5rem .7rem; white-space:pre-wrap;"
-             :style="m.role==='user'
-               ? 'align-self:flex-end; background:#1d2530; max-width:85%;'
-               : 'align-self:flex-start; background:#161a21; max-width:92%;'">
-          <div class="dim" style="font-size:.7rem; margin-bottom:.2rem;" x-text="m.role"></div>
-          <div x-text="m.content"></div>
-        </div>
-      </template>
-      <div class="dim" x-show="!chat.messages.length">
-        Pick a lane and type. The router serves the reply — no Agent Zero, no Open WebUI in the path.
+<body>
+  <button class="mobile-menu" id="mobile-menu" aria-label="Open navigation"><img src="/ui/icons/sidebar-simple.svg" alt=""></button>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+      <div class="brand">
+        <div class="brand-mark"><img src="/ui/icons/cube.svg" alt=""></div>
+        <div><strong>Imperium</strong><span>local model router</span><small class="version">v__IMPERIUM_VERSION__</small></div>
       </div>
-      <div class="dim" x-show="chat.busy">thinking…</div>
-    </div>
-
-    <div style="display:flex; gap:.5rem; margin-top:.6rem;">
-      <textarea x-model="chat.input" rows="2" placeholder="Message…  (Ctrl+Enter to send)"
-                @keydown.ctrl.enter="sendChat()"></textarea>
-      <button @click="sendChat()" :disabled="chat.busy">Send</button>
-    </div>
-    <div class="dim" x-show="chat.error" x-text="chat.error" style="margin-top:.4rem; color:var(--err);"></div>
-  </div>
-</div>
-
-<!-- ════════════════════ OVERVIEW ════════════════════ -->
-<div class="grid" x-show="tab==='overview'">
-
-  <div class="card">
-    <h2 style="display:flex; justify-content:space-between; align-items:center;">
-      <span>Slots</span>
-      <span x-show="fleet.fleet_control?.enabled" style="display:flex; gap:.35rem;">
-        <button class="btn-sm" @click="control('/fleet/start')">start all</button>
-        <button class="btn-sm btn-stop" @click="control('/fleet/stop')">stop all</button>
-      </span>
-    </h2>
-    <template x-for="slot in slots" :key="slot.id">
-      <div class="row">
-        <span>
-          <strong x-text="slot.id"></strong>
-          <span class="dim" x-text="' · ' + (slot.role || '?') + ' · :' + (slot.port || '?')"></span>
-        </span>
-        <span style="display:flex; gap:.35rem; align-items:center;">
-          <template x-if="fleet.fleet_control?.enabled">
-            <span style="display:flex; gap:.3rem;">
-              <button class="btn-sm" title="start slot"
-                      @click="control('/fleet/slots/' + slot.id + '/start')">start</button>
-              <button class="btn-sm btn-stop" title="stop slot"
-                      @click="control('/fleet/slots/' + slot.id + '/stop')">stop</button>
-            </span>
-          </template>
-          <span class="badge"
-                :class="slot.health === 'healthy' ? 'ok' : (slot.health === 'disabled' ? 'warn' : 'err')"
-                x-text="slot.health || 'unknown'"></span>
-        </span>
-      </div>
-    </template>
-    <div class="dim" x-show="!slots.length">no slots</div>
-    <div class="dim" x-show="controlMsg" x-text="controlMsg"
-         style="margin-top:.5rem; font-size:.78rem;"></div>
-    <div class="dim" x-show="fleet.fleet_control && !fleet.fleet_control.enabled"
-         style="margin-top:.5rem; font-size:.72rem;">
-      start/stop is off — set A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1 and restart
-      (backend: <span x-text="fleet.fleet_control?.backend || '?'"></span>)
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Backends</h2>
-    <template x-for="b in backends" :key="b.name">
-      <div class="row">
-        <span>
-          <strong x-text="b.name"></strong>
-          <span class="dim" x-text="' · ' + b.type"></span>
-          <span class="badge warn" x-show="b.experimental">experimental</span>
-        </span>
-        <span class="badge" :class="b.serves_inference ? 'ok' : 'warn'"
-              x-text="b.serves_inference ? 'serving' : (b.enabled ? 'no-serve' : 'disabled')"></span>
-      </div>
-    </template>
-  </div>
-
-  <div class="card">
-    <h2>Fleet queue</h2>
-    <div class="row"><span class="dim">active</span><span x-text="fleet.queue?.active ?? '—'"></span></div>
-    <div class="row"><span class="dim">queued</span><span x-text="fleet.queue?.queued ?? '—'"></span></div>
-    <div class="row"><span class="dim">max active</span><span x-text="fleet.queue?.max_active ?? '—'"></span></div>
-    <div class="row"><span class="dim">agents seen</span><span x-text="fleet.agents?.count ?? '—'"></span></div>
-    <div class="row"><span class="dim">requests completed</span>
-      <span x-text="fleet.requests?.by_status?.completed ?? 0"></span></div>
-    <div class="row"><span class="dim">requests failed</span>
-      <span x-text="fleet.requests?.by_status?.failed ?? 0"></span></div>
-  </div>
-
-  <div class="card">
-    <h2>App profiles</h2>
-    <template x-for="a in apps" :key="a.app_id">
-      <div class="row">
-        <span><strong x-text="a.app_id"></strong></span>
-        <span class="dim" x-text="'default: ' + a.default_model"></span>
-      </div>
-    </template>
-    <div class="dim" x-show="!apps.length">permissive default only</div>
-  </div>
-
-  <div class="card" style="grid-column:1/-1">
-    <h2>Models</h2>
-    <table>
-      <thead><tr><th>id</th><th>kind</th><th>role</th><th>live slot</th><th>n_ctx</th></tr></thead>
-      <tbody>
-        <template x-for="m in models" :key="m.id">
-          <tr>
-            <td x-text="m.id"></td>
-            <td class="dim" x-text="m.meta?.kind"></td>
-            <td x-text="m.meta?.maps_to_role || m.meta?.role || ''"></td>
-            <td x-text="m.meta?.live?.slot_id || m.meta?.slot_id || ''"></td>
-            <td x-text="m.meta?.live?.n_ctx || m.meta?.n_ctx || ''"></td>
-          </tr>
-        </template>
-      </tbody>
-    </table>
-  </div>
-
-  <div class="card" style="grid-column:1/-1">
-    <h2>Routing test panel</h2>
-    <div style="display:flex; gap:.6rem; flex-wrap:wrap; margin-bottom:.6rem;">
-      <select x-model="route.task_type" style="max-width:220px">
-        <template x-for="t in taskTypes"><option :value="t" x-text="t"></option></template>
-      </select>
-      <input x-model="route.role" placeholder="role (optional: chat/utility/embed/scribe)" style="max-width:320px">
-      <button @click="testRoute()">Route (dry-run)</button>
-    </div>
-    <pre x-text="route.result || 'routing decision will appear here'"></pre>
-  </div>
-
-</div>
-
-<!-- ════════════════════ COOKBOOK ════════════════════ -->
-<div class="grid" x-show="tab==='compare'" x-cloak>
-
-  <div class="card">
-    <h2>Routing analytics</h2>
-    <div class="row"><span class="dim">fallbacks</span><span x-text="analytics.fallback_count ?? 0"></span></div>
-    <div class="row"><span class="dim">no slot failures</span><span x-text="analytics.no_slot_count ?? 0"></span></div>
-    <div class="row"><span class="dim">cache hits</span><span x-text="analytics.cache?.HIT ?? 0"></span></div>
-    <div class="row"><span class="dim">cache misses</span><span x-text="analytics.cache?.MISS ?? 0"></span></div>
-  </div>
-
-  <div class="card">
-    <h2>Model card</h2>
-    <div style="display:flex; gap:.5rem; margin-bottom:.6rem;">
-      <input x-model="cardModel" placeholder="model id or slot id">
-      <button @click="loadModelCard()">Load</button>
-    </div>
-    <pre x-text="modelCard || 'model details will appear here'"></pre>
-  </div>
-
-  <div class="card" style="grid-column:1/-1">
-    <h2>Recent routing decisions</h2>
-    <table>
-      <thead><tr><th>time</th><th>app</th><th>requested</th><th>resolved</th><th>slot</th><th>strategy</th><th>cache</th><th>status</th></tr></thead>
-      <tbody>
-        <template x-for="r in (analytics.recent || [])" :key="r.request_id">
-          <tr>
-            <td class="dim" x-text="r.updated_at"></td>
-            <td x-text="r.app_id || r.agent_type"></td>
-            <td x-text="r.requested_model"></td>
-            <td x-text="r.resolved_model || r.model"></td>
-            <td x-text="r.slot_id"></td>
-            <td x-text="r.routing_strategy"></td>
-            <td x-text="r.cache_status"></td>
-            <td x-text="r.status"></td>
-          </tr>
-        </template>
-      </tbody>
-    </table>
-  </div>
-
-</div>
-
-<!-- ORCHESTRATION -->
-<!-- ════════════════════ HARNESSES ════════════════════ -->
-<div class="harness-stack" data-dashboard-section="harnesses" x-show="tab==='harnesses'" x-cloak>
-  <div class="card">
-    <h2>Dedicated harness connections</h2>
-    <p style="margin:.2rem 0">
-      A harness is a client runtime. Each connection below has its own URL and one
-      authoritative pinned model. Roles remain inside the harness; Agent Zero is the
-      only current two-connection exception.
-    </p>
-  </div>
-
-  <template x-for="harness in harnesses" :key="harness.harness_id">
-    <details class="harness-row" :data-harness-id="harness.harness_id">
-      <summary>
-        <span class="harness-summary">
-          <strong x-text="harness.display_name"></strong>
-          <span class="harness-meta dim">
-            <span x-text="harness.connections.length + (harness.connections.length === 1 ? ' connection' : ' connections')"></span>
-            <span x-text="harness.kind + ' · ' + harness.location"></span>
-          </span>
-        </span>
-      </summary>
-      <div class="harness-body">
-      <template x-for="connection in harness.connections" :key="connection.name">
-        <div style="border-top:1px solid var(--line); padding:.6rem 0">
-          <div class="row"><span class="dim">connection</span><strong x-text="connection.name"></strong></div>
-          <div class="row"><span class="dim">Pinned model</span><span x-text="connection.model"></span></div>
-          <div class="row"><span class="dim">base URL</span><code x-text="connection.base_url"></code></div>
-          <div class="row"><span class="dim">status</span>
-            <span class="badge" :class="connection.verification.state === 'verified' ? 'ok' : 'warn'"
-                  x-text="connection.verification.state"></span>
-          </div>
-          <div class="dim" x-show="connection.verification.last_seen"
-               x-text="'last seen: ' + connection.verification.last_seen"></div>
-          <div style="display:flex; gap:.4rem; margin-top:.5rem">
-            <button class="btn-sm btn-ghost" @click="copyText(connection.base_url, harness.harness_id + connection.name)"
-                    x-text="copied === harness.harness_id + connection.name ? 'copied!' : 'Copy URL'"></button>
-            <button class="btn-sm" @click="verifyHarness(harness, connection)">Verify</button>
-          </div>
-        </div>
-      </template>
-      <div class="snippet-head" style="margin-top:.7rem">
-        <span class="dim" x-text="harness.setup.target"></span>
-        <button class="btn-sm btn-ghost" @click="copyText(harness.setup.content, 'setup-' + harness.harness_id)">
-          Copy setup
+      <nav class="nav" id="simple-nav"></nav>
+      <div class="advanced">
+        <button class="advanced-toggle" id="advanced-toggle" aria-expanded="false">
+          <img src="/ui/icons/gear-six.svg" alt=""><span data-i18n="advanced">Advanced</span><img class="caret" src="/ui/icons/caret-down.svg" alt="">
         </button>
+        <nav class="advanced-items" id="advanced-nav"></nav>
       </div>
-      <pre x-text="harness.setup.content"></pre>
+      <div class="sidebar-footer">
+        <button class="side-control" id="theme-control"><img src="/ui/icons/sun.svg" alt=""><span data-i18n="theme">Theme</span><span class="side-value" id="theme-value">Light</span></button>
+        <button class="side-control" id="language-control"><img src="/ui/icons/translate.svg" alt=""><span data-i18n="language">Language</span><span class="side-value" id="language-value">English</span></button>
+        <button class="side-control" id="mode-control"><img src="/ui/icons/sliders-horizontal.svg" alt=""><span data-i18n="mode">Mode</span><span class="side-value" id="mode-value">Simple</span></button>
+        <div class="system-time"><span class="status-dot"></span><div><span class="muted" data-i18n="systemTime">System time</span><strong id="clock" style="display:block"></strong></div></div>
       </div>
-    </details>
-  </template>
-
-  <div class="card" x-show="!harnesses.length">
-    <div class="dim">No harnesses configured in <code>conf/harnesses.yaml</code>.</div>
+    </aside>
+    <main class="main" id="main" tabindex="-1"></main>
   </div>
-
-  <details class="harness-row" data-dashboard-panel="add-harness">
-    <summary><span class="harness-summary"><strong>Add harness</strong><span class="dim">guided setup</span></span></summary>
-    <div class="harness-body">
-      <div class="grid">
-      <label>Harness ID<input x-model="newHarness.harness_id" placeholder="my_harness"></label>
-      <label>Display name<input x-model="newHarness.display_name" placeholder="My Harness"></label>
-      <label>Template
-        <select x-model="newHarness.kind">
-          <option value="custom">OpenAI-compatible</option>
-          <option value="hermes">Hermes</option>
-          <option value="pi">Pi</option>
-          <option value="agent_zero">Agent Zero (chat + utility)</option>
-        </select>
-      </label>
-      <label>Location
-        <select x-model="newHarness.location"><option value="host">Host</option><option value="docker">Docker</option></select>
-      </label>
-      <label>Model<input x-model="newHarness.model" placeholder="dmr/model or slot model_id"></label>
-      <label x-show="newHarness.kind === 'agent_zero'">Utility model
-        <input x-model="newHarness.utility_model" placeholder="utility_cpu">
-      </label>
-    </div>
-      <div style="display:flex; gap:.5rem; margin-top:.7rem">
-        <button @click="previewHarness()">Generate setup</button>
-        <button class="btn-ghost" @click="saveHarness()" :disabled="!harnessMeta.config_writes_enabled">Save</button>
-      </div>
-      <div class="dim" x-show="!harnessMeta.config_writes_enabled" style="margin-top:.5rem">
-        Preview only. Saving requires an API key and A0_LMM_ROUTER_ENABLE_CONFIG_WRITES=1.
-      </div>
-      <div class="dim" x-text="harnessMessage" style="margin-top:.5rem"></div>
-      <pre x-show="harnessPreview" x-text="harnessPreview"></pre>
-    </div>
-  </details>
-
-  <details class="harness-row" data-dashboard-panel="generic-api">
-    <summary><span class="harness-summary"><strong>Generic API (advanced)</strong><span class="dim">Connection guides</span></span></summary>
-    <div class="harness-body">
-      <p style="margin:.2rem 0 .6rem">
-      Point any OpenAI-compatible tool at this base URL. Send an alias as the
-      model name (<code>auto</code>, <code>chat</code>, <code>coder</code>,
-      <code>fast</code>, <code>deep</code>, <code>embedding</code>) and the
-      router picks the slot; any other model id passes through verbatim.
-      If no API key is configured, any key value (e.g. <code>local</code>) works.
-    </p>
-      <div class="row"><span class="dim">from this machine</span>
-        <strong x-text="base + '/v1'"></strong></div>
-      <div class="row"><span class="dim">from inside Docker (Agent Zero, Open WebUI…)</span>
-        <strong x-text="dockerBase + '/v1'"></strong></div>
-      <div class="row"><span class="dim">identify your client (optional, enables per-app policy)</span>
-        <strong>X-App-Id: &lt;name&gt;</strong></div>
-      <template x-for="s in snippets" :key="s.id">
-        <details class="harness-row" :data-guide-id="s.id" style="margin-top:.6rem">
-          <summary>
-            <span class="harness-summary"><strong x-text="s.title"></strong><span class="dim">setup</span></span>
-          </summary>
-          <div class="harness-body">
-            <div class="snippet-head">
-              <span class="dim">OpenAI-compatible connection</span>
-              <button class="btn-sm btn-ghost" @click="copy(s.id)"
-                      x-text="copied === s.id ? 'copied!' : 'copy'"></button>
-            </div>
-            <pre x-text="snippetText(s.id)"></pre>
-          </div>
-        </details>
-      </template>
-      </div>
-  </details>
-</div>
-
-<div class="grid" x-show="tab==='orchestration'" x-cloak>
-  <div class="card">
-    <h2>Sub-agent instances</h2>
-    <div class="row"><span class="dim">running</span><span x-text="orchestration.summary.instances?.running ?? 0"></span></div>
-    <div class="row"><span class="dim">stale</span><span x-text="orchestration.summary.instances?.stale ?? 0"></span></div>
-    <div class="row"><span class="dim">blocked / failed</span><span x-text="orchestration.summary.instances?.blocked_failed ?? 0"></span></div>
-    <div class="row"><span class="dim">max parallel</span><span x-text="orchestration.summary.instances?.max_parallel || 'not set'"></span></div>
-    <div style="height:.45rem; background:#0d1016; border:1px solid var(--line); border-radius:6px; overflow:hidden; margin-top:.6rem;">
-      <div style="height:100%; background:var(--accent);" :style="'width:' + concurrencyPct() + '%'"></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Plans</h2>
-    <template x-for="p in orchestration.plans" :key="p.plan_id">
-      <div class="row" @click="openPlan(p.plan_id)" style="cursor:pointer">
-        <span><strong x-text="p.goal"></strong><span class="dim" x-text="' · ' + p.plan_id"></span></span>
-        <span class="badge"
-              :class="p.status === 'ready_for_planner' ? 'ok' : (p.status === 'needs_attention' ? 'err' : 'warn')"
-              x-text="p.status"></span>
-      </div>
-    </template>
-    <div class="dim" x-show="!orchestration.plans.length">no plans yet</div>
-    <div class="dim" x-show="orchestration.error" x-text="orchestration.error"></div>
-  </div>
-
-  <div class="card">
-    <h2>Selected plan</h2>
-    <template x-if="orchestration.plan">
-      <div>
-        <div class="row"><span class="dim">status</span><span x-text="orchestration.plan.plan.status"></span></div>
-        <div class="row"><span class="dim">workspace</span><span x-text="orchestration.plan.plan.workspace_path"></span></div>
-        <div class="row"><span class="dim">compose draft</span><span x-text="orchestration.plan.plan.compose_path"></span></div>
-        <div class="row"><span class="dim">wake</span><span x-text="orchestration.plan.wake?.reason || 'not ready'"></span></div>
-      </div>
-    </template>
-    <div class="dim" x-show="!orchestration.plan">select a plan</div>
-  </div>
-
-  <div class="card" style="grid-column:1/-1">
-    <h2>Instances</h2>
-    <table>
-      <thead><tr><th>agent</th><th>status</th><th>persona</th><th>model</th><th>task</th><th>slot/container</th><th>runtime</th><th>DOX</th></tr></thead>
-      <tbody>
-        <template x-for="i in selectedInstances()" :key="i.instance_id">
-          <tr @click="openInstance(i.instance_id)" style="cursor:pointer">
-            <td><strong x-text="i.agent_id || i.instance_id"></strong><div class="dim" x-text="i.instance_id"></div></td>
-            <td><span class="badge" :class="instanceStatusClass(i.status)" x-text="i.status"></span></td>
-            <td><span x-text="i.persona_name || i.persona_id || '-'"></span><div class="dim" x-text="i.persona_prompt_path || ''"></div></td>
-            <td><span x-text="i.model"></span><div class="dim" x-text="i.role"></div></td>
-            <td><span x-text="i.task_title || i.ticket_id || ''"></span><div class="dim" x-text="i.prompt_preview"></div></td>
-            <td><span x-text="i.slot_id || '-'"></span><div class="dim" x-text="i.container_id || ''"></div></td>
-            <td class="dim" x-text="runtimeText(i)"></td>
-            <td class="dim" x-text="i.dox_state || 'missing'"></td>
-          </tr>
-        </template>
-      </tbody>
-    </table>
-    <div class="dim" x-show="!selectedInstances().length">no sub-agent instances yet</div>
-  </div>
-
-  <div class="card" style="grid-column:1/-1">
-    <h2>Tickets</h2>
-    <table>
-      <thead><tr><th>ticket</th><th>role</th><th>status</th><th>persona</th><th>deps</th><th>artifacts</th><th>DOX</th></tr></thead>
-      <tbody>
-        <template x-for="t in (orchestration.plan?.tickets || [])" :key="t.ticket_id">
-          <tr @click="openTicket(t.ticket_id)" style="cursor:pointer">
-            <td><strong x-text="t.title"></strong><div class="dim" x-text="t.ticket_id"></div></td>
-            <td x-text="t.agent_role"></td>
-            <td><span class="badge"
-                      :class="t.status === 'completed' ? 'ok' : (['blocked','failed'].includes(t.status) ? 'err' : 'warn')"
-                      x-text="t.status"></span></td>
-            <td><span x-text="t.persona_name || t.persona_id || '-'"></span><div class="dim" x-text="t.persona_prompt_path || ''"></div></td>
-            <td class="dim" x-text="(t.dependencies || []).join(', ') || 'none'"></td>
-            <td class="dim" x-text="t.artifact_path"></td>
-            <td class="dim" x-text="t.dox_report_path"></td>
-          </tr>
-        </template>
-      </tbody>
-    </table>
-  </div>
-
-  <div class="card" style="grid-column:1/-1">
-    <h2>Instance packet</h2>
-    <pre x-text="orchestration.instance ? JSON.stringify(orchestration.instance, null, 2) : 'select an instance'"></pre>
-  </div>
-
-  <div class="card" style="grid-column:1/-1">
-    <h2>Ticket packet</h2>
-    <pre x-text="orchestration.ticket ? JSON.stringify(orchestration.ticket, null, 2) : 'select a ticket'"></pre>
-  </div>
-</div>
-
-<div class="grid" x-show="tab==='cookbook'" x-cloak>
-
-  <div class="card" style="grid-column:1/-1; display:flex; justify-content:space-between; align-items:center;">
-    <span>
-      <strong>Which model should serve each role?</strong>
-      <span class="dim"> — scans your GGUF folder, checks what fits the GPU, ranks per role.</span>
-    </span>
-    <button class="btn-sm" @click="loadCookbook(true)"
-            x-text="cookbookBusy ? 'scanning…' : 'rescan'"></button>
-  </div>
-
-  <template x-if="cookbook && !cookbook.ok">
-    <div class="card" style="grid-column:1/-1">
-      <h2>Not configured yet</h2>
-      <p x-text="cookbook.detail || cookbook.error"></p>
-    </div>
-  </template>
-
-  <template x-if="cookbook && cookbook.ok">
-    <div class="card">
-      <h2>Hardware budget</h2>
-      <div class="row"><span class="dim">GPU</span><span x-text="cookbook.hardware.gpu || 'unknown'"></span></div>
-      <div class="row"><span class="dim">VRAM</span><span x-text="cookbook.hardware.vram_gb + ' GB'"></span></div>
-      <div class="row"><span class="dim">budget (after safety margin)</span>
-        <span x-text="cookbook.hardware.vram_budget_gb + ' GB'"></span></div>
-      <div class="row"><span class="dim">RAM available</span>
-        <span x-text="cookbook.hardware.ram_available_gb + ' GB'"></span></div>
-      <div class="row"><span class="dim">models found</span><span x-text="cookbook.model_count"></span></div>
-    </div>
-  </template>
-
-  <template x-if="cookbook && cookbook.ok">
-    <div class="card">
-      <h2>Recommended per role</h2>
-      <template x-for="role in Object.keys(cookbook.recommendations || {})" :key="role">
-        <div class="row">
-          <span><strong x-text="role"></strong>
-            <span class="badge warn" x-show="cookbook.recommendations[role].warnings?.length"
-                  :title="(cookbook.recommendations[role].warnings || []).join('; ')">⚠</span>
-          </span>
-          <span>
-            <span x-text="cookbook.recommendations[role].file"></span>
-            <span class="dim" x-text="' · ' + cookbook.recommendations[role].score
-                  + ' · ' + cookbook.recommendations[role].confidence"></span>
-          </span>
-        </div>
-      </template>
-      <div class="dim" x-show="!Object.keys(cookbook.recommendations || {}).length">
-        no runnable candidates found</div>
-    </div>
-  </template>
-
-  <template x-if="cookbook && cookbook.ok">
-    <div class="card" style="grid-column:1/-1">
-      <h2>All scanned models <span class="dim">(click a row for the why)</span></h2>
-      <table>
-        <thead><tr>
-          <th>file</th><th>role hint</th><th>size</th><th>params</th><th>quant</th>
-          <th>fit</th><th>max ctx</th><th>best score</th><th>confidence</th>
-        </tr></thead>
-        <template x-for="m in cookbook.models" :key="m.path">
-          <tbody>
-            <tr @click="expanded = expanded === m.path ? '' : m.path" style="cursor:pointer">
-              <td x-text="m.file"></td>
-              <td class="dim" x-text="m.role_hint || ''"></td>
-              <td x-text="m.size_gb + ' GB'"></td>
-              <td x-text="m.params_b ? m.params_b + 'B' : '?'"></td>
-              <td class="dim" x-text="m.quant || '?'"></td>
-              <td><span class="badge"
-                    :class="m.fit === 'full_gpu' ? 'ok' : (m.fit === 'partial_offload' ? 'warn' : 'err')"
-                    x-text="m.fit"></span></td>
-              <td x-text="m.max_ctx_fit"></td>
-              <td x-text="Math.max(0, ...Object.values(m.scores || {0:0})).toFixed(0)"></td>
-              <td class="dim" x-text="m.confidence"></td>
-            </tr>
-            <tr x-show="expanded === m.path">
-              <td colspan="9" class="reasons" x-text="(m.reasons || []).join(' · ')"></td>
-            </tr>
-          </tbody>
-        </template>
-      </table>
-    </div>
-  </template>
-
-</div>
-
-<script>
-function dashboard() {
-  return {
-    apiKey: localStorage.getItem("lmr_key") || "",
-    health: {}, slots: [], backends: [], apps: [], models: [], fleet: {}, analytics: {},
-    harnesses: [], harnessMeta: {}, harnessPreview: "", harnessMessage: "",
-    newHarness: {
-      harness_id: "", display_name: "", kind: "custom", location: "host",
-      model: "", utility_model: "utility_cpu",
-    },
-    orchestration: { plans: [], plan: null, ticket: null, instances: [], instance: null, summary: { instances: {} }, error: "" },
-    taskTypes: ["chat","coding","planning","research","summarization","embedding",
-                "tool_calling","sub_agent_task","background_worker","documentation"],
-    route: { task_type: "chat", role: "", result: "" },
-    cardModel: "auto",
-    modelCard: "",
-    controlMsg: "",
-    tab: "chat",
-    chat: { messages: [], input: "", model: "auto", busy: false, error: "" },
-    cookbook: null,
-    cookbookBusy: false,
-    expanded: "",
-    copied: "",
-    snippets: [
-      { id: "python", title: "Python (OpenAI SDK)" },
-      { id: "agent_zero", title: "Agent Zero" },
-      { id: "open_webui", title: "Open WebUI" },
-      { id: "claude_mcp", title: "Claude Code MCP" },
-      { id: "dify", title: "Dify" },
-      { id: "vercel_ai", title: "Vercel AI SDK" },
-      { id: "aider", title: "Aider" },
-      { id: "n8n", title: "n8n" },
-      { id: "curl", title: "curl" },
-    ],
-
-    get base() { return location.origin; },
-    get dockerBase() { return "http://host.docker.internal:" + (location.port || "9000"); },
-
-    snippetText(id) {
-      const b = this.base, d = this.dockerBase;
-      const texts = {
-        python:
-`from openai import OpenAI
-
-client = OpenAI(base_url="${b}/v1", api_key="local")
-resp = client.chat.completions.create(
-    model="auto",  # or: chat / coder / fast / deep / embedding
-    messages=[{"role": "user", "content": "Hello"}],
-)
-print(resp.choices[0].message.content)`,
-        agent_zero:
-`# Agent Zero → Settings → Models (runs in Docker, so use the docker host)
-provider:  OpenAI-compatible
-api_base:  ${d}/v1
-model:     chat            # or auto
-api_key:   local`,
-        open_webui:
-`# Open WebUI → Admin → Settings → Connections → OpenAI API
-# (if Open WebUI runs in Docker, use ${d}/v1)
-URL: ${b}/v1
-Key: local`,
-        claude_mcp:
-`# Claude Code MCP
-.venv\\Scripts\\python -m local_model_router mcp
-claude mcp add local-model-router -s user -- http://127.0.0.1:8095/mcp`,
-        dify:
-`# Dify -> Settings -> Model Provider -> OpenAI-compatible
-Base URL: ${b}/v1
-API Key: local
-Model: auto`,
-        vercel_ai:
-`import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
-
-const lmr = createOpenAICompatible({
-  name: "local-model-router",
-  baseURL: "${b}/v1",
-  apiKey: "local",
-})
-const model = lmr.chatModel("auto")`,
-        aider:
-`aider --openai-api-base ${b}/v1 --openai-api-key local --model openai/coder`,
-        n8n:
-`# n8n → Credentials → OpenAI
-Base URL: ${b}/v1          # docker: ${d}/v1
-API Key:  local
-# optional, enables per-app policy from conf/apps.yaml:
-#   add HTTP header  X-App-Id: n8n`,
-        curl:
-`curl ${b}/v1/chat/completions \\
-  -H "Content-Type: application/json" \\
-  -H "X-App-Id: my-script" \\
-  -d '{"model":"auto","messages":[{"role":"user","content":"hi"}]}'`,
-      };
-      return texts[id] || "";
-    },
-
-    copy(id) {
-      navigator.clipboard.writeText(this.snippetText(id));
-      this.copied = id;
-      setTimeout(() => { this.copied = ""; }, 1500);
-    },
-
-    copyText(value, id) {
-      navigator.clipboard.writeText(value || "");
-      this.copied = id;
-      setTimeout(() => { this.copied = ""; }, 1500);
-    },
-
-    harnessPayload() {
-      const h = this.newHarness;
-      const connections = h.kind === "agent_zero"
-        ? { chat: { model: h.model.trim() }, utility: { model: h.utility_model.trim() } }
-        : { default: { model: h.model.trim() } };
-      return {
-        harness_id: h.harness_id.trim(),
-        display_name: h.display_name.trim() || h.harness_id.trim(),
-        kind: h.kind,
-        protocol: "openai",
-        location: h.kind === "agent_zero" ? "docker" : h.location,
-        connections,
-      };
-    },
-
-    previewHarness() {
-      const p = this.harnessPayload();
-      const lines = ["harnesses:", "  " + (p.harness_id || "<harness_id>") + ":",
-        "    display_name: " + (p.display_name || "<display name>"),
-        "    kind: " + p.kind, "    protocol: openai", "    location: " + p.location,
-        "    connections:"];
-      Object.entries(p.connections).forEach(([name, value]) => {
-        lines.push("      " + name + ":", "        model: " + (value.model || "<model>"));
+  <div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><div class="drawer-panel"><div class="drawer-head"><h2 id="drawer-title">Details</h2><button class="button small" data-action="close-drawer"><img src="/ui/icons/x.svg" alt=""><span data-i18n="close">Close</span></button></div><div id="drawer-body"></div></div></div>
+  <div class="toast-region" id="toasts" aria-live="polite"></div>
+  <div class="sr-only" id="live" aria-live="polite"></div>
+  <script>
+  (() => {
+    "use strict";
+    const SETUP_TOKEN = "__IMPERIUM_SETUP_TOKEN__";
+    const ICON = name => `/ui/icons/${name}.svg`;
+    const I = (name, cls="") => `<img class="${cls}" src="${ICON(name)}" alt="">`;
+    const esc = value => String(value ?? "").replace(/[&<>'"]/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[ch]));
+    const textValue = value => typeof value === "object" && value ? (value[state.lang] || value.en || "") : (value || "");
+    const dictionary = {
+      en: {
+        home:"Home",chat:"Chat",models:"Models",connections:"Connections",advanced:"Advanced",fleet:"Fleet",routing:"Routing",configuration:"Configuration",diagnostics:"Diagnostics",theme:"Theme",language:"Language",mode:"Mode",systemTime:"System time",light:"Light",dark:"Dark",simple:"Simple",close:"Close",
+        setupTitle:"Let’s finish setup", setupSubtitle:"Complete one step below to get a recommended local model running on your system.", readyTitle:"Your local AI is ready", readySubtitle:"Imperium is routing requests to a local model on this computer.", attentionTitle:"Your model server needs attention", attentionSubtitle:"The configuration is saved. Complete the action below to continue.",
+        recommended:"Recommended for your system", recommendedCopy:"A balanced model selected from the approved catalog for your detected hardware.", reviewModel:"Review model", whyModel:"Why this model?", whyCopy:"Good quality, fast responses, and a safe fit for the detected memory.", installed:"Installed", available:"Available", incompatible:"Incompatible", download:"Download", activate:"Activate", stop:"Stop", details:"Details",manageModels:"Manage models",startChat:"Start chatting",connectApp:"Connect an app",additional:"Additional improvements",
+        modelPage:"Models", modelPageCopy:"Install, activate, and understand the models available on this computer.", installedTab:"Installed", recommendedTab:"Recommended", downloadsTab:"Downloads", noInstalled:"No catalog models are installed yet.", noDownloads:"Downloads and verification progress will appear here.",
+        chatPage:"Chat", chatPageCopy:"Talk directly to your local model and confirm the full route is working.", chooseModel:"Choose a model", clear:"Clear", send:"Send", stopGeneration:"Stop generation", retry:"Retry", emptyChat:"Your local conversation starts here.", emptyChatCopy:"Choose a prompt or write your own. Messages stay on this computer.", prompt1:"Explain how local inference works", prompt2:"Write a small Python utility", prompt3:"Summarize a technical idea", startServer:"Start model server", chatFailed:"The model could not answer.",
+        connectionsPage:"Connections", connectionsCopy:"Connect tools to one stable OpenAI-compatible address.", activeConnections:"Active connections", verify:"Verify connection", copy:"Copy", copied:"Copied", endpoint:"API address", name:"Name", modelName:"Model name", pinnedModel:"Pinned model", apiKey:"API key", notRequired:"Not required", connectionOk:"Connection verified", connectionFailed:"Could not verify the connection", addHarness:"Add custom harness", customHarnesses:"Custom harnesses",
+        fleetPage:"Fleet", fleetCopy:"Servers, slots, processes, GPU state, and operational controls.", startAll:"Start all", stopAll:"Stop all", slot:"Slot", role:"Role", backend:"Backend", health:"Health", context:"Context", noRows:"No items to show.",
+        routingPage:"Routing", routingCopy:"Aliases, strategy, decisions, and failover visibility.", alias:"Alias", mapsTo:"Maps to", liveModel:"Live model", testRoute:"Test route",
+        configurationPage:"Configuration", configurationCopy:"Authentication, environment, and a safe redacted preview.", saveLocal:"Save on this device", rawPreview:"Raw preview", diagnosticsPage:"Diagnostics", diagnosticsCopy:"Readiness checks, versions, and support information.", runDoctor:"Run checks", refresh:"Refresh", system:"System",gpu:"GPU",memory:"Memory",runtime:"Runtime",unknown:"Unknown",router:"Router",model:"Model",ready:"Ready",needsAttention:"Needs attention",setupRequired:"Setup required",
+        wizardWelcome:"Welcome to Imperium", wizardWelcomeCopy:"We’ll inspect this computer, recommend a safe runtime and model, and ask before downloading anything.", continue:"Continue", back:"Back", exit:"Exit setup", scanSystem:"Check this computer", scanning:"Checking hardware and existing installations…", detectedHardware:"Hardware detected", detectedHardwareCopy:"Imperium records where each result came from and keeps unknown values unknown.", runtimeChoice:"Choose how to run models", runtimeChoiceCopy:"Native llama.cpp is recommended. You can also connect an existing server or use Advanced setup.", native:"Native llama.cpp", nativeCopy:"Private, managed, and versioned by Imperium.", existing:"Existing server", existingCopy:"Use llama.cpp, Ollama, LM Studio, LocalAI, or another OpenAI-compatible server.", advancedChoice:"Advanced setup", advancedCopy:"Choose binaries and paths yourself.", operationMode:"Choose launch behavior", background:"Managed background", backgroundCopy:"Imperium starts and monitors the server quietly.", terminal:"Visible llama.cpp terminal", terminalCopy:"Keep a dedicated terminal window visible while the model runs.", backendChoice:"Recommended backend", backendCopy:"The recommendation is based on detected adapters and available drivers.", chooseRecommended:"Choose a first model", chooseRecommendedCopy:"One model will power auto, chat, fast, and coder until you decide to split roles.", reviewInstall:"Review and approve", reviewInstallCopy:"Nothing is downloaded until you confirm the source, size, license, and destination.", confirmDownloads:"I approve the listed downloads.", confirmConfig:"I approve the configuration preview and backup.", installNow:"Install and configure", installing:"Installing your local AI", installingCopy:"You can leave this page open. Downloads resume after interruption and every file is verified.", cancel:"Cancel", firstTest:"Final check", firstTestCopy:"Imperium will verify the runtime, model, configuration, and local route.", runSmoke:"Run final check", setupComplete:"Setup complete", setupCompleteCopy:"Your approved model is installed. Start a conversation to verify the experience.",
+        license:"License",size:"Size",destination:"Destination",source:"Source",confidence:"Confidence",freeDisk:"Free disk",cpuOnly:"CPU",select:"Select",loading:"Loading…",offline:"Offline",repair:"Repair",optional:"Optional",openGuide:"Open setup guide",setupPrinciples:"Windows-first · Native llama.cpp · Explicit download approval",recommendedBuild:"Recommended · tested build",latestStable:"Latest · official stable release",experimentalCandidates:"Experimental candidates",experimentalCopy:"Runtime and platform gates must pass before first-run use.",experimentalDisabled:"Experimental · not enabled",plans:"Plans",subAgents:"Sub-agent instances",activeTickets:"Active tickets",artifacts:"Artifacts",observeOnly:"Observe-only",savedBrowser:"Saved only in this browser profile.",redactedPreview:"Sensitive values are redacted by the service.",customHarnessCopy:"Advanced pinned-model connection profiles for custom tools.",customApp:"Custom app",search:"Search",blocking:"blocking",plannedPlatform:"Planned for a future release",installationFailed:"Installation stopped",tryAgain:"Try again",useExisting:"Use an existing server",english:"English",hebrew:"עברית",scanAgain:"Scan again",acceleration:"Acceleration",verified:"Verified",inferred:"Inferred",technicalDetails:"Technical details",evidence:"Evidence",launchBehavior:"Launch behavior",recommendedModel:"Recommended first model",existingModelCopy:"Your existing server provides its own model; Imperium will use its automatic route.",otherModels:"Other compatible models",backendOverride:"Backend override",dedicatedGraphicsMemory:"Dedicated graphics memory",reportedGraphicsMemory:"Reported graphics memory",sharedUnknown:"Shared versus dedicated is unknown",automatic:"Automatic",generalChat:"General chat",fastModel:"Fast",codingModel:"Coding",stepWelcome:"Welcome",stepHardware:"System scan",stepRuntime:"Runtime",stepModel:"Model",stepReview:"Review",stepInstall:"Install & test"
+      },
+      he: {
+        home:"בית",chat:"צ׳אט",models:"מודלים",connections:"חיבורים",advanced:"מתקדם",fleet:"צי שרתים",routing:"ניתוב",configuration:"הגדרות",diagnostics:"אבחון",theme:"ערכת נושא",language:"שפה",mode:"מצב",systemTime:"זמן מערכת",light:"בהיר",dark:"כהה",simple:"פשוט",close:"סגירה",
+        setupTitle:"בואו נסיים את ההגדרה", setupSubtitle:"עוד שלב אחד ומודל מקומי מומלץ יפעל על המחשב הזה.", readyTitle:"ה־AI המקומי מוכן", readySubtitle:"Imperium מנתב בקשות למודל מקומי שפועל במחשב הזה.", attentionTitle:"שרת המודל דורש טיפול", attentionSubtitle:"ההגדרה נשמרה. יש להשלים את הפעולה הבאה כדי להמשיך.",
+        recommended:"מומלץ למערכת שלך", recommendedCopy:"מודל מאוזן שנבחר מהקטלוג המאושר לפי החומרה שזוהתה.", reviewModel:"בדיקת המודל", whyModel:"למה המודל הזה?", whyCopy:"איכות טובה, תשובות מהירות והתאמה בטוחה לזיכרון שזוהה.", installed:"מותקן", available:"זמין", incompatible:"לא תואם", download:"הורדה", activate:"הפעלה", stop:"עצירה", details:"פרטים",manageModels:"ניהול מודלים",startChat:"התחלת שיחה",connectApp:"חיבור אפליקציה",additional:"שיפורים נוספים",
+        modelPage:"מודלים", modelPageCopy:"התקנה, הפעלה והיכרות עם המודלים שזמינים במחשב הזה.", installedTab:"מותקנים", recommendedTab:"מומלצים", downloadsTab:"הורדות", noInstalled:"עדיין לא הותקן מודל מהקטלוג.", noDownloads:"הורדות פעילות והתקדמות האימות יופיעו כאן.",
+        chatPage:"צ׳אט", chatPageCopy:"שיחה ישירה עם המודל המקומי ובדיקה של מסלול הניתוב המלא.", chooseModel:"בחירת מודל", clear:"ניקוי", send:"שליחה", stopGeneration:"עצירת יצירה", retry:"ניסיון חוזר", emptyChat:"השיחה המקומית שלך מתחילה כאן.", emptyChatCopy:"אפשר לבחור הצעה או לכתוב שאלה. ההודעות נשארות במחשב הזה.", prompt1:"הסבר איך עובדת הרצה מקומית", prompt2:"כתוב כלי Python קטן", prompt3:"סכם רעיון טכני", startServer:"הפעלת שרת המודל", chatFailed:"המודל לא הצליח להשיב.",
+        connectionsPage:"חיבורים", connectionsCopy:"חיבור כלים לכתובת אחת, יציבה ותואמת OpenAI.", activeConnections:"חיבורים פעילים", verify:"בדיקת החיבור", copy:"העתקה", copied:"הועתק", endpoint:"כתובת API", name:"שם", modelName:"שם המודל", pinnedModel:"מודל מוצמד", apiKey:"מפתח API", notRequired:"לא נדרש", connectionOk:"החיבור אומת", connectionFailed:"לא הצלחנו לאמת את החיבור", addHarness:"הוספת harness מותאם", customHarnesses:"Harnesses מותאמים",
+        fleetPage:"צי שרתים", fleetCopy:"שרתים, slots, תהליכים, GPU ובקרות תפעול.", startAll:"הפעלת הכול", stopAll:"עצירת הכול", slot:"Slot", role:"תפקיד", backend:"Backend", health:"מצב", context:"Context", noRows:"אין פריטים להצגה.",
+        routingPage:"ניתוב", routingCopy:"כינויים, אסטרטגיה, החלטות ו־failover.", alias:"כינוי", mapsTo:"ממופה אל", liveModel:"מודל פעיל", testRoute:"בדיקת ניתוב",
+        configurationPage:"הגדרות", configurationCopy:"אימות, environment ותצוגה בטוחה ללא סודות.", saveLocal:"שמירה במכשיר", rawPreview:"תצוגה גולמית", diagnosticsPage:"אבחון", diagnosticsCopy:"בדיקות מוכנות, גרסאות ומידע לתמיכה.", runDoctor:"הרצת בדיקות", refresh:"רענון", system:"מערכת",gpu:"GPU",memory:"זיכרון",runtime:"Runtime",unknown:"לא ידוע",router:"נתב",model:"מודל",ready:"מוכן",needsAttention:"דורש טיפול",setupRequired:"נדרשת הגדרה",
+        wizardWelcome:"ברוכים הבאים ל־Imperium", wizardWelcomeCopy:"נבדוק את המחשב, נמליץ על runtime ומודל בטוחים ונבקש אישור לפני כל הורדה.", continue:"המשך", back:"חזרה", exit:"יציאה מההגדרה", scanSystem:"בדיקת המחשב", scanning:"בודק חומרה והתקנות קיימות…", detectedHardware:"החומרה זוהתה", detectedHardwareCopy:"Imperium שומר את מקור כל נתון ולא הופך ערך לא ידוע לאפס.", runtimeChoice:"איך להריץ מודלים", runtimeChoiceCopy:"llama.cpp מקומי הוא ברירת המחדל. אפשר גם להתחבר לשרת קיים או לבחור בהגדרה מתקדמת.", native:"llama.cpp מקומי", nativeCopy:"פרטי, מנוהל ומותקן בגרסאות על ידי Imperium.", existing:"שרת קיים", existingCopy:"שימוש ב־llama.cpp, Ollama, LM Studio, LocalAI או שרת תואם OpenAI.", advancedChoice:"הגדרה מתקדמת", advancedCopy:"בחירה ידנית של קבצים ותיקיות.", operationMode:"אופן ההפעלה", background:"רקע מנוהל", backgroundCopy:"Imperium מפעיל ומנטר את השרת בשקט.", terminal:"טרמינל llama.cpp גלוי", terminalCopy:"חלון טרמינל ייעודי נשאר פתוח בזמן שהמודל פועל.", backendChoice:"Backend מומלץ", backendCopy:"ההמלצה מבוססת על המתאמים והדרייברים שזוהו.", chooseRecommended:"בחירת מודל ראשון", chooseRecommendedCopy:"מודל אחד ישמש את auto, chat, fast ו־coder עד שתחליטו לפצל תפקידים.", reviewInstall:"בדיקה ואישור", reviewInstallCopy:"שום דבר לא יורד לפני אישור המקור, הגודל, הרישיון והיעד.", confirmDownloads:"אני מאשר/ת את ההורדות המוצגות.", confirmConfig:"אני מאשר/ת את תצוגת ההגדרה ואת הגיבוי.", installNow:"התקנה והגדרה", installing:"מתקין את ה־AI המקומי", installingCopy:"אפשר להשאיר את העמוד פתוח. הורדות ממשיכות לאחר ניתוק וכל קובץ עובר אימות.", cancel:"ביטול", firstTest:"בדיקה אחרונה", firstTestCopy:"Imperium יוודא שה־runtime, המודל, ההגדרה והנתיב המקומי מוכנים.", runSmoke:"הרצת בדיקה אחרונה", setupComplete:"ההגדרה הושלמה", setupCompleteCopy:"המודל המאושר מותקן. אפשר להתחיל שיחה ולבדוק את החוויה.",
+        license:"רישיון",size:"גודל",destination:"יעד",source:"מקור",confidence:"רמת ודאות",freeDisk:"דיסק פנוי",cpuOnly:"CPU",select:"בחירה",loading:"טוען…",offline:"לא מקוון",repair:"תיקון",optional:"אופציונלי",openGuide:"פתיחת מדריך ההגדרה",setupPrinciples:"Windows תחילה · llama.cpp מקומי · אישור מפורש להורדות",recommendedBuild:"מומלץ · build שנבדק",latestStable:"Latest · גרסה רשמית יציבה",experimentalCandidates:"מועמדים ניסיוניים",experimentalCopy:"יש לעבור את בדיקות ה־runtime והפלטפורמה לפני שימוש בהתקנה ראשונה.",experimentalDisabled:"ניסיוני · לא מופעל",plans:"תוכניות",subAgents:"מופעי סוכני משנה",activeTickets:"משימות פעילות",artifacts:"תוצרים",observeOnly:"תצפית בלבד",savedBrowser:"נשמר רק בפרופיל הדפדפן הזה.",redactedPreview:"ערכים רגישים מוסתרים על ידי השירות.",customHarnessCopy:"פרופילי חיבור מתקדמים עם מודל מוצמד לכלים מותאמים.",customApp:"אפליקציה מותאמת",search:"חיפוש",blocking:"חוסמות",plannedPlatform:"מתוכנן לגרסה עתידית",installationFailed:"ההתקנה נעצרה",tryAgain:"ניסיון נוסף",useExisting:"שימוש בשרת קיים",english:"English",hebrew:"עברית",scanAgain:"סריקה נוספת",acceleration:"האצה",verified:"מאומת",inferred:"מוסק",technicalDetails:"פרטים טכניים",evidence:"מקור הזיהוי",launchBehavior:"אופן הפעלה",recommendedModel:"מודל ראשון מומלץ",existingModelCopy:"השרת הקיים מספק את המודל; Imperium ישתמש בניתוב האוטומטי.",otherModels:"מודלים תואמים נוספים",backendOverride:"עקיפת backend",dedicatedGraphicsMemory:"זיכרון גרפי ייעודי",reportedGraphicsMemory:"זיכרון גרפי מדווח",sharedUnknown:"לא ידוע אם הזיכרון משותף או ייעודי",automatic:"אוטומטי",generalChat:"צ׳אט כללי",fastModel:"מהיר",codingModel:"קוד",stepWelcome:"ברוכים הבאים",stepHardware:"סריקת מערכת",stepRuntime:"Runtime",stepModel:"מודל",stepReview:"בדיקה",stepInstall:"התקנה ובדיקה"
+      }
+    };
+    dictionary.en.closeAppsRescan="Close other apps, then scan again";
+    dictionary.he.closeAppsRescan="יש לסגור יישומים אחרים ואז לסרוק שוב";
+    const navSimple = [
+      ["home","house","home"],["chat","chat-circle-dots","chat"],["models","cube","models"],["connections","plugs-connected","connections"]
+    ];
+    const navAdvanced = [
+      ["advanced/fleet","hard-drives","fleet"],["advanced/routing","git-branch","routing"],["advanced/configuration","file-code","configuration"],["advanced/diagnostics","heartbeat","diagnostics"]
+    ];
+    function loadChat() {
+      try { const messages=JSON.parse(localStorage.getItem("imperium.chat")||"[]"); return Array.isArray(messages)?messages.filter(message=>["user","assistant"].includes(message?.role)&&typeof message.content==="string").slice(-100):[]; }
+      catch (_) { return []; }
+    }
+    function saveChat() { try { localStorage.setItem("imperium.chat",JSON.stringify(state.messages.slice(-100))); } catch (_) {} }
+    function loadSetup() {
+      try {
+        const saved=JSON.parse(localStorage.getItem("imperium.setup")||"{}");
+        return {step:Math.min(6,Math.max(1,Number(saved.step)||1)),wizard:saved.wizard&&typeof saved.wizard==="object"?saved.wizard:{},plan:saved.plan&&typeof saved.plan==="object"?saved.plan:null};
+      } catch (_) { return {step:1,wizard:{},plan:null}; }
+    }
+    const savedSetup=loadSetup();
+    const setupRoutes=["setup","setup/system","setup/runtime","setup/model","setup/plan","setup/install"];
+    const setupStepByRoute={"setup":1,"setup/system":2,"setup/hardware":2,"setup/runtime":3,"setup/launch":3,"setup/backend":3,"setup/model":4,"setup/plan":5,"setup/install":6};
+    const simpleModelAliases=["auto","chat","fast","coder"];
+    const state = {
+      lang: localStorage.getItem("imperium.lang") || "en",
+      theme: localStorage.getItem("imperium.theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
+      mode: localStorage.getItem("imperium.mode") || "simple",
+      route: "home", status: null, setup: null, fleet: null, modelsList: [], harnesses: [], cookbook: null, config: null,
+      modelTab: "recommended", messages: loadChat(), chatModel: localStorage.getItem("imperium.chatModel") || "auto", busy: false, aborter: null,
+      wizardStep: savedSetup.step, wizard: {runtime:"native", launch:"background", backend:"", channel:"recommended", modelId:"", existingUrl:"", confirmDownloads:false, confirmConfig:false, scanned:false,...savedSetup.wizard}, setupPlan: savedSetup.plan, setupFailure: null, setupRunning: false, events: [], progress: 0,
+      apiKey: localStorage.getItem("imperium.apiKey") || "", error: ""
+    };
+    function saveSetup() { try { localStorage.setItem("imperium.setup",JSON.stringify({step:state.wizardStep,wizard:state.wizard,plan:state.setupPlan})); } catch (_) {} }
+    function setWizardStep(step) {
+      state.wizardStep=Math.min(6,Math.max(1,step));
+      state.route=setupRoutes[state.wizardStep-1];
+      history.replaceState(null,"",`#/${state.route}`);
+      saveSetup();
+    }
+    const t = key => (dictionary[state.lang] && dictionary[state.lang][key]) || dictionary.en[key] || key;
+    function applyPreferences() {
+      document.documentElement.dataset.theme = state.theme;
+      document.documentElement.lang = state.lang;
+      document.documentElement.dir = state.lang === "he" ? "rtl" : "ltr";
+      document.getElementById("theme-value").textContent = t(state.theme);
+      document.getElementById("language-value").textContent = state.lang === "he" ? "עברית" : "English";
+      document.getElementById("mode-value").textContent = t(state.mode);
+      document.querySelectorAll("[data-i18n]").forEach(node => node.textContent = t(node.dataset.i18n));
+    }
+    function request(path, options={}) {
+      const headers = {Accept:"application/json", ...(options.headers || {})};
+      if (options.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+      if (state.apiKey) headers.Authorization = `Bearer ${state.apiKey}`;
+      if (path.startsWith("/setup/")) headers["X-Setup-Token"] = SETUP_TOKEN;
+      return fetch(path, {...options, headers}).then(async response => {
+        const type = response.headers.get("content-type") || "";
+        const payload = type.includes("json") ? await response.json() : await response.text();
+        if (!response.ok) throw Object.assign(new Error(payload.detail || payload.error || response.statusText), {status:response.status,payload});
+        return payload;
       });
-      this.harnessPreview = lines.join("\n");
-      this.harnessMessage = "Setup preview generated; no file was changed.";
-    },
-
-    async saveHarness() {
-      this.previewHarness();
-      try {
-        const resp = await fetch("/harnesses", {
-          method: "POST", headers: this.headers(), body: JSON.stringify(this.harnessPayload()),
-        });
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok) throw new Error(data.detail || data.error || ("HTTP " + resp.status));
-        this.harnessMessage = "Saved " + data.harness_id + ". Configure the consumer with the generated setup.";
-        await this.refresh();
-      } catch (err) { this.harnessMessage = String(err); }
-    },
-
-    async verifyHarness(harness, connection) {
-      this.harnessMessage = "Verifying " + harness.harness_id + "/" + connection.name + "...";
-      try {
-        const resp = await fetch(connection.base_url + "/models", { headers: this.headers() });
-        if (!resp.ok) throw new Error("HTTP " + resp.status);
-        this.harnessMessage = "Router endpoint verified. Consumer traffic is tracked separately.";
-        await this.refresh();
-      } catch (err) { this.harnessMessage = "Verification failed: " + String(err); }
-    },
-
-    openTab(t) {
-      this.tab = t;
-      if (t === "cookbook" && !this.cookbook) this.loadCookbook();
-      if (t === "orchestration") this.loadOrchestration();
-    },
-
-    instanceStatusClass(status) {
-      return status === "completed" ? "ok" : (["blocked","failed","stale"].includes(status) ? "err" : "warn");
-    },
-    selectedInstances() {
-      const planId = this.orchestration.plan?.plan?.plan_id;
-      return planId
-        ? (this.orchestration.instances || []).filter((i) => i.plan_id === planId)
-        : (this.orchestration.instances || []);
-    },
-    concurrencyPct() {
-      const s = this.orchestration.summary.instances || {};
-      const running = Number(s.running || 0), max = Number(s.max_parallel || 0);
-      return max ? Math.min(100, Math.round((running / max) * 100)) : (running ? 100 : 0);
-    },
-    runtimeText(i) {
-      const seconds = Math.max(0, Math.floor(Number(i.runtime_ms || 0) / 1000));
-      return seconds < 60 ? seconds + "s" : Math.floor(seconds / 60) + "m " + (seconds % 60) + "s";
-    },
-
-    async loadCookbook(force = false) {
-      this.cookbookBusy = true;
-      try {
-        this.cookbook = await this.get("/cookbook" + (force ? "?refresh=1" : ""));
-      } catch (err) {
-        this.cookbook = { ok: false, error: String(err) };
+    }
+    async function loadData() {
+      try { state.status=await request("/ui/status");state.setup=state.status.setup||state.setup; } catch(error) { state.error=error.message; }
+      const jobs = [
+        ["modelsList",()=>request("/v1/models").then(x=>x.data||[])],
+        ["harnesses",()=>request("/harnesses").then(x=>x.harnesses||x.items||[])], ["fleet",()=>request("/fleet/status")],
+        ["config",()=>request("/config/preview")], ["cookbook",()=>request("/cookbook")]
+      ];
+      await Promise.all(jobs.map(async ([key,job]) => { try { state[key] = await job(); } catch (_) {} }));
+      if (!state.wizard.backend && state.setup?.recommended_backend) state.wizard.backend = state.setup.recommended_backend;
+      if (state.setup?.platform_support?.status !== "supported" && state.wizard.runtime === "native") state.wizard.runtime = "existing";
+      if (!state.wizard.modelId && state.setup?.recommendation?.id) state.wizard.modelId = state.setup.recommendation.id;
+      if (!state.wizard.existingUrl && state.setup?.discovery?.servers?.[0]?.url) state.wizard.existingUrl = state.setup.discovery.servers[0].url;
+      if (state.mode!=="advanced" && !simpleModelAliases.includes(state.chatModel)) { state.chatModel="auto"; localStorage.setItem("imperium.chatModel","auto"); }
+      if (state.status?.setup_api_active===false&&state.setup?.setup_complete&&state.route.startsWith("setup")&&state.wizardStep<6) state.wizardStep=6;
+      if (state.wizardStep===5&&state.status?.setup_api_active!==false) { try { state.setupPlan=await request("/setup/plan",{method:"POST",body:JSON.stringify(setupPayload())}); } catch (_) {} }
+      if (state.wizardStep===6 && state.setup?.setup_complete) state.progress=1;
+      else if (state.wizardStep===6&&state.status?.setup_api_active!==false) { try { const payload=await request("/setup/events?after=0");state.events=(payload.events||[]).slice(-50);const progress=state.events.filter(event=>typeof event.progress==="number").at(-1)?.progress;if(typeof progress==="number")state.progress=Math.min(.99,progress); } catch (_) {} }
+      if (state.route.startsWith("setup")) saveSetup();
+      render();
+    }
+    function toast(message) {
+      const node = document.createElement("div"); node.className="toast"; node.textContent=message;
+      document.getElementById("toasts").appendChild(node); setTimeout(()=>node.remove(),3200);
+    }
+    function announce(message) { document.getElementById("live").textContent=message; }
+    function statusLabel() {
+      if (!state.status) return t("loading");
+      return state.status.overall === "ready" ? t("ready") : state.status.overall === "needs_attention" ? t("needsAttention") : t("setupRequired");
+    }
+    function navButton([route,icon,label]) {
+      const active = state.route === route || (route === "models" && state.route.startsWith("models/"));
+      return `<button class="nav-button ${active?"active":""}" data-route="${route}" ${active?'aria-current="page"':""}>${I(icon)}<span>${t(label)}</span></button>`;
+    }
+    function renderNav() {
+      document.getElementById("simple-nav").innerHTML = navSimple.map(navButton).join("");
+      document.getElementById("advanced-nav").innerHTML = navAdvanced.map(navButton).join("");
+      const isAdvanced = state.route.startsWith("advanced/") || state.mode === "advanced";
+      document.getElementById("advanced-nav").classList.toggle("open", isAdvanced);
+      document.getElementById("advanced-toggle").setAttribute("aria-expanded", String(isAdvanced));
+    }
+    function pageHeader(title,copy,actions="",eyebrow="") { return `<header class="page-header"><div>${eyebrow?`<div class="eyebrow">${esc(eyebrow)}</div>`:""}<h1>${esc(title)}</h1><p>${esc(copy)}</p></div>${actions}</header>`; }
+    function localized(value) { return esc(textValue(value)); }
+    function readinessHtml() {
+      const stages = state.status?.stages || [
+        {code:"system",complete:true,label:{en:"System checked",he:"המערכת נבדקה"}}, {code:"runtime",complete:false,label:{en:"llama.cpp",he:"llama.cpp"}}, {code:"model",complete:false,label:{en:"Model",he:"מודל"}}, {code:"server",complete:false,label:{en:"Ready",he:"מוכן"}}
+      ];
+      const firstIncomplete = stages.findIndex(stage=>!stage.complete);
+      return `<div class="readiness">${stages.map((stage,index)=>{
+        const current = index === firstIncomplete; const icon=stage.complete?"check-circle":current?"warning-circle":"clock";
+        const detail = stage.code === "system" ? (state.setup?.hardware?.system?.os || t("system")) : stage.code === "runtime" ? (stage.complete?t("installed"):t("setupRequired")) : stage.code === "model" ? (stage.complete?(state.status?.active?.model||t("installed")):t("setupRequired")) : (stage.complete?t("ready"):t("router"));
+        return `<div class="stage ${stage.complete?"complete":current?"current":""}"><div class="stage-head"><span class="stage-icon">${I(icon)}</span><span class="stage-title">${localized(stage.label)}</span></div><div class="stage-detail">${esc(detail)}</div></div>`;
+      }).join("")}</div>`;
+    }
+    function modelCardHome() {
+      const model = state.setup?.recommendation || state.setup?.models?.[0];
+      if (!model) return `<div class="status-banner warning">${I("warning-circle")}<div><strong>${t("setupRequired")}</strong><div class="muted">${t("chooseRecommendedCopy")}</div></div></div>`;
+      const actionRoute = model.installed ? "chat" : "setup/model";
+      return `<section><div class="section-title"><h2>${t("recommended")}</h2><p>${t("recommendedCopy")}</p></div><div class="model-recommendation"><div class="model-row"><span class="model-symbol">${I("cube")}</span><div><div class="model-name">${esc(model.name)} <span class="badge primary">${t("recommended")}</span></div><div class="meta-line"><span class="meta-item">${I("database")} ${esc(model.size_gb)} GB</span><span class="meta-item">${I("memory")} ${esc(textValue(model.fit_reason_i18n)||model.fit_reason||model.quant)}</span><span class="meta-item">${I("check-circle")} ${esc((model.capabilities||[]).slice(0,3).join(" · "))}</span></div></div><button class="button" data-route="${actionRoute}">${t("reviewModel")} ${I("arrow-right")}</button></div><div class="why">${I("info")}<div><strong>${t("whyModel")}</strong>&nbsp; ${t("whyCopy")}</div></div></div></section>`;
+    }
+    function factsHtml() {
+      const hw=state.setup?.hardware||{}; const gpu=hw.gpus?.[0]||{}; const ram=hw.ram||{}; const system=hw.system||{};
+      const facts=[["desktop","system",`${system.os||t("unknown")} ${system.release||""}`],["graphics-card","gpu",gpu.name||t("unknown")],["memory","memory",ram.total_mb?`${Math.round(ram.total_mb/1024)} GB RAM`:t("unknown")],["code","runtime",state.setup?.discovery?.runtime_installed?t("installed"):t("setupRequired")]];
+      return `<div class="facts">${facts.map(([icon,label,value])=>`<div class="fact">${I(icon)}<div><strong>${t(label)}</strong><span title="${esc(value)}">${esc(value)}</span></div></div>`).join("")}</div>`;
+    }
+    function homePage() {
+      const overall=state.status?.overall||"setup_required"; const ready=overall==="ready"; const attention=overall==="needs_attention";
+      const title=ready?t("readyTitle"):attention?t("attentionTitle"):t("setupTitle"); const copy=ready?t("readySubtitle"):attention?t("attentionSubtitle"):t("setupSubtitle");
+      const next=state.status?.next_action||{href:"#/setup",label:{en:"Continue setup",he:"המשך ההגדרה"}};
+      const optional=state.status?.optional_issues||[];
+      return `<div class="page">${pageHeader(title,copy,`<button class="button primary" data-route="${esc((next.href||"#/setup").replace(/^#\//,""))}">${localized(next.label)} ${I("arrow-right")}</button>`,statusLabel())}${readinessHtml()}${modelCardHome()}${factsHtml()}<div class="quick-actions">${(state.status?.quick_actions||[]).map(action=>`<button class="button small" data-route="${esc((action.href||"").replace(/^#\//,""))}">${localized(action.label)}</button>`).join("")}</div>${optional.length?`<section class="additional"><h3>${t("additional")}</h3>${optional.map(issue=>`<div class="issue-row"><span>${localized(issue.message)}</span><button class="button small" data-route="${esc((issue.action?.href||"advanced/diagnostics").replace(/^#\//,""))}">${localized(issue.action?.label)}</button></div>`).join("")}</section>`:""}</div>`;
+    }
+    function modelRows(tab) {
+      let rows=state.setup?.models||[];
+      if (tab==="installed") rows=rows.filter(row=>row.installed);
+      if (tab==="recommended") rows=rows.filter(row=>row.fit!=="incompatible");
+      if (!rows.length) return `<div class="empty">${I("cube")}<div><h3>${tab==="downloads"?t("noDownloads"):t("noInstalled")}</h3></div></div>`;
+      return `<div class="cards">${rows.map(model=>`<article class="card"><div class="card-icon">${I("cube")}</div><div class="model-name" style="font-size:18px">${esc(model.name)}</div><div class="meta-line"><span>${esc(model.quant)}</span><span>${esc(model.size_gb)} GB</span><span>${esc(model.context||"")} ctx</span></div><p class="muted" style="margin-top:14px">${esc(textValue(model.fit_reason_i18n)||model.fit_reason||"")}</p><div class="meta-line"><span class="badge ${model.fit==="incompatible"?"warning":"success"}">${t(model.fit==="incompatible"?"incompatible":model.installed?"installed":"available")}</span><span>${esc(model.license)}</span></div><div class="card-footer"><button class="button small" data-action="model-details" data-model="${esc(model.id)}">${t("details")}</button><button class="button primary small" data-action="select-model" data-model="${esc(model.id)}" ${model.fit==="incompatible"?"disabled":""}>${model.installed?t("activate"):t("download")}</button></div></article>`).join("")}</div>`;
+    }
+    function modelsPage() { const experiments=state.mode==="advanced"&&state.modelTab==="recommended"?(state.setup?.experimental_candidates||[]):[]; return `<div class="page">${pageHeader(t("modelPage"),t("modelPageCopy"))}<div class="tabs">${[["installed","installedTab"],["recommended","recommendedTab"],["downloads","downloadsTab"]].map(([id,label])=>`<button class="tab ${state.modelTab===id?"active":""}" data-model-tab="${id}">${t(label)}</button>`).join("")}</div>${state.modelTab==="downloads"?downloadsView():modelRows(state.modelTab)}${experiments.length?`<section style="margin-top:42px"><div class="section-title"><h2>${t("experimentalCandidates")}</h2><p>${t("experimentalCopy")}</p></div><div class="cards">${experiments.map(model=>`<article class="card"><div class="card-icon">${I("wrench")}</div><div class="model-name" style="font-size:18px">${esc(model.name)}</div><div class="meta-line"><span>${esc(Math.round(model.size_gb*1000))} MB</span><span>${esc(model.runtime)}</span><span>${esc(model.license)}</span></div><p class="muted" style="margin-top:14px">${esc((model.blockers||[])[0]||"")}</p><span class="badge warning">${t("experimentalDisabled")}</span></article>`).join("")}</div></section>`:""}</div>`; }
+    function downloadsView() { return state.events.length?`<div class="table-wrap"><table><thead><tr><th>${t("status")||"Status"}</th><th>${t("details")}</th></tr></thead><tbody>${state.events.map(event=>`<tr><td><span class="badge">${esc(event.status)}</span></td><td>${esc(event.detail)}</td></tr>`).join("")}</tbody></table></div>`:`<div class="empty">${I("download-simple")}<div><h3>${t("noDownloads")}</h3></div></div>`; }
+    function chatModelOptions() {
+      const all=state.modelsList.length?state.modelsList:[{id:"auto"}];
+      return state.mode==="advanced"?all:all.filter(row=>simpleModelAliases.includes(row.id));
+    }
+    function chatModelLabel(id) { return ({auto:t("automatic"),chat:t("generalChat"),fast:t("fastModel"),coder:t("codingModel")})[id]||id; }
+    function chatPage() {
+      const options=chatModelOptions();
+      return `<div class="page chat-layout"><div class="chat-toolbar"><div><h2>${t("chatPage")}</h2><span class="muted">${t("chatPageCopy")}</span></div><div style="display:flex;gap:8px"><label class="sr-only" for="chat-model">${t("chooseModel")}</label><select class="select" id="chat-model" style="width:auto">${options.map(row=>`<option value="${esc(row.id)}" ${state.chatModel===row.id?"selected":""}>${esc(state.mode==="advanced"?row.id:chatModelLabel(row.id))}</option>`).join("")}</select><button class="button small" data-action="clear-chat">${I("trash")} ${t("clear")}</button></div></div><div class="chat-messages" id="chat-messages">${state.messages.length?state.messages.map((message,index)=>`<div class="message ${message.role}">${esc(message.content)}${message.routing?`<details class="routing-detail"><summary>${t("routing")}</summary>${esc(message.routing)}</details>`:""}${message.error?`<div style="margin-top:10px"><button class="button small" data-action="retry-chat">${I("arrow-clockwise")} ${t("retry")}</button></div>`:""}</div>`).join(""):`<div class="empty">${I("chat-circle-dots")}<div><h3>${t("emptyChat")}</h3><p>${t("emptyChatCopy")}</p><div class="prompt-chips">${["prompt1","prompt2","prompt3"].map(key=>`<button class="prompt-chip" data-prompt="${esc(t(key))}">${t(key)}</button>`).join("")}</div></div></div>`}</div><div class="composer"><form class="composer-box" id="chat-form"><label class="sr-only" for="chat-input">${t("chatPage")}</label><textarea id="chat-input" placeholder="${esc(t("emptyChat"))}" ${state.busy?"disabled":""}></textarea><button class="icon-button" type="${state.busy?"button":"submit"}" ${state.busy?'data-action="stop-chat"':''} aria-label="${state.busy?t("stopGeneration"):t("send")}">${I(state.busy?"stop":"paper-plane-tilt")}</button></form></div></div>`;
+    }
+    const integrations=[
+      {id:"openai",name:"OpenAI SDK",icon:"code",model:"auto",copy:{en:"Python and JavaScript clients using a custom base URL.",he:"לקוחות Python ו־JavaScript עם כתובת בסיס מותאמת."}},
+      {id:"open-webui",name:"Open WebUI",icon:"chat-circle-dots",model:"auto",copy:{en:"A friendly local chat interface connected through OpenAI compatibility.",he:"ממשק צ׳אט מקומי שמתחבר דרך תאימות OpenAI."}},
+      {id:"claude-code",name:"Claude Code MCP",icon:"terminal-window",model:"coder",copy:{en:"Route coding and tool tasks through the local gateway.",he:"ניתוב משימות קוד וכלים דרך השער המקומי."}},
+      {id:"aider",name:"Aider",icon:"git-branch",model:"coder",copy:{en:"Use a local coding model in your existing repository.",he:"שימוש במודל קוד מקומי בתוך המאגר הקיים."}},
+      {id:"agent-zero",name:"Agent Zero",icon:"circles-four",model:"auto",copy:{en:"Connect agents to one explainable local route.",he:"חיבור סוכנים למסלול מקומי אחד וברור."}},
+      {id:"vercel",name:"Vercel AI SDK",icon:"file-code",model:"auto",copy:{en:"Use the OpenAI-compatible provider from a web app.",he:"שימוש בספק תואם OpenAI מאפליקציית Web."}},
+      {id:"dify",name:"Dify",icon:"tree-structure",model:"auto",copy:{en:"Connect Dify workflows to a private local model.",he:"חיבור תהליכי Dify למודל מקומי ופרטי."}},
+      {id:"generic",name:"Generic API",icon:"plugs-connected",model:"auto",copy:{en:"For any OpenAI-compatible application.",he:"לכל אפליקציה שתואמת ל־OpenAI."}}
+    ];
+    function connectionsPage() { return `<div class="page">${pageHeader(t("connectionsPage"),t("connectionsCopy"))}<div class="cards">${integrations.map(app=>`<article class="card"><div class="card-icon">${I(app.icon)}</div><h3>${esc(app.name)}</h3><p class="muted">${localized(app.copy)}</p><div class="card-footer"><span class="badge">${esc(app.model)}</span><button class="button small" data-action="integration-details" data-integration="${app.id}">${t("connectApp")}</button></div></article>`).join("")}</div><section style="margin-top:38px"><h2>${t("activeConnections")}</h2>${state.harnesses.length?`<div class="table-wrap"><table><thead><tr><th>${t("connections")}</th><th>${t("model")}</th><th>${t("health")}</th></tr></thead><tbody>${state.harnesses.map(item=>`<tr><td>${esc(item.name||item.id)}</td><td class="mono">${esc(item.model||item.model_alias||"auto")}</td><td><span class="badge success">${t("ready")}</span></td></tr>`).join("")}</tbody></table></div>`:`<div class="status-banner">${I("info")}<div>${t("noRows")}</div></div>`}</section></div>`; }
+    function fleetPage() { const rows=state.fleet?.slots||[]; return `<div class="page">${pageHeader(t("fleetPage"),t("fleetCopy"),`<div style="display:flex;gap:8px"><button class="button" data-action="fleet-start">${I("play")} ${t("startAll")}</button><button class="button danger" data-action="fleet-stop">${I("stop")} ${t("stopAll")}</button></div>`)}<div class="toolbar"><input class="input search" id="fleet-search" placeholder="${t("search")||"Search"}"><button class="button small" data-action="refresh">${I("arrow-clockwise")} ${t("refresh")}</button></div>${table([t("slot"),t("role"),t("model"),t("backend"),t("health")],rows.map(row=>[row.id,row.role,row.model_id,row.backend_type,row.health||"unknown"]))}</div>`; }
+    function routingPage() { const aliases=state.modelsList.filter(row=>row.meta?.kind==="alias"); return `<div class="page">${pageHeader(t("routingPage"),t("routingCopy"),`<button class="button" data-action="route-test">${I("git-branch")} ${t("testRoute")}</button>`)}${table([t("alias"),t("mapsTo"),t("liveModel")],aliases.map(row=>[row.id,row.meta?.maps_to_role,row.meta?.live?.model||"—"]))}</div>`; }
+    function configurationPage() { return `<div class="page">${pageHeader(t("configurationPage"),t("configurationCopy"))}<div class="cards"><section class="card"><h3>${t("apiKey")}</h3><p class="muted">${t("savedBrowser")}</p><div class="field"><label for="api-key">${t("apiKey")}</label><input class="input mono" id="api-key" type="password" value="${esc(state.apiKey)}" autocomplete="off"></div><button class="button primary" data-action="save-api-key">${t("saveLocal")}</button></section><section class="card"><h3>${t("rawPreview")}</h3><p class="muted">${t("redactedPreview")}</p><button class="button" data-action="show-config">${I("file-code")} ${t("rawPreview")}</button></section><section class="card"><h3>${t("customHarnesses")}</h3><p class="muted">${t("customHarnessCopy")}</p><button class="button" data-action="open-harness">${I("plus")} ${t("addHarness")}</button></section></div></div>`; }
+    function diagnosticsPage() { const status=state.status||{}; return `<div class="page">${pageHeader(t("diagnosticsPage"),t("diagnosticsCopy"),`<button class="button" data-action="refresh">${I("heartbeat")} ${t("runDoctor")}</button>`)}<div class="cards"><article class="card"><div class="card-icon">${I("heartbeat")}</div><h3>${statusLabel()}</h3><p class="muted">${(status.blocking_issues||[]).length} blocking · ${(status.optional_issues||[]).length} optional</p></article><article class="card"><div class="card-icon">${I("code")}</div><h3>Imperium v__IMPERIUM_VERSION__</h3><p class="muted mono">${esc(location.origin)}</p></article><article class="card"><div class="card-icon">${I("graphics-card")}</div><h3>${esc(status.hardware?.gpu||t("unknown"))}</h3><p class="muted">${status.hardware?.vram_mb?Math.round(status.hardware.vram_mb/1024)+" GB VRAM":t("unknown")}</p></article></div><section style="margin-top:32px"><h2>${t("needsAttention")}</h2>${[...(status.blocking_issues||[]),...(status.optional_issues||[])].length?[...(status.blocking_issues||[]),...(status.optional_issues||[])].map(issue=>`<div class="issue-row"><div><span class="badge ${issue.severity==="blocking"?"warning":""}">${esc(issue.code)}</span> ${localized(issue.message)}</div><button class="button small" data-route="${esc((issue.action?.href||"home").replace(/^#\//,""))}">${localized(issue.action?.label)}</button></div>`).join(""):`<div class="status-banner success">${I("check-circle")}<div>${t("ready")}</div></div>`}</section></div>`; }
+    function table(headers,rows) { return `<div class="table-wrap"><table><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${rows.length?rows.map(row=>`<tr>${row.map(cell=>`<td>${esc(cell??"—")}</td>`).join("")}</tr>`).join(""):`<tr><td colspan="${headers.length}">${t("noRows")}</td></tr>`}</tbody></table></div>`; }
+    function wizardSidebar() { const labels=["stepWelcome","stepHardware","stepRuntime","stepModel","stepReview","stepInstall"]; return `<aside class="wizard-side"><h2>Imperium setup</h2><div class="wizard-progress">${labels.map((label,index)=>`<div class="wizard-step ${state.wizardStep===index+1?"active":state.wizardStep>index+1?"done":""}"><span class="wizard-step-number">${state.wizardStep>index+1?"✓":index+1}</span><span>${t(label)}</span></div>`).join("")}</div></aside>`; }
+    function option(value,current,title,copy,icon="",disabled=false,group="wizard-option") { return `<label class="option ${current===value?"selected":""} ${disabled?"disabled":""}"><input type="radio" name="${group}" value="${esc(value)}" ${current===value?"checked":""} ${disabled?"disabled":""}>${icon?I(icon):""}<span><strong>${esc(title)}</strong><span>${esc(copy)}</span></span></label>`; }
+    function graphicsMemory(gpu) {
+      const verifiedDedicated=gpu.source==="nvidia-smi"&&gpu.dedicated_vram_mb;
+      const reported=gpu.reported_graphics_memory_mb||gpu.reported_memory_mb||(!verifiedDedicated&&gpu.source==="windows_cim"?gpu.dedicated_vram_mb:null);
+      if (verifiedDedicated) return `${t("dedicatedGraphicsMemory")}: ${Math.round(verifiedDedicated/1024)} GB`;
+      if (reported) return `${t("reportedGraphicsMemory")}: ${Math.round(reported/1024)} GB · ${t("sharedUnknown")}`;
+      return t("unknown");
+    }
+    function hardwareSummary() { const hw=state.setup?.hardware||{}; const gpu=hw.gpus?.[0]||{}; return `<div class="cards"><article class="card"><div class="card-icon">${I("desktop")}</div><h3>${esc(hw.system?.os||t("unknown"))}</h3><p class="muted">${esc(hw.system?.release||"")}</p><span class="badge">${t("confidence")}: ${esc(hw.system?.confidence||"unknown")}</span></article><article class="card"><div class="card-icon">${I("graphics-card")}</div><h3>${esc(gpu.name||t("unknown"))}</h3><p class="muted">${esc(graphicsMemory(gpu))}</p><span class="badge">${esc(gpu.source||"fallback")}</span></article><article class="card"><div class="card-icon">${I("memory")}</div><h3>${state.setup?.hardware?.ram?.total_mb?Math.round(state.setup.hardware.ram.total_mb/1024)+" GB RAM":t("unknown")}</h3><p class="muted">${t("freeDisk")}: ${esc(hw.disk?.free_gb??t("unknown"))} GB</p></article></div>`; }
+    function accelerationHtml(allowOverride=false) {
+      const candidates=state.setup?.backend_candidates||[]; const row=candidates.find(item=>item.id===state.wizard.backend)||candidates.find(item=>item.recommended)||{};
+      const capability=row.id?.startsWith("cuda")?"cuda":row.id==="rocm"?"hip":row.id; const evidence=state.setup?.hardware?.accelerator_evidence?.[capability]||{};
+      const inferred=String(evidence.source||"").includes("inference")||(!["cpu",undefined].includes(row.id)&&row.confidence!=="high");
+      const certainty=row.id==="cpu"?t("available"):inferred?t("inferred"):t("verified");
+      const override=allowOverride?`<div class="field"><label for="backend-override">${t("backendOverride")}</label><select class="select" id="backend-override">${candidates.map(item=>`<option value="${esc(item.id)}" ${item.id===state.wizard.backend?"selected":""} ${item.eligible?"":"disabled"}>${esc(item.id.toUpperCase())} · ${esc(item.eligible?item.confidence:item.reason_code)}</option>`).join("")}</select></div><div class="field"><label for="runtime-channel">llama.cpp channel</label><select class="select" id="runtime-channel"><option value="recommended" ${state.wizard.channel==="recommended"?"selected":""}>${t("recommendedBuild")}</option><option value="latest" ${state.wizard.channel==="latest"?"selected":""}>${t("latestStable")}</option></select></div>`:"";
+      return `<div class="acceleration">${I(row.id==="cpu"?"desktop":"graphics-card")}<div><strong>${t("acceleration")}: ${esc((row.id||"cpu").toUpperCase())}</strong><div class="muted">${certainty}</div></div></div><details class="technical-details"><summary>${t("technicalDetails")}</summary><div class="detail-body"><div>${t("evidence")}: <span class="mono">${esc(evidence.source||"cpu")}</span></div><div>${t("confidence")}: ${esc(row.confidence||evidence.confidence||"unknown")}</div>${override}</div></details>`;
+    }
+    function wizardContent() {
+      const step=state.wizardStep; const model=(state.setup?.models||[]).find(row=>row.id===state.wizard.modelId)||state.setup?.recommendation;
+      if (step===1) return `<h1>${t("wizardWelcome")}</h1><p>${t("wizardWelcomeCopy")}</p><div class="language-choice" role="group" aria-label="${t("language")}"><button class="button small" data-language="en" aria-pressed="${state.lang==="en"}">${t("english")}</button><button class="button small" data-language="he" aria-pressed="${state.lang==="he"}">${t("hebrew")}</button></div><div class="status-banner" style="margin-top:20px">${I("info")}<div>${t("setupPrinciples")}</div></div>`;
+      if (step===2) return state.wizard.scanned?`<h1>${t("detectedHardware")}</h1><p>${t("detectedHardwareCopy")}</p>${hardwareSummary()}${accelerationHtml()}<button class="button small ghost" style="margin-top:16px" data-action="scan-system">${I("magnifying-glass")} ${t("scanAgain")}</button>`:`<h1>${t("scanSystem")}</h1><p>${t("scanning")}</p><button class="button primary" data-action="scan-system" ${state.busy?"disabled":""}>${I("magnifying-glass")} ${t("scanSystem")}</button>`;
+      if (step===3) {
+        const planned=state.setup?.platform_support?.status!=="supported";
+        const runtimeOptions=`<div class="wizard-options">${option("native",state.wizard.runtime,t("native"),planned?t("plannedPlatform"):t("nativeCopy"),"code",planned,"runtime-option")}${option("existing",state.wizard.runtime,t("existing"),t("existingCopy"),"plugs-connected",false,"runtime-option")}${option("advanced",state.wizard.runtime,t("advancedChoice"),t("advancedCopy"),"gear-six",false,"runtime-option")}</div>`;
+        const existing=state.wizard.runtime==="existing"?`<div class="field" style="margin-top:18px"><label for="existing-url">${t("endpoint")}</label><input class="input mono" id="existing-url" value="${esc(state.wizard.existingUrl||"http://127.0.0.1:8080/v1")}"></div>`:"";
+        const managed=state.wizard.runtime!=="existing"?`${accelerationHtml(state.mode==="advanced"||state.wizard.runtime==="advanced")}<fieldset class="choice-group"><legend>${t("launchBehavior")}</legend><div class="wizard-options">${option("background",state.wizard.launch,t("background"),t("backgroundCopy"),"play",false,"launch-option")}${option("terminal",state.wizard.launch,t("terminal"),t("terminalCopy"),"terminal-window",false,"launch-option")}</div></fieldset>`:"";
+        return `<h1>${t("runtimeChoice")}</h1><p>${t("runtimeChoiceCopy")}</p>${runtimeOptions}${existing}${managed}`;
       }
-      this.cookbookBusy = false;
-    },
-
-    saveKey() { localStorage.setItem("lmr_key", this.apiKey); },
-    headers() {
-      const h = { "Content-Type": "application/json" };
-      if (this.apiKey) h["Authorization"] = "Bearer " + this.apiKey;
-      return h;
-    },
-    async get(path) {
-      const resp = await fetch(path, { headers: this.headers() });
-      if (!resp.ok) throw new Error(path + " -> " + resp.status);
-      return resp.json();
-    },
-    async refresh() {
-      try { this.health = await this.get("/health"); } catch { this.health = {}; }
-      try { this.slots = await this.get("/health/slots"); } catch { this.slots = []; }
-      try { this.backends = (await this.get("/backends")).backends || []; } catch { this.backends = []; }
-      try { this.apps = (await this.get("/apps")).apps || []; } catch { this.apps = []; }
-      try {
-        this.harnessMeta = await this.get("/harnesses");
-        this.harnesses = this.harnessMeta.harnesses || [];
-      } catch { this.harnessMeta = {}; this.harnesses = []; }
-      try { this.models = (await this.get("/v1/models")).data || []; } catch { this.models = []; }
-      try { this.fleet = await this.get("/fleet/status"); } catch { this.fleet = {}; }
-      try { this.analytics = await this.get("/routing/analytics"); } catch { this.analytics = {}; }
-      if (this.tab === "orchestration") await this.loadOrchestration();
-    },
-    async control(path) {
-      this.controlMsg = path + " ...";
-      try {
-        const resp = await fetch(path, { method: "POST", headers: this.headers() });
-        const data = await resp.json().catch(() => ({}));
-        this.controlMsg = resp.ok
-          ? path + " → ok (" + (data.backend || "?") + ")"
-          : path + " → " + (data.error?.message || ("HTTP " + resp.status));
-      } catch (err) { this.controlMsg = String(err); }
-      await this.refresh();
-    },
-    async testRoute() {
-      this.route.result = "routing...";
-      try {
-        const body = { agent_id: "dashboard", agent_type: "custom", task_type: this.route.task_type };
-        if (this.route.role.trim()) body.role = this.route.role.trim();
-        const resp = await fetch("/routing/request", {
-          method: "POST", headers: this.headers(), body: JSON.stringify(body),
-        });
-        this.route.result = JSON.stringify(await resp.json(), null, 2);
-      } catch (err) { this.route.result = String(err); }
-    },
-    async loadModelCard() {
-      this.modelCard = "loading...";
-      try {
-        this.modelCard = JSON.stringify(await this.get("/routing/models/" + encodeURIComponent(this.cardModel)), null, 2);
-      } catch (err) { this.modelCard = String(err); }
-    },
-    async loadOrchestration() {
-      try {
-        const [plans, summary, instances] = await Promise.all([
-          this.get("/orchestrator/plans"),
-          this.get("/orchestrator/summary"),
-          this.get("/orchestrator/instances"),
-        ]);
-        this.orchestration.plans = plans.plans || [];
-        this.orchestration.summary = summary || { instances: {} };
-        this.orchestration.instances = instances.instances || [];
-        this.orchestration.error = "";
-        if (!this.orchestration.plan && this.orchestration.plans.length) {
-          await this.openPlan(this.orchestration.plans[0].plan_id);
-        }
-      } catch (err) { this.orchestration.error = String(err); }
-    },
-    async openPlan(planId) {
-      try {
-        this.orchestration.plan = await this.get("/orchestrator/plans/" + encodeURIComponent(planId));
-        this.orchestration.ticket = null;
-        this.orchestration.instance = null;
-        this.orchestration.error = "";
-      } catch (err) { this.orchestration.error = String(err); }
-    },
-    openInstance(instanceId) {
-      this.orchestration.instance = (this.orchestration.instances || []).find((i) => i.instance_id === instanceId) || null;
-    },
-    async openTicket(ticketId) {
-      try {
-        this.orchestration.ticket = await this.get("/orchestrator/tickets/" + encodeURIComponent(ticketId));
-        this.orchestration.error = "";
-      } catch (err) { this.orchestration.error = String(err); }
-    },
-    async sendChat() {
-      const text = this.chat.input.trim();
-      if (!text || this.chat.busy) return;
-      this.chat.messages.push({ role: "user", content: text });
-      this.chat.input = "";
-      this.chat.error = "";
-      this.chat.busy = true;
-      this.$nextTick(() => { const el = this.$refs.chatlog; if (el) el.scrollTop = el.scrollHeight; });
-      try {
-        const resp = await fetch("/v1/chat/completions", {
-          method: "POST",
-          headers: this.headers(),
-          body: JSON.stringify({
-            model: this.chat.model,
-            messages: this.chat.messages.map((m) => ({ role: m.role, content: m.content })),
-            stream: false,
-          }),
-        });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error?.message || ("HTTP " + resp.status));
-        this.chat.messages.push({ role: "assistant", content: data.choices?.[0]?.message?.content ?? "(no content)" });
-      } catch (err) {
-        this.chat.error = String(err);
-      } finally {
-        this.chat.busy = false;
-        this.$nextTick(() => { const el = this.$refs.chatlog; if (el) el.scrollTop = el.scrollHeight; });
+      if (step===4) {
+        if (state.wizard.runtime==="existing") return `<h1>${t("recommendedModel")}</h1><p>${t("existingModelCopy")}</p><div class="status-banner">${I("plugs-connected")}<div><strong>${t("automatic")}</strong><div class="muted mono">auto</div></div></div>`;
+        const alternatives=(state.setup?.models||[]).filter(row=>row.id!==model?.id&&row.fit!=="incompatible");
+        return `<h1>${t("recommendedModel")}</h1><p>${t("chooseRecommendedCopy")}</p><div class="wizard-options">${model?option(model.id,state.wizard.modelId,`${model.name} · ${model.quant}`,`${model.size_gb} GB · ${textValue(model.fit_reason_i18n)||model.fit_reason}`,"cube",false,"model-option"):`<div class="status-banner warning">${I("warning-circle")}<div>${t("setupRequired")}</div></div>`}</div>${state.mode==="advanced"&&alternatives.length?`<details class="technical-details"><summary>${t("otherModels")}</summary><div class="wizard-options">${alternatives.map(row=>option(row.id,state.wizard.modelId,`${row.name} · ${row.quant}`,`${row.size_gb} GB · ${textValue(row.fit_reason_i18n)||row.fit_reason}`,"cube",false,"model-option")).join("")}</div></details>`:""}`;
       }
-    },
-    boot() { this.refresh(); setInterval(() => this.refresh(), 7000); },
-  };
-}
-</script>
+      if (step===5) return `<h1>${t("reviewInstall")}</h1><p>${t("reviewInstallCopy")}</p><div class="card"><div class="model-name" style="font-size:19px">${esc(model?.name||(state.wizard.runtime==="existing"?t("existing"):t("model")))}</div><div class="meta-line">${model?`<span>${t("size")}: ${esc(model.size_gb||0)} GB</span><span>${t("license")}: ${esc(model.license||"—")}</span>`:""}<span>${t("acceleration")}: ${esc(state.wizard.runtime==="existing"?t("existing"):state.wizard.backend)}</span></div><p class="mono muted" style="margin-top:16px">${esc(state.setupPlan?.destination?.models||state.setup?.discovery?.models_dir||"")}</p>${state.setupPlan?.steps?`<ol class="muted">${state.setupPlan.steps.map(item=>`<li>${esc(item.action.replaceAll("_"," "))}</li>`).join("")}</ol>`:""}</div><div class="wizard-options"><label class="option"><input id="confirm-downloads" type="checkbox" ${state.wizard.confirmDownloads?"checked":""}><span><strong>${t("confirmDownloads")}</strong><span>${esc(model?.source_url||t("existing"))}</span></span></label><label class="option"><input id="confirm-config" type="checkbox" ${state.wizard.confirmConfig?"checked":""}><span><strong>${t("confirmConfig")}</strong><span>${esc(state.setupPlan?.destination?.config||state.setup?.discovery?.config_path||"")}</span></span></label></div>`;
+      if (state.setupFailure) { const memory=state.setupFailure.code==="insufficient_available_memory"; return `<h1>${t("installationFailed")}</h1><p>${esc(state.setupFailure.message)}</p><div class="log" role="status" aria-live="polite">${state.events.map(event=>`[${esc(event.status)}] ${esc(event.detail)}`).join("\n")}</div><div class="wizard-actions"><button class="button ghost" data-action="use-existing-setup">${t("useExisting")}</button><button class="button primary" data-action="retry-setup">${I("arrow-clockwise")} ${memory?t("closeAppsRescan"):t("tryAgain")}</button></div>`; }
+      if (!state.setupRunning&&state.progress>=1) return `<h1>${t("setupComplete")}</h1><p>${t("setupCompleteCopy")}</p><div class="status-banner success">${I("check-circle")}<div><strong>${t("ready")}</strong><div class="muted">runtime · model · config · route</div></div></div><div class="quick-actions"><button class="button primary" data-action="finish-setup">${t("startChat")} ${I("arrow-right")}</button></div>`;
+      return `<h1>${t("installing")}</h1><p>${t("installingCopy")}</p><div class="progress-bar"><span style="width:${Math.round(state.progress*100)}%"></span></div><div class="log" role="status" aria-live="polite">${state.events.length?state.events.map(event=>`[${esc(event.status)}] ${esc(event.detail)}`).join("\n"):t("loading")}</div>${state.setupRunning?`<button class="button danger" style="margin-top:18px" data-action="cancel-setup">${t("cancel")}</button>`:`<button class="button primary" style="margin-top:18px" data-action="retry-setup">${I("arrow-clockwise")} ${t("tryAgain")}</button>`}`;
+    }
+    function wizardPage() {
+      saveSetup();
+      const canNext=state.wizardStep!==2||state.wizard.scanned;
+      const runtimeReady=state.wizardStep!==3||(state.wizard.runtime==="existing"?Boolean(state.wizard.existingUrl||"http://127.0.0.1:8080/v1"):Boolean(state.wizard.backend));
+      const modelReady=state.wizardStep!==4||state.wizard.runtime==="existing"||Boolean(state.wizard.modelId);
+      const confirmed=state.wizardStep!==5||(state.wizard.confirmDownloads&&state.wizard.confirmConfig);
+      return `<div class="page"><div class="wizard-shell">${wizardSidebar()}<section class="wizard-body"><div class="wizard-content">${wizardContent()}</div>${state.wizardStep<6?`<div class="wizard-actions"><button class="button ghost" data-action="wizard-${state.wizardStep===1?"exit":"back"}">${state.wizardStep===1?t("exit"):t("back")}</button><button class="button primary" data-action="${state.wizardStep===5?"apply-setup":"wizard-next"}" ${canNext&&runtimeReady&&modelReady&&confirmed?"":"disabled"}>${state.wizardStep===5?t("installNow"):t("continue")} ${I("arrow-right")}</button></div>`:""}</section></div></div>`;
+    }
+    function render() {
+      renderNav(); applyPreferences();
+      let html;
+      if (state.route.startsWith("setup")) html=wizardPage(); else if (state.route==="home") html=homePage(); else if (state.route==="chat") html=chatPage(); else if (state.route.startsWith("models")) html=modelsPage(); else if (state.route==="connections") html=connectionsPage(); else if (state.route==="advanced/fleet") html=fleetPage(); else if (state.route==="advanced/routing") html=routingPage(); else if (state.route==="advanced/configuration") html=configurationPage(); else html=diagnosticsPage();
+      document.getElementById("main").innerHTML=html; document.getElementById("main").focus({preventScroll:true});
+      requestAnimationFrame(()=>{ const messages=document.getElementById("chat-messages"); if(messages) messages.scrollTop=messages.scrollHeight; });
+    }
+    function routeTo(route) {
+      route=route||"home";
+      if (route==="setup"&&state.wizardStep>1) route=setupRoutes[state.wizardStep-1];
+      state.route=route;
+      if (setupStepByRoute[route]) state.wizardStep=setupStepByRoute[route];
+      history.replaceState(null,"",`#/${route}`);
+      document.getElementById("sidebar").classList.remove("open");
+      if (route.startsWith("setup")) saveSetup();
+      render();
+    }
+    function openDrawer(title,body) { document.getElementById("drawer-title").textContent=title; document.getElementById("drawer-body").innerHTML=body; document.getElementById("drawer").classList.add("open"); }
+    function closeDrawer() { document.getElementById("drawer").classList.remove("open"); }
+    function setupPayload(confirm=false) { return {backend:state.wizard.runtime==="existing"?"existing":state.wizard.backend,runtime_channel:state.wizard.channel,model_id:state.wizard.runtime==="existing"?null:state.wizard.modelId,existing_url:state.wizard.existingUrl,launch_mode:state.wizard.launch,...(confirm?{confirm_download:state.wizard.confirmDownloads,confirm_write:state.wizard.confirmConfig}:{})}; }
+    async function scanSystem() { state.busy=true; render(); try { state.setup=await request("/setup/scan",{method:"POST"}); state.wizard.backend=state.setup.recommended_backend||""; state.wizard.runtime=state.setup.platform_support?.status==="supported"?"native":"existing"; state.wizard.modelId=state.setup.recommendation?.id||""; state.wizard.scanned=true;setWizardStep(2); } catch(error){ toast(error.message); } finally { state.busy=false;saveSetup();render(); } }
+    async function preparePlan() { try { state.setupPlan=await request("/setup/plan",{method:"POST",body:JSON.stringify(setupPayload())});setWizardStep(5);render(); } catch(error){toast(error.message);} }
+    async function pollEvents() { try { const payload=await request(`/setup/events?after=${state.events.at(-1)?.id||0}`); if(payload.events?.length){ for(const event of payload.events){const last=state.events.at(-1);if(last&&last.stage===event.stage&&last.status===event.status&&last.detail===event.detail)state.events[state.events.length-1]=event;else state.events.push(event);}state.events=state.events.slice(-50);const progress=payload.events.filter(e=>typeof e.progress==="number").at(-1)?.progress;if(typeof progress==="number")state.progress=progress;render(); } } catch(_){} }
+    async function applySetup() { if(state.setupRunning)return;state.setupRunning=true;setWizardStep(6);state.setupFailure=null;state.events=[];state.progress=.02;render();const timer=setInterval(pollEvents,700);try{const result=await request("/setup/apply",{method:"POST",body:JSON.stringify(setupPayload(true))});clearInterval(timer);state.setup=result.state||state.setup;state.progress=1;announce(t("setupComplete"));await loadData();}catch(error){state.setupFailure={code:error.payload?.error,message:error.message,remediation:error.payload?.remediation||[]};state.events.push({status:"error",detail:error.message});}finally{state.setupRunning=false;clearInterval(timer);saveSetup();render();} }
+    async function sendChat(prompt) { const content=(prompt||document.getElementById("chat-input")?.value||"").trim(); if(!content||state.busy)return; state.messages.push({role:"user",content});saveChat();state.busy=true; state.aborter=new AbortController(); render(); try { const response=await request("/v1/chat/completions",{method:"POST",signal:state.aborter.signal,body:JSON.stringify({model:state.chatModel,messages:state.messages.filter(m=>!m.error).map(({role,content})=>({role,content})),stream:false})}); const answer=response.choices?.[0]?.message?.content||response.choices?.[0]?.text||""; state.messages.push({role:"assistant",content:answer||"—",routing:response.routing?JSON.stringify(response.routing):""}); } catch(error){ if(error.name!=="AbortError") state.messages.push({role:"assistant",content:`${t("chatFailed")} ${error.message}`,error:true}); } finally { saveChat();state.busy=false;state.aborter=null;render(); } }
+    async function verifyConnection(model="auto") { try { await request("/v1/models"); toast(t("connectionOk")+` · ${model}`); } catch(error){ toast(`${t("connectionFailed")}: ${error.message}`); } }
+    document.addEventListener("click", async event => {
+      const language=event.target.closest("[data-language]")?.dataset.language;if(language){state.lang=language;localStorage.setItem("imperium.lang",state.lang);saveSetup();render();return;}
+      const route=event.target.closest("[data-route]")?.dataset.route; if(route){routeTo(route);return;}
+      const action=event.target.closest("[data-action]")?.dataset.action; if(!action)return;
+      if(action==="close-drawer")closeDrawer();
+      if(action==="wizard-exit")routeTo("home");
+      if(action==="wizard-back"){setWizardStep(state.wizardStep-1);render();}
+      if(action==="wizard-next"){
+        if(state.wizardStep===3){const input=document.getElementById("existing-url");if(input)state.wizard.existingUrl=input.value.trim();setWizardStep(4);render();}
+        else if(state.wizardStep===4)preparePlan();
+        else{setWizardStep(state.wizardStep+1);render();}
+      }
+      if(action==="scan-system")scanSystem();
+      if(action==="apply-setup")applySetup();
+      if(action==="retry-setup"){if(state.setupFailure?.remediation?.includes("rescan")){state.setupFailure=null;await scanSystem();}else applySetup();}
+      if(action==="use-existing-setup"){state.setupFailure=null;state.wizard.runtime="existing";setWizardStep(3);render();}
+      if(action==="cancel-setup")request("/setup/cancel",{method:"POST",body:"{}"}).then(()=>toast(t("cancel"))).catch(error=>toast(error.message));
+      if(action==="finish-setup"){localStorage.removeItem("imperium.setup");state.wizardStep=1;routeTo("chat");}
+      if(action==="select-model"){state.wizard.modelId=event.target.closest("[data-model]").dataset.model;setWizardStep(4);render();}
+      if(action==="model-details"){const model=(state.setup?.models||[]).find(row=>row.id===event.target.closest("[data-model]").dataset.model);openDrawer(model?.name||t("details"),`<pre class="json">${esc(JSON.stringify(model,null,2))}</pre>`);}
+      if(action==="integration-details"){const app=integrations.find(row=>row.id===event.target.closest("[data-integration]").dataset.integration);const base=state.status?.api?.base_url||location.origin;openDrawer(app.name,`<p class="muted">${localized(app.copy)}</p><div class="field"><label>${t("endpoint")}</label><div class="copy-field"><input class="input mono" readonly value="${esc(base)}/v1"><button class="button" data-copy="${esc(base)}/v1">${t("copy")}</button></div></div><div class="field"><label>${t("pinnedModel")}</label><div class="copy-field"><input class="input mono" readonly value="${esc(app.model)}"><button class="button" data-copy="${esc(app.model)}">${t("copy")}</button></div></div><button class="button primary" data-verify="${esc(app.model)}">${t("verify")}</button>`);}
+      if(action==="open-harness")openDrawer(t("addHarness"),`<div class="field"><label for="harness-id">ID</label><input class="input mono" id="harness-id" value="custom_app"></div><div class="field"><label for="harness-name">${t("name")}</label><input class="input" id="harness-name" value="${t("customApp")}"></div><div class="field"><label for="harness-model">${t("pinnedModel")}</label><input class="input mono" id="harness-model" value="auto"></div><button class="button primary" data-action="create-harness">${t("addHarness")}</button>`);
+      if(action==="create-harness"){const id=document.getElementById("harness-id").value.trim();const name=document.getElementById("harness-name").value.trim();const model=document.getElementById("harness-model").value.trim();request("/harnesses",{method:"POST",body:JSON.stringify({harness_id:id,display_name:name,kind:"custom",protocol:"openai",location:"host",connections:{default:{model}}})}).then(()=>{toast(t("saveLocal"));closeDrawer();loadData();}).catch(error=>toast(error.message));}
+      if(action==="clear-chat"){state.messages=[];localStorage.removeItem("imperium.chat");render();}
+      if(action==="stop-chat")state.aborter?.abort();
+      if(action==="retry-chat"){const last=[...state.messages].reverse().find(m=>m.role==="user");state.messages=state.messages.filter(m=>!m.error);if(last)sendChat(last.content);}
+      if(action==="refresh")loadData();
+      if(action==="show-config")openDrawer(t("rawPreview"),`<pre class="json">${esc(JSON.stringify(state.config,null,2))}</pre>`);
+      if(action==="show-json"){const el=event.target.closest("[data-json]");openDrawer(el.dataset.title,`<pre class="json">${esc(decodeURIComponent(el.dataset.json))}</pre>`);}
+      if(action==="save-api-key"){state.apiKey=document.getElementById("api-key").value.trim();localStorage.setItem("imperium.apiKey",state.apiKey);toast(t("saveLocal"));loadData();}
+      if(action==="fleet-start"||action==="fleet-stop"){if(action==="fleet-stop"&&!confirm(t("stopAll")+"?"))return;request(action==="fleet-start"?"/fleet/start":"/fleet/stop",{method:"POST",body:"{}"}).then(loadData).catch(error=>toast(error.message));}
+      if(action==="route-test")request("/routing/request",{method:"POST",body:JSON.stringify({agent_id:"dashboard",agent_type:"human",task_type:"chat",requested_model:"auto"})}).then(payload=>openDrawer(t("testRoute"),`<pre class="json">${esc(JSON.stringify(payload,null,2))}</pre>`)).catch(error=>toast(error.message));
+    });
+    document.addEventListener("change", event => {
+      if(event.target.name==="runtime-option")state.wizard.runtime=event.target.value;
+      if(event.target.name==="launch-option")state.wizard.launch=event.target.value;
+      if(event.target.name==="model-option")state.wizard.modelId=event.target.value;
+      if(event.target.id==="backend-override")state.wizard.backend=event.target.value;
+      if(event.target.id==="runtime-channel")state.wizard.channel=event.target.value;
+      if(event.target.id==="existing-url")state.wizard.existingUrl=event.target.value.trim();
+      if(event.target.id==="confirm-downloads")state.wizard.confirmDownloads=event.target.checked;
+      if(event.target.id==="confirm-config")state.wizard.confirmConfig=event.target.checked;
+      if(event.target.closest(".wizard-shell")){saveSetup();render();}
+      if(event.target.id==="chat-model"){state.chatModel=event.target.value;localStorage.setItem("imperium.chatModel",state.chatModel);}
+    });
+    document.addEventListener("submit", event => { if(event.target.id==="chat-form"){event.preventDefault();sendChat();} });
+    document.addEventListener("click", event => { const copy=event.target.closest("[data-copy]")?.dataset.copy;if(copy)navigator.clipboard.writeText(copy).then(()=>toast(t("copied")));const verify=event.target.closest("[data-verify]")?.dataset.verify;if(verify)verifyConnection(verify);const prompt=event.target.closest("[data-prompt]")?.dataset.prompt;if(prompt)sendChat(prompt);const tab=event.target.closest("[data-model-tab]")?.dataset.modelTab;if(tab){state.modelTab=tab;render();} });
+    document.getElementById("theme-control").addEventListener("click",()=>{state.theme=state.theme==="light"?"dark":"light";localStorage.setItem("imperium.theme",state.theme);render();});
+    document.getElementById("language-control").addEventListener("click",()=>{state.lang=state.lang==="en"?"he":"en";localStorage.setItem("imperium.lang",state.lang);render();});
+    document.getElementById("mode-control").addEventListener("click",()=>{state.mode=state.mode==="simple"?"advanced":"simple";localStorage.setItem("imperium.mode",state.mode);if(state.mode!=="advanced"&&!simpleModelAliases.includes(state.chatModel)){state.chatModel="auto";localStorage.setItem("imperium.chatModel","auto");}if(state.mode==="advanced")routeTo("advanced/fleet");else routeTo("home");});
+    document.getElementById("advanced-toggle").addEventListener("click",event=>{const open=event.currentTarget.getAttribute("aria-expanded")!=="true";event.currentTarget.setAttribute("aria-expanded",String(open));document.getElementById("advanced-nav").classList.toggle("open",open);});
+    document.getElementById("mobile-menu").addEventListener("click",()=>document.getElementById("sidebar").classList.toggle("open"));
+    document.getElementById("drawer").addEventListener("click",event=>{if(event.target.id==="drawer")closeDrawer();});
+    document.addEventListener("keydown",event=>{if(event.key==="Escape"){closeDrawer();document.getElementById("sidebar").classList.remove("open");}});
+    function tick(){document.getElementById("clock").textContent=new Intl.DateTimeFormat(state.lang==="he"?"he-IL":"en-US",{dateStyle:"medium",timeStyle:"short"}).format(new Date());}
+    tick();setInterval(tick,30000);
+    const initial=location.hash.replace(/^#\//,"");state.route=initial||"home";if(setupStepByRoute[state.route])state.wizardStep=setupStepByRoute[state.route];if(state.route==="setup"&&savedSetup.step>1)state.route=setupRoutes[savedSetup.step-1];applyPreferences();renderNav();render();loadData();
+  })();
+  </script>
 </body>
 </html>

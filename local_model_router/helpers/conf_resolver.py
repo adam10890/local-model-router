@@ -24,8 +24,23 @@ def _safe_resolve(path: str | Path) -> Path:
     return Path(path).expanduser().resolve(strict=False)
 
 
+def managed_conf_path() -> Path:
+    home = os.environ.get("IMPERIUM_HOME", "").strip()
+    if home:
+        return _safe_resolve(Path(home) / "conf" / CONF_FILENAME)
+    local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+    if os.name == "nt" and local_app_data:
+        return _safe_resolve(Path(local_app_data) / "Imperium" / "conf" / CONF_FILENAME)
+    return _safe_resolve(Path.home() / ".imperium" / "conf" / CONF_FILENAME)
+
+
 def allowed_conf_roots(caller_file: str | None = None) -> list[Path]:
-    roots = [plugin_root(caller_file) / "conf", Path.cwd(), Path(tempfile.gettempdir())]
+    roots = [
+        plugin_root(caller_file) / "conf",
+        managed_conf_path().parent,
+        Path.cwd(),
+        Path(tempfile.gettempdir()),
+    ]
     extra = os.environ.get(ENV_EXTRA_ROOTS, "").strip()
     if extra:
         roots.extend(Path(item) for item in extra.split(os.pathsep) if item.strip())
@@ -41,7 +56,10 @@ def is_safe_conf_path(path: str | Path, caller_file: str | None = None) -> bool:
 
 
 def standard_conf_candidates(caller_file: str | None = None) -> list[Path]:
-    return [_safe_resolve(plugin_root(caller_file) / "conf" / CONF_FILENAME)]
+    return [
+        _safe_resolve(plugin_root(caller_file) / "conf" / CONF_FILENAME),
+        managed_conf_path(),
+    ]
 
 
 def resolve_conf_path(caller_file: str | None = None, *, allow_missing: bool = True) -> str:
@@ -49,12 +67,15 @@ def resolve_conf_path(caller_file: str | None = None, *, allow_missing: bool = T
     env_value = os.environ.get(ENV_CONFIG, "").strip()
     if env_value:
         env_path = _safe_resolve(env_value)
-        if env_path.exists() and is_safe_conf_path(env_path, caller_file):
+        if (env_path.exists() or allow_missing) and is_safe_conf_path(env_path, caller_file):
             return str(env_path)
 
-    candidate = standard_conf_candidates(caller_file)[0]
-    if candidate.exists() or allow_missing:
-        return str(candidate)
+    candidates = standard_conf_candidates(caller_file)
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    if allow_missing:
+        return str(candidates[-1])
     raise FileNotFoundError(f"{CONF_FILENAME} not found")
 
 

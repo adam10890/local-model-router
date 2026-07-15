@@ -68,6 +68,53 @@ def test_catalog_exposes_builtins_without_prompts():
     assert catalog.get("code-review").routing.routing_strategy == "quality"
 
 
+def test_packaged_catalog_exposes_the_four_official_agents():
+    public = AgentCatalog.load_packaged().public_list()
+    assert {agent["id"] for agent in public} == {
+        "code-review",
+        "implementation-plan",
+        "test-design",
+        "documentation-writer",
+    }
+
+
+def test_agent_catalog_precedence_is_explicit_then_adjacent_then_packaged(tmp_path, monkeypatch):
+    from local_model_router.service.app import create_app
+
+    monkeypatch.delenv("A0_LMM_ROUTER_API_KEY", raising=False)
+    config = tmp_path / "conf" / "llama_cpp_servers.yaml"
+    config.parent.mkdir()
+    config.write_text(_EMPTY_FLEET, encoding="utf-8")
+
+    def catalog(path: Path, agent_id: str) -> None:
+        path.write_text(
+            "agents:\n"
+            f"  - id: {agent_id}\n"
+            f"    name: {agent_id}\n"
+            "    description: Catalog precedence test.\n"
+            "    system_prompt: Test only.\n"
+            "    routing:\n"
+            "      role: chat\n"
+            "      task_type: general\n",
+            encoding="utf-8",
+        )
+
+    adjacent = config.parent / "agents.yaml"
+    explicit = tmp_path / "explicit-agents.yaml"
+    catalog(adjacent, "adjacent-agent")
+    catalog(explicit, "explicit-agent")
+
+    explicit_client = TestClient(create_app(config, agents_path=str(explicit), setup_home=str(tmp_path / "a")))
+    assert [row["id"] for row in explicit_client.get("/agents").json()["agents"]] == ["explicit-agent"]
+
+    adjacent_client = TestClient(create_app(config, setup_home=str(tmp_path / "b")))
+    assert [row["id"] for row in adjacent_client.get("/agents").json()["agents"]] == ["adjacent-agent"]
+
+    adjacent.unlink()
+    packaged_client = TestClient(create_app(config, setup_home=str(tmp_path / "c")))
+    assert len(packaged_client.get("/agents").json()["agents"]) == 4
+
+
 def test_windows_scripts_prepare_and_stop_the_agent_runner():
     setup = (REPO_ROOT / "SETUP.bat").read_text(encoding="utf-8")
     start = (REPO_ROOT / "START.bat").read_text(encoding="utf-8")
@@ -75,7 +122,8 @@ def test_windows_scripts_prepare_and_stop_the_agent_runner():
 
     assert '.[dev,mcp,agents]' in setup
     assert 'A0_LMM_ROUTER_AGENT_BASE_URL=%BASE_URL%/v1' in start
-    assert 'for %%P in (%OBSERVER_PORT% 8089)' in stop
+    assert 'taskkill /F /T /FI "WINDOWTITLE eq Imperium - Local Model Router"' in stop
+    assert "netstat" not in stop.lower()
 
 
 def test_runner_settings_propagate_routing_and_local_only():

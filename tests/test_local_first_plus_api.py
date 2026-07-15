@@ -179,7 +179,9 @@ def test_dashboard_exposes_compare_routing_and_integration_snippets():
     from local_model_router.dashboard import dashboard_html
 
     html = dashboard_html()
-    assert "Compare / Routing" in html
+    assert "v0.8.0" in html
+    assert "__IMPERIUM_VERSION__" not in html
+    assert "Routing" in html
     assert "Claude Code MCP" in html
     assert "Dify" in html
     assert "Vercel AI SDK" in html

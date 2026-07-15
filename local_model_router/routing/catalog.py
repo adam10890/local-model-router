@@ -9,7 +9,23 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Optional
 
+from .aliases import resolve_alias
+
 VALID_STRATEGIES = {"balanced_local", "fastest", "quality", "economy"}
+_TASK_TO_ROLE = {
+    "embedding": "embed",
+    "coding": "utility",
+    "debugging": "utility",
+    "planning": "utility",
+    "research": "utility",
+    "tool_calling": "utility",
+    "private_data_processing": "utility",
+    "background_worker": "utility",
+    "sub_agent_task": "utility",
+    "documentation": "scribe",
+    "summarization": "chat",
+    "chat": "chat",
+}
 
 
 @dataclass(frozen=True)
@@ -153,13 +169,28 @@ def _has_json_mode(body: dict[str, Any]) -> bool:
     return isinstance(response_format, dict) and response_format.get("type") in {"json_object", "json_schema"}
 
 
-def required_capabilities_from_chat_body(body: dict[str, Any], *, role: str = "chat") -> RoutingNeeds:
+def role_from_task_type(task_type: str) -> str:
+    return _TASK_TO_ROLE.get(str(task_type or "").lower(), "chat")
+
+
+def role_from_chat_body(body: dict[str, Any]) -> str:
+    routing = _dict_or_empty(body.get("routing"))
+    metadata = _dict_or_empty(body.get("metadata"))
+    explicit = _pick(body, routing, metadata, "role")
+    if explicit:
+        return str(explicit)
+    task_type = str(_pick(body, routing, metadata, "task_type", "chat") or "chat").lower()
+    resolution = resolve_alias(body.get("model"), task_type=task_type)
+    return resolution.role if resolution.recognized and resolution.role else role_from_task_type(task_type)
+
+
+def required_capabilities_from_chat_body(body: dict[str, Any], *, role: str | None = None) -> RoutingNeeds:
     routing = _dict_or_empty(body.get("routing"))
     metadata = _dict_or_empty(body.get("metadata"))
     privacy_mode = str(_pick(body, routing, metadata, "privacy_mode", "unknown") or "unknown").lower()
     estimated = _positive_int(_pick(body, routing, metadata, "estimated_tokens"))
     return RoutingNeeds(
-        role=str(_pick(body, routing, metadata, "role", role) or role),
+        role=str(_pick(body, routing, metadata, "role", role or role_from_chat_body(body)) or "chat"),
         task_type=str(_pick(body, routing, metadata, "task_type", "chat") or "chat"),
         requires_tools=_bool_from_sources(
             _pick(body, routing, metadata, "requires_tools"),

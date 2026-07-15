@@ -26,6 +26,7 @@ from local_model_router.routing.catalog import (
     build_slot_candidates,
     build_upstream_candidates,
     rank_candidates,
+    role_from_task_type,
 )
 from local_model_router.helpers.context_calculator import ContextUtilization
 
@@ -59,27 +60,6 @@ AUTO_UPSTREAMS_ENV = "A0_LMM_ROUTER_AUTO_UPSTREAMS"
 
 def _auto_upstreams_enabled() -> bool:
     return os.environ.get(AUTO_UPSTREAMS_ENV, "0").strip().lower() in {"1", "true", "yes", "on"}
-
-# Role inferred from task_type when role is not explicitly provided.
-_TASK_TO_ROLE: Dict[str, str] = {
-    "embedding":                "embed",
-    "coding":                   "utility",
-    "debugging":                "utility",
-    "planning":                 "utility",
-    "research":                 "utility",
-    "tool_calling":             "utility",
-    "private_data_processing":  "utility",
-    "background_worker":        "utility",
-    "sub_agent_task":           "utility",
-    "documentation":            "scribe",
-    "summarization":            "chat",
-    "chat":                     "chat",
-}
-
-
-def _role_from_task_type(task_type: str) -> str:
-    return _TASK_TO_ROLE.get(task_type.lower(), "chat")
-
 
 def _router_alias_from_role(role: str) -> str:
     role_key = (role or "chat").lower()
@@ -234,7 +214,7 @@ class RoutingIntentHandler:
                 warnings.append(f"unknown_{pref_name}:{pref_val}")
 
         # ── 2. Resolve role ────────────────────────────────────────────────
-        role = req.role or _role_from_task_type(req.task_type)
+        role = req.role or role_from_task_type(req.task_type)
 
         # ── 3. Privacy policy ──────────────────────────────────────────────
         local_only_enforced = req.local_only or req.privacy_mode == "local_only"
