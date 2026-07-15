@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from importlib.resources import as_file, files
 from pathlib import Path
 from typing import Any, Optional
 
@@ -133,6 +134,11 @@ class AgentCatalog:
         if len({definition.id for definition in definitions}) != len(definitions):
             raise AgentConfigError("agents catalog contains duplicate ids")
         return cls(definitions)
+
+    @classmethod
+    def load_packaged(cls) -> "AgentCatalog":
+        with as_file(files("local_model_router.service").joinpath("agents.yaml")) as path:
+            return cls.load(path)
 
     def get(self, agent_id: str) -> Optional[AgentDefinition]:
         return self._definitions.get(agent_id)

@@ -1,0 +1,97 @@
+{
+  "schema_version": 2,
+  "recommended": {
+    "tag": "b9987",
+    "commit": "ad8d8219915df8e423768d082d1dccfccb6e8437",
+    "source": "https://github.com/ggml-org/llama.cpp/releases/tag/b9987"
+  },
+  "platforms": [
+    {
+      "os": "windows",
+      "arch": "x86_64",
+      "status": "supported",
+      "backends": {
+        "cpu": {
+          "status": "supported",
+          "assets": [
+            {
+              "name": "llama-b9987-bin-win-cpu-x64.zip",
+              "url": "https://github.com/ggml-org/llama.cpp/releases/download/b9987/llama-b9987-bin-win-cpu-x64.zip",
+              "sha256": "6847d537b3cd5099051989d08c7eca4296e7a0f1755dbf0540c82e37768320f3",
+              "size_bytes": 18245951
+            }
+          ]
+        },
+        "vulkan": {
+          "status": "supported",
+          "assets": [
+            {
+              "name": "llama-b9987-bin-win-vulkan-x64.zip",
+              "url": "https://github.com/ggml-org/llama.cpp/releases/download/b9987/llama-b9987-bin-win-vulkan-x64.zip",
+              "sha256": "99520abd3930cbe8ca27e6c992e93df72873eb206694825e1403b401c52f7083",
+              "size_bytes": 32934762
+            }
+          ]
+        },
+        "cuda12": {
+          "status": "supported",
+          "min_driver": "551.61",
+          "driver_reference": "https://docs.nvidia.com/cuda/archive/12.4.0/cuda-toolkit-release-notes/index.html",
+          "assets": [
+            {
+              "name": "llama-b9987-bin-win-cuda-12.4-x64.zip",
+              "url": "https://github.com/ggml-org/llama.cpp/releases/download/b9987/llama-b9987-bin-win-cuda-12.4-x64.zip",
+              "sha256": "78b76a0942db026b6637a3269c38a043f20017186b82a814bc4b99609ac8d38c",
+              "size_bytes": 267379519
+            },
+            {
+              "name": "cudart-llama-bin-win-cuda-12.4-x64.zip",
+              "url": "https://github.com/ggml-org/llama.cpp/releases/download/b9987/cudart-llama-bin-win-cuda-12.4-x64.zip",
+              "sha256": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
+              "size_bytes": 391443627
+            }
+          ]
+        },
+        "hip": { "status": "planned", "reason_code": "windows_hip_not_verified" },
+        "sycl": { "status": "planned", "reason_code": "windows_sycl_not_verified" }
+      }
+    },
+    {
+      "os": "windows",
+      "arch": "arm64",
+      "status": "planned",
+      "backends": { "cpu": { "status": "planned" }, "opencl": { "status": "planned" } }
+    },
+    {
+      "os": "macos",
+      "arch": "arm64",
+      "status": "planned",
+      "backends": { "metal": { "status": "planned" }, "cpu": { "status": "planned" } }
+    },
+    {
+      "os": "macos",
+      "arch": "x86_64",
+      "status": "planned",
+      "backends": { "metal": { "status": "planned" }, "cpu": { "status": "planned" } }
+    },
+    {
+      "os": "linux",
+      "arch": "x86_64",
+      "status": "planned",
+      "backends": {
+        "cuda12": { "status": "planned" },
+        "rocm": { "status": "planned" },
+        "vulkan": { "status": "planned" },
+        "sycl": { "status": "planned" },
+        "cpu": { "status": "planned" }
+      }
+    },
+    {
+      "os": "linux",
+      "arch": "arm64",
+      "status": "planned",
+      "backends": { "vulkan": { "status": "planned" }, "cpu": { "status": "planned" } }
+    }
+  ],
+  "latest_api": "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
+}

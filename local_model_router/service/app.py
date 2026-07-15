@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
 import logging
 import os
+import secrets
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,7 +24,7 @@ import aiohttp
 from pydantic import ValidationError
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from local_model_router.a2a.card import agent_card, skill_ids
@@ -32,7 +34,9 @@ from local_model_router.routing.aliases import public_aliases, resolve_alias
 from local_model_router.routing.catalog import (
     build_slot_candidates,
     required_capabilities_from_chat_body,
+    role_from_chat_body,
 )
+from local_model_router.setup import SetupEngine, SetupError
 from local_model_router.upstreams.registry import (
     UpstreamConfig,
     load_upstreams,
@@ -75,6 +79,7 @@ from .prompt_cache import (
     prompt_cache_enabled,
 )
 from .routing_intent import RoutingIntentHandler, RoutingIntentRequest
+from .readiness import build_ui_status
 
 from local_model_router import __version__ as _VERSION
 logger = logging.getLogger(__name__)
@@ -183,35 +188,6 @@ def _pick_routing_value(
     return default
 
 
-def _role_from_chat_body(body: Dict[str, Any], routing: Dict[str, Any], metadata: Dict[str, Any]) -> str:
-    explicit_role = _pick_routing_value(body, routing, metadata, "role")
-    if explicit_role:
-        return str(explicit_role)
-
-    task_type = str(_pick_routing_value(body, routing, metadata, "task_type", "") or "").lower()
-    resolution = resolve_alias(body.get("model"), task_type=task_type or "chat")
-    if resolution.recognized and resolution.role:
-        return resolution.role
-
-    model = str(body.get("model", "") or "").lower()
-    if "utility" in model or model in {"util", "coding", "debugging"}:
-        return "utility"
-    if task_type in {
-        "background_worker",
-        "coding",
-        "debugging",
-        "planning",
-        "private_data_processing",
-        "research",
-        "sub_agent_task",
-        "tool_calling",
-    }:
-        return "utility"
-    if task_type == "embedding":
-        return "embed"
-    return "chat"
-
-
 def _intent_from_chat_body(
     body: Dict[str, Any],
     agent: Optional[AgentIdentity] = None,
@@ -221,7 +197,7 @@ def _intent_from_chat_body(
 ) -> RoutingIntentRequest:
     routing = _dict_or_empty(body.get("routing"))
     metadata = _dict_or_empty(body.get("metadata"))
-    role = _role_from_chat_body(body, routing, metadata)
+    role = role_from_chat_body(body)
     needs = required_capabilities_from_chat_body(body, role=role)
 
     payload = {
@@ -380,6 +356,8 @@ def create_app(
     harnesses_path: Optional[str] = None,
     agents_path: Optional[str] = None,
     orchestrator: Optional[AgentOrchestrator] = None,
+    setup_home: Optional[str] = None,
+    setup_api_enabled: Optional[bool] = None,
 ) -> Starlette:
     """Return a configured Starlette app.  Safe to call multiple times (no side-effects)."""
     observer = ObserverBackend(config_path)
@@ -389,6 +367,13 @@ def create_app(
     prompt_cache = InMemoryPromptCache() if prompt_cache_enabled() else None
     compute_cache: Optional[tuple[float, dict[str, Any], dict[str, Any]]] = None
     compute_lock = asyncio.Lock()
+    setup_engine = SetupEngine(home=setup_home, config_path=observer.config_path)
+    setup_token = secrets.token_urlsafe(24)
+    setup_api_active = {
+        "value": bool(setup_api_enabled)
+        if setup_api_enabled is not None
+        else not Path(observer.config_path).is_file()
+    }
 
     conf_dir = Path(observer.config_path).resolve().parent
     upstreams = load_upstreams(upstreams_path or conf_dir / "upstreams.yaml")
@@ -397,7 +382,14 @@ def create_app(
         upstream_rows_fn=lambda: [upstream.describe() for upstream in upstreams],
     )
     app_profiles = AppProfiles.load(apps_path or conf_dir / "apps.yaml")
-    agent_catalog = AgentCatalog.load(agents_path or conf_dir / "agents.yaml")
+    external_agents_path = conf_dir / "agents.yaml"
+    agent_catalog = (
+        AgentCatalog.load(agents_path)
+        if agents_path is not None
+        else AgentCatalog.load(external_agents_path)
+        if external_agents_path.is_file()
+        else AgentCatalog.load_packaged()
+    )
     harness_profiles = HarnessProfiles.load(
         harnesses_path
         or os.environ.get("A0_LMM_ROUTER_HARNESSES_CONFIG")
@@ -449,6 +441,48 @@ def create_app(
 
         return wrapper
 
+    def deprecated(handler: Callable[[Request], Awaitable[Response]]) -> Callable[[Request], Awaitable[Response]]:
+        async def wrapper(request: Request) -> Response:
+            response = await handler(request)
+            response.headers["Deprecation"] = "true"
+            return response
+
+        return wrapper
+
+    def setup_protected(handler: Callable[[Request], Awaitable[Response]]) -> Callable[[Request], Awaitable[Response]]:
+        async def wrapper(request: Request) -> Response:
+            client_host = request.client.host if request.client else ""
+            if client_host not in {"127.0.0.1", "::1", "localhost", "testclient"}:
+                return JSONResponse({"error": "loopback_only"}, status_code=403)
+            token = request.headers.get("x-setup-token", "")
+            if not hmac.compare_digest(token, setup_token):
+                return JSONResponse({"error": "invalid_setup_token"}, status_code=401)
+            if not setup_api_active["value"]:
+                return JSONResponse({"error": "setup_api_inactive"}, status_code=410)
+            try:
+                return await handler(request)
+            except OSError as exc:
+                logger.warning("Setup storage is unavailable: %s", exc)
+                return JSONResponse(
+                    {
+                        "error": "setup_storage_unavailable",
+                        "detail": str(exc),
+                        "remediation": "Choose a writable Imperium data folder and restart setup.",
+                    },
+                    status_code=503,
+                )
+
+        return wrapper
+
+    async def _json_body(request: Request) -> dict[str, Any]:
+        try:
+            payload = await request.json()
+        except Exception as exc:
+            raise SetupError("invalid_json", "The request body must be valid JSON") from exc
+        if not isinstance(payload, dict):
+            raise SetupError("invalid_request", "The request body must be an object")
+        return payload
+
     async def health(request: Request) -> JSONResponse:
         return JSONResponse({
             "status": "ok",
@@ -471,6 +505,86 @@ def create_app(
     async def health_slots(request: Request) -> JSONResponse:
         results = await observer.get_slots_health()
         return JSONResponse(results)
+
+    async def ui_status(request: Request) -> JSONResponse:
+        try:
+            setup_state_payload = await asyncio.to_thread(setup_engine.state)
+        except Exception as exc:
+            logger.warning("Setup state failed: %s", exc)
+            setup_state_payload = {
+                "hardware": {},
+                "discovery": {
+                    "runtime_installed": False,
+                    "gguf_models": [],
+                    "config_exists": Path(observer.config_path).is_file(),
+                    "enabled_slots": len([slot for slot in observer.get_slots() if slot.get("enabled")]),
+                },
+            }
+        try:
+            slot_rows = await observer.get_slots_health()
+        except Exception as exc:
+            logger.warning("Slot readiness failed: %s", exc)
+            slot_rows = observer.get_slots()
+        _vram, compute = await compute_status()
+        payload = build_ui_status(
+            setup_state=setup_state_payload,
+            slots_health=slot_rows,
+            compute=compute,
+            base_url=str(request.base_url).rstrip("/"),
+        )
+        payload["setup"] = setup_state_payload
+        payload["setup_api_active"] = setup_api_active["value"]
+        return JSONResponse(payload)
+
+    async def setup_state(request: Request) -> JSONResponse:
+        return JSONResponse(await asyncio.to_thread(setup_engine.state))
+
+    async def setup_scan(request: Request) -> JSONResponse:
+        return JSONResponse(await asyncio.to_thread(setup_engine.state, refresh_hardware=True))
+
+    async def setup_plan(request: Request) -> JSONResponse:
+        try:
+            return JSONResponse(await asyncio.to_thread(setup_engine.plan, await _json_body(request)))
+        except SetupError as exc:
+            return JSONResponse(exc.payload(), status_code=400)
+
+    async def setup_apply(request: Request) -> JSONResponse:
+        try:
+            result = await asyncio.to_thread(setup_engine.apply, await _json_body(request))
+            observer.reload()
+            setup_api_active["value"] = False
+            return JSONResponse(result)
+        except SetupError as exc:
+            return JSONResponse(exc.payload(), status_code=400)
+
+    async def setup_events(request: Request) -> Response:
+        try:
+            after = max(0, int(request.query_params.get("after", "0")))
+        except ValueError:
+            after = 0
+        if "text/event-stream" not in request.headers.get("accept", ""):
+            return JSONResponse(setup_engine.events(after))
+
+        async def stream_events():
+            cursor = after
+            while not await request.is_disconnected():
+                payload = setup_engine.events(cursor)
+                for event in payload["events"]:
+                    cursor = max(cursor, int(event["id"]))
+                    yield f"event: setup\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.5)
+
+        return StreamingResponse(stream_events(), media_type="text/event-stream")
+
+    async def setup_cancel(request: Request) -> JSONResponse:
+        await asyncio.to_thread(setup_engine.cancel)
+        return JSONResponse({"ok": True})
+
+    async def setup_smoke(request: Request) -> JSONResponse:
+        result = await asyncio.to_thread(setup_engine.smoke)
+        if result.get("ok"):
+            setup_api_active["value"] = False
+        return JSONResponse(result)
 
     async def fleet_status(request: Request) -> JSONResponse:
         slots = observer.get_slots()
@@ -1059,7 +1173,17 @@ def create_app(
     async def dashboard_page(request: Request) -> HTMLResponse:
         from local_model_router.dashboard import dashboard_html
 
-        return HTMLResponse(dashboard_html())
+        client_host = request.client.host if request.client else ""
+        token = setup_token if client_host in {"127.0.0.1", "::1", "localhost", "testclient"} else ""
+        return HTMLResponse(dashboard_html(setup_token=token))
+
+    async def dashboard_icon_file(request: Request) -> Response:
+        from local_model_router.dashboard import dashboard_icon
+
+        path = dashboard_icon(str(request.path_params.get("name") or ""))
+        if path is None:
+            return Response(status_code=404)
+        return FileResponse(path, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=86400"})
 
     async def well_known_agent_card(request: Request) -> JSONResponse:
         base_url = str(request.base_url).rstrip("/")
@@ -1695,6 +1819,14 @@ def create_app(
         Route("/config/preview", protected(config_preview)),
         Route("/routing/preview", protected(routing_preview)),
         Route("/health/slots", protected(health_slots)),
+        Route("/ui/status", protected(ui_status)),
+        Route("/setup/state", setup_protected(setup_state)),
+        Route("/setup/scan", setup_protected(setup_scan), methods=["POST"]),
+        Route("/setup/plan", setup_protected(setup_plan), methods=["POST"]),
+        Route("/setup/apply", setup_protected(setup_apply), methods=["POST"]),
+        Route("/setup/events", setup_protected(setup_events)),
+        Route("/setup/cancel", setup_protected(setup_cancel), methods=["POST"]),
+        Route("/setup/smoke", setup_protected(setup_smoke), methods=["POST"]),
         Route("/fleet/status", protected(fleet_status)),
         Route("/fleet/agents", protected(fleet_agents)),
         Route("/fleet/agents/register", protected(fleet_agents_register), methods=["POST"]),
@@ -1706,14 +1838,14 @@ def create_app(
         Route("/routing/models", protected(routing_models)),
         Route("/routing/models/{model_id:path}", protected(routing_model_card)),
         Route("/routing/analytics", protected(routing_analytics)),
-        Route("/orchestrator/plans", protected(orchestrator_create_plan), methods=["POST"]),
-        Route("/orchestrator/plans", protected(orchestrator_list_plans)),
-        Route("/orchestrator/summary", protected(orchestrator_summary)),
-        Route("/orchestrator/instances", protected(orchestrator_list_instances)),
-        Route("/orchestrator/instances/{instance_id}", protected(orchestrator_instance_upsert), methods=["POST"]),
-        Route("/orchestrator/plans/{plan_id}", protected(orchestrator_plan_detail)),
-        Route("/orchestrator/tickets/{ticket_id}/submit", protected(orchestrator_ticket_submit), methods=["POST"]),
-        Route("/orchestrator/tickets/{ticket_id}", protected(orchestrator_ticket_detail)),
+        Route("/orchestrator/plans", protected(deprecated(orchestrator_create_plan)), methods=["POST"]),
+        Route("/orchestrator/plans", protected(deprecated(orchestrator_list_plans))),
+        Route("/orchestrator/summary", protected(deprecated(orchestrator_summary))),
+        Route("/orchestrator/instances", protected(deprecated(orchestrator_list_instances))),
+        Route("/orchestrator/instances/{instance_id}", protected(deprecated(orchestrator_instance_upsert)), methods=["POST"]),
+        Route("/orchestrator/plans/{plan_id}", protected(deprecated(orchestrator_plan_detail))),
+        Route("/orchestrator/tickets/{ticket_id}/submit", protected(deprecated(orchestrator_ticket_submit)), methods=["POST"]),
+        Route("/orchestrator/tickets/{ticket_id}", protected(deprecated(orchestrator_ticket_detail))),
         Route("/backends", protected(backends)),
         Route("/apps", protected(apps_list)),
         Route("/agents", protected(agents_list)),
@@ -1737,9 +1869,13 @@ def create_app(
         Route("/.well-known/agent-card.json", well_known_agent_card),
         Route("/a2a", protected(a2a_skills), methods=["POST"]),
         Route("/ui", dashboard_page),
+        Route("/ui/icons/{name}", dashboard_icon_file),
         Route("/v1/models", protected(v1_models)),
         Route("/v1/chat/completions", protected(chat_completions), methods=["POST"]),
         Route("/v1/embeddings", protected(embeddings), methods=["POST"]),
     ]
 
-    return Starlette(routes=routes)
+    app = Starlette(routes=routes)
+    app.state.setup_token = setup_token
+    app.state.setup_engine = setup_engine
+    return app

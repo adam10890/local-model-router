@@ -29,7 +29,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("serve", help="start the router HTTP service (default)")
     sub.add_parser("mcp", help="start the MCP server (Streamable HTTP, requires the 'mcp' extra)")
-    sub.add_parser("doctor", help="check python, config, dependencies, and slot reachability")
+    doctor = sub.add_parser("doctor", help="check python, config, dependencies, and slot reachability")
+    doctor.add_argument("--json", action="store_true", help="print structured checks as JSON")
     sub.add_parser("list-models", help="print router aliases and live slot models")
     sub.add_parser("config-check", help="parse and sanity-check the fleet config")
 
@@ -37,6 +38,20 @@ def build_parser() -> argparse.ArgumentParser:
     route.add_argument("--role", default=None, help="explicit fleet role (chat|utility|embed|scribe)")
     route.add_argument("--task-type", default="chat", help="task type for auto-routing")
     route.add_argument("--model", default=None, help="model alias to resolve (auto, fast, coder, ...)")
+
+    setup = sub.add_parser("setup", help="open first-run setup or inspect managed runtime state")
+    setup.add_argument("--status", action="store_true", help="print current setup state as JSON")
+    setup.add_argument("--repair", action="store_true", help="print repair guidance for incomplete setup")
+    setup.add_argument("--plan", help="apply a reviewed setup plan from a JSON file")
+    setup.add_argument("--yes", action="store_true", help="confirm downloads and configuration writes")
+    setup.add_argument("--start-runtime", action="store_true", help="start the configured managed llama.cpp server")
+    setup.add_argument("--stop-runtime", action="store_true", help="stop the managed llama.cpp server")
+    setup.add_argument("--terminal", action="store_true", help="show llama.cpp in its own terminal window")
+
+    update = sub.add_parser("update", help="check or install the latest stable managed llama.cpp runtime")
+    update.add_argument("--check", action="store_true", help="check without installing")
+    update.add_argument("--yes", action="store_true", help="confirm the runtime download and activation")
+    sub.add_parser("rollback", help="switch back to the previous managed llama.cpp runtime")
 
     return parser
 
@@ -158,14 +173,27 @@ def cmd_test_route(args: argparse.Namespace) -> int:
     return 0 if not decision.no_slot_available else 2
 
 
-def cmd_doctor(_args: argparse.Namespace) -> int:
+def cmd_doctor(args: argparse.Namespace) -> int:
     failures = 0
+    checks: list[dict[str, Any]] = []
 
-    def check(label: str, ok: bool, detail: str = "") -> None:
+    def check(label: str, ok: bool, detail: str = "", remediation: str = "") -> None:
         nonlocal failures
         status = "PASS" if ok else "FAIL"
         if not ok:
             failures += 1
+        checks.append(
+            {
+                "code": label.lower().replace(" ", "_").replace(":", ""),
+                "status": "pass" if ok else "fail",
+                "severity": "info" if ok else "blocking",
+                "label": label,
+                "detail": detail,
+                "remediation": remediation or None,
+            }
+        )
+        if args.json:
+            return
         suffix = f" — {detail}" if detail else ""
         print(f"[{status}] {label}{suffix}")
 
@@ -203,12 +231,129 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
         url = str(slot["base_url"]).rstrip("/") + "/models"
         ok = _probe(url)
         reachable += 1 if ok else 0
-        check(f"slot reachable: {slot.get('id')}", ok, url)
+        check(f"slot reachable: {slot.get('id')}", ok, url, "Start the configured model server")
     if slots and reachable == 0:
-        print("       hint: is the llama.cpp fleet running? The router routes to it; it does not start it.")
+        if not args.json:
+            print("       hint: is the llama.cpp fleet running? The router routes to it; it does not start it.")
 
-    print(f"\n{'all checks passed' if failures == 0 else f'{failures} check(s) failed'}")
+    if args.json:
+        print(json.dumps({"ok": failures == 0, "checks": checks}, indent=2))
+    else:
+        print(f"\n{'all checks passed' if failures == 0 else f'{failures} check(s) failed'}")
     return 0 if failures == 0 else 1
+
+
+def _setup_engine():
+    from local_model_router.setup import SetupEngine
+
+    return SetupEngine(config_path=_resolve_config())
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from local_model_router.setup import SetupError
+
+    engine = _setup_engine()
+    try:
+        if args.status:
+            print(json.dumps(engine.state(), indent=2))
+            return 0
+        if args.repair:
+            state = engine.state(refresh_hardware=True)
+            missing = []
+            if not state["discovery"]["runtime_installed"]:
+                missing.append("runtime")
+            if not state["discovery"]["gguf_models"]:
+                missing.append("model")
+            if not state["discovery"]["config_exists"]:
+                missing.append("configuration")
+            print(json.dumps({"ok": not missing, "missing": missing, "next": "imperium setup"}, indent=2))
+            return 0 if not missing else 1
+        if args.start_runtime:
+            print(json.dumps(engine.start_managed(visible_terminal=args.terminal), indent=2))
+            return 0
+        if args.stop_runtime:
+            print(json.dumps(engine.stop_managed(), indent=2))
+            return 0
+        if args.plan:
+            payload = json.loads(Path(args.plan).read_text(encoding="utf-8-sig"))
+            if not isinstance(payload, dict):
+                raise SetupError("invalid_plan", "The setup plan must be a JSON object")
+            payload["confirm_download"] = bool(args.yes)
+            payload["confirm_write"] = bool(args.yes)
+            print(json.dumps(engine.apply(payload), indent=2))
+            return 0
+
+        import threading
+        import time
+        import webbrowser
+
+        import uvicorn
+
+        from local_model_router.service.app import create_app
+
+        host = "127.0.0.1"
+        port = int(os.environ.get("OBSERVER_PORT", "9000"))
+        url = f"http://{host}:{port}/ui#/setup"
+
+        def open_wizard() -> None:
+            for _ in range(60):
+                if _probe(f"http://{host}:{port}/health"):
+                    webbrowser.open(url)
+                    return
+                time.sleep(0.25)
+
+        threading.Thread(target=open_wizard, daemon=True).start()
+        uvicorn.run(
+            create_app(
+                engine.config_path,
+                setup_home=str(engine.home),
+                setup_api_enabled=True,
+            ),
+            host=host,
+            port=port,
+        )
+        return 0
+    except (SetupError, OSError, ValueError, json.JSONDecodeError) as exc:
+        code = getattr(exc, "code", "setup_failed")
+        payload = exc.payload() if isinstance(exc, SetupError) else {"error": code, "detail": str(exc)}
+        print(json.dumps(payload, indent=2))
+        return 1
+
+
+def cmd_update(args: argparse.Namespace) -> int:
+    from local_model_router.setup import SetupError
+
+    engine = _setup_engine()
+    try:
+        status = engine.update_status()
+        if args.check or not status["update_available"]:
+            print(json.dumps(status, indent=2))
+            return 0
+        if not args.yes:
+            print(json.dumps({**status, "confirmation_required": True, "next": "imperium update --yes"}, indent=2))
+            return 2
+        runtime = engine._managed_runtime()
+        if not runtime:
+            raise SetupError("runtime_missing", "Install the recommended runtime before switching to latest")
+        result = engine.install_runtime(str(runtime["backend"]), channel="latest")
+        print(json.dumps({"ok": True, "runtime": result}, indent=2))
+        return 0
+    except SetupError as exc:
+        print(json.dumps(exc.payload(), indent=2))
+        return 1
+
+
+def cmd_rollback(_args: argparse.Namespace) -> int:
+    from local_model_router.setup import SetupError
+
+    try:
+        print(json.dumps({"ok": True, "runtime": _setup_engine().rollback()}, indent=2))
+        return 0
+    except SetupError as exc:
+        print(json.dumps(exc.payload(), indent=2))
+        return 1
 
 
 _COMMANDS = {
@@ -218,6 +363,9 @@ _COMMANDS = {
     "list-models": cmd_list_models,
     "test-route": cmd_test_route,
     "config-check": cmd_config_check,
+    "setup": cmd_setup,
+    "update": cmd_update,
+    "rollback": cmd_rollback,
 }
 
 

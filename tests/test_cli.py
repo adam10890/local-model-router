@@ -49,6 +49,20 @@ def test_default_command_is_serve():
     assert cli._COMMANDS["serve"] is cli.cmd_serve
 
 
+def test_setup_plan_accepts_windows_utf8_bom(tmp_path, monkeypatch, capsys):
+    plan = tmp_path / "plan.json"
+    plan.write_bytes('{"backend":"cpu"}'.encode("utf-8-sig"))
+
+    class _Engine:
+        def apply(self, payload):
+            assert payload == {"backend": "cpu", "confirm_download": True, "confirm_write": True}
+            return {"ok": True}
+
+    monkeypatch.setattr(cli, "_setup_engine", lambda: _Engine())
+    assert cli.main(["setup", "--plan", str(plan), "--yes"]) == 0
+    assert '"ok": true' in capsys.readouterr().out
+
+
 def test_config_check_ok(tmp_path, monkeypatch, capsys):
     _write_config(tmp_path, monkeypatch)
     rc = cli.main(["config-check"])

@@ -361,20 +361,20 @@ class TestNoSecretsInResponse:
 
 class TestRoutingIntentSchema:
     def test_role_from_task_type_chat(self):
-        from local_model_router.service.routing_intent import _role_from_task_type
-        assert _role_from_task_type("chat") == "chat"
+        from local_model_router.routing.catalog import role_from_task_type
+        assert role_from_task_type("chat") == "chat"
 
     def test_role_from_task_type_coding(self):
-        from local_model_router.service.routing_intent import _role_from_task_type
-        assert _role_from_task_type("coding") == "utility"
+        from local_model_router.routing.catalog import role_from_task_type
+        assert role_from_task_type("coding") == "utility"
 
     def test_role_from_task_type_embedding(self):
-        from local_model_router.service.routing_intent import _role_from_task_type
-        assert _role_from_task_type("embedding") == "embed"
+        from local_model_router.routing.catalog import role_from_task_type
+        assert role_from_task_type("embedding") == "embed"
 
     def test_role_from_unknown_task_defaults_to_chat(self):
-        from local_model_router.service.routing_intent import _role_from_task_type
-        assert _role_from_task_type("zap_widget") == "chat"
+        from local_model_router.routing.catalog import role_from_task_type
+        assert role_from_task_type("zap_widget") == "chat"
 
     def test_request_defaults_are_sensible(self):
         from local_model_router.service.routing_intent import RoutingIntentRequest
