@@ -12,6 +12,21 @@
 # back to those models when no healthy local slot can serve the request.
 # Local slots always win while healthy; without a models list the upstream
 # stays reachable only by explicit "<name>/<model>" addressing.
+#
+# type: subscription is for CLI-driven providers with no HTTP surface at all
+# (Codex, Ollama Cloud's CLI path) — no base_url, so serves_inference is
+# always false; invoke names the local runner (e.g. "codex_cli") and
+# default_model is the model id assumed when none is given.
+#
+# limits: (either type) declares the provider's own published rolling-window
+# usage caps, since subscription plans expose no remaining-quota API to poll
+# — usage against them is counted locally instead. Each entry is a window
+# ("5h"/"7d", i.e. <int><h|d>) plus max_tokens and/or max_requests:
+#   limits:
+#     - window: "5h"
+#       max_tokens: 1000000
+#     - window: "7d"
+#       max_requests: 5000
 
 upstreams:
   - name: dmr
@@ -37,3 +52,27 @@ upstreams:
     base_url: http://localhost:1234/v1
     enabled: false
     notes: "LM Studio local server."
+
+  - name: codex
+    type: subscription
+    invoke: codex_cli
+    default_model: gpt-5-codex
+    enabled: false
+    limits:
+      - window: "5h"
+        max_tokens: 1000000
+      - window: "7d"
+        max_requests: 5000
+    notes: "OpenAI Codex CLI subscription. No HTTP surface — invoked as a local process; limits are declared from the published plan, not measured live."
+
+  - name: ollama_cloud
+    type: openai_compatible
+    base_url: https://ollama.com/v1
+    api_key_env: OLLAMA_API_KEY
+    enabled: false
+    limits:
+      - window: "1h"
+        max_requests: 200
+      - window: "1d"
+        max_tokens: 5000000
+    notes: "Ollama Cloud's hosted OpenAI-compatible endpoint. Declared limits count against the subscription plan since there's no live quota API."
