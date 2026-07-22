@@ -69,7 +69,7 @@ from .fleet_manager import (
     slots_model_snapshot,
     vram_unknown_summary,
 )
-from ..helpers import budget_engine
+from ..helpers import budget_engine, usage_ledger
 from ..helpers.compute_monitor import scan_hardware
 from .models_listing import FetchFn, _default_fetch as _models_default_fetch, list_models
 from .observer import ObserverBackend
@@ -171,6 +171,29 @@ def _unauthorized_response(request: Request) -> JSONResponse:
 
 def _dict_or_empty(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _record_upstream_usage(upstream_name: Optional[str], usage: Optional[Dict[str, Any]], model: Optional[str]) -> None:
+    """Best-effort: record upstream token usage to the budget ledger. Never raises.
+
+    Called from forward_to_upstream (the single choke point for every declared-
+    upstream forward, both explicit-model-match and auto-fallback routing) right
+    where the real upstream name and the real response usage are both known.
+    # ponytail: streaming responses aren't parsed for a trailing usage chunk, so
+    # streamed upstream requests don't hit the ledger yet — add if budget drift
+    # from streaming traffic becomes noticeable.
+    """
+    try:
+        if not upstream_name:
+            return
+        usage = usage or {}
+        pt = int(usage.get("prompt_tokens") or 0)
+        ct = int(usage.get("completion_tokens") or 0)
+        if not pt and not ct:
+            return
+        usage_ledger.record_usage(upstream_name, tokens_in=pt, tokens_out=ct, model=model or "", source="proxy")
+    except Exception:
+        return
 
 
 def _pick_routing_value(
@@ -1170,6 +1193,8 @@ def create_app(
                             error_type="server_error",
                             extra={"upstream_status": resp.status, **pinned_harness},
                         )
+                    if resp.status < 400:
+                        _record_upstream_usage(upstream.name, _dict_or_empty(upstream_json).get("usage"), bare_model)
                     return JSONResponse(upstream_json, status_code=resp.status, headers=out_headers)
         except aiohttp.ClientError as exc:
             return _openai_error(
