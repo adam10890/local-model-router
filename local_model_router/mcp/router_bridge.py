@@ -102,6 +102,10 @@ async def providers_list() -> dict[str, Any]:
     return await _router_request("GET", "/backends")
 
 
+async def compute_budget() -> dict[str, Any]:
+    return await _router_request("GET", "/compute/budget")
+
+
 async def route_preview(
     role: str = "chat",
     task_type: str = "chat",
@@ -126,6 +130,32 @@ async def route_preview(
             "estimated_tokens": estimated_tokens,
             "routing_strategy": routing_strategy,
             "local_only": local_only,
+        },
+    )
+
+
+async def route_task(
+    task: str = "",
+    role: str = "chat",
+    task_type: str = "chat",
+    est_input_tokens: int = 0,
+    est_output_tokens: int = 0,
+    quality: str = "best_available",
+    routing_strategy: str = "balanced_local",
+) -> dict[str, Any]:
+    return await _router_request(
+        "POST",
+        "/routing/request",
+        {
+            "agent_id": "mcp-router",
+            "agent_type": "mcp",
+            "role": role,
+            "task_type": task_type,
+            "est_input_tokens": est_input_tokens,
+            "est_output_tokens": est_output_tokens,
+            "quality": quality,
+            "routing_strategy": routing_strategy,
+            "metadata": {"task": task} if task else {},
         },
     )
 

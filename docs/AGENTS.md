@@ -11,6 +11,10 @@ Durable documentation for operators, contributors, and coding agents.
   OpenAI-compatible clients.
 - `HARNESSES.md` owns harness terminology, dedicated connection contracts,
   and the new-harness setup flow.
+- `COMPUTE-BUDGET.md` owns the compute-budget/token-economy layer: declared
+  upstream `limits`, the live Codex usage reader, `GET /compute/budget`,
+  budget-aware routing, the local usage ledger, and the dashboard's Compute
+  Providers tab.
 - `1.0-beta-roadmap.html` owns the accepted living product roadmap toward
   the standalone Imperium beta; keep decisions, gates, and deferred ideas
   current.

@@ -45,6 +45,7 @@ Agent Zero is client #1, not the owner.
 | Fleet Manager | `GET /fleet/status`, `GET /fleet/agents`, `POST /fleet/agents/register` | agent identity, bounded queueing, SQLite + cached GPU/CPU/RAM telemetry |
 | Fleet control (opt-in) | `POST /fleet/start`, `POST /fleet/stop`, `POST /fleet/slots/{id}/start` + `/stop` | start/stop slots; off unless `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1` |
 | Backends | `GET /backends` | local fleet + configured upstreams with capabilities |
+| Compute budget | `GET /compute/budget` | local hardware headroom + per-provider usage vs declared/live limits |
 | App profiles | `GET /apps` | per-client routing policy |
 | Config preview | `GET /config/preview` | secrets redacted |
 | Simple dashboard | `GET /ui` | Home, Chat, Models, and Connections; light/dark, English/Hebrew, LTR/RTL |
@@ -219,6 +220,21 @@ What "start" does follows `global.backend` in `conf/llama_cpp_servers.yaml`:
 The endpoints honor the API key like everything else, and the dashboard
 shows start/stop buttons per slot only when the flag is on.
 
+## Compute Budget
+
+One place tracks all available compute — the local llama.cpp fleet plus
+configured subscription/upstream providers — and routing stays aware of it.
+Declare rolling-window `limits` (`"5h"`/`"7d"`, `max_tokens`/`max_requests`)
+on an upstream in `conf/upstreams.yaml`, or rely on the live Codex/ChatGPT
+usage reader for the `codex` subscription entry (reads `~/.codex/auth.json`,
+percent-of-window only, read-only). `GET /compute/budget` reports local
+hardware headroom plus every provider's `ok`/`warn`/`exhausted` status.
+`POST /routing/request` and the MCP `route_task` tool drop exhausted
+upstreams from candidate selection and flag near-limit ones — recommend-only,
+they never forward a prompt themselves. See `docs/COMPUTE-BUDGET.md` for
+config examples, the Codex live-usage path, and the dashboard's Compute
+Providers tab.
+
 ## Security
 
 - Binds to `127.0.0.1` by default.
@@ -268,7 +284,8 @@ key. The fleet config is mounted read-only from `./conf`;
 
 Tools: `chat_completion`, `utility_completion`, `route_completion`,
 `get_embeddings`, `fleet_status`, `list_slots`, `list_models`,
-`model_card`, `providers_list`, `route_preview` - plus admin tools
+`model_card`, `providers_list`, `route_preview`, `compute_budget`,
+`route_task` - plus admin tools
 (`start_fleet`, `start_slot`, `stop_slot`) **only** when
 `MCP_ALLOW_MUTATING_TOOLS=1`. Bearer auth is on by default; inspect with
 `npx @modelcontextprotocol/inspector http://127.0.0.1:8095/mcp`.

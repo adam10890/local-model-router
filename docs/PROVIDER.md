@@ -21,6 +21,8 @@ fleet control is explicitly enabled.
   hardware summaries.
 - `GET /fleet/agents` lists registered/observed agents.
 - `POST /fleet/agents/register` registers an agent identity manually.
+- `GET /compute/budget` returns local hardware headroom plus per-provider
+  usage vs declared/live limits; see `COMPUTE-BUDGET.md`.
 
 When `A0_LMM_ROUTER_API_KEY` is set, every endpoint except `/health` requires:
 

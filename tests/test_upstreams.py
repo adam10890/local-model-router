@@ -6,6 +6,7 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
 from starlette.testclient import TestClient
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +17,7 @@ from local_model_router.service.app import create_app  # noqa: E402
 from local_model_router.upstreams.registry import (  # noqa: E402
     load_upstreams,
     match_upstream_model,
+    parse_window,
 )
 
 _FLEET_CONFIG = textwrap.dedent("""
@@ -116,6 +118,106 @@ def test_match_upstream_model(tmp_path):
     assert match_upstream_model("airllm/huge-model", upstreams) is None
     assert match_upstream_model("chat", upstreams) is None
     assert match_upstream_model(None, upstreams) is None
+
+
+# ---------------------------------------------------------------------------
+# declared usage limits
+# ---------------------------------------------------------------------------
+
+def test_parse_window():
+    assert parse_window("5h") == 5 * 3600
+    assert parse_window("7d") == 7 * 86400
+    for bad in ("", "5", "h", "5m", "-5h", "5hh", "five"):
+        with pytest.raises(ValueError):
+            parse_window(bad)
+
+
+def test_limits_parse_into_limit_window_tuple(tmp_path):
+    content = textwrap.dedent("""
+        upstreams:
+          - name: capped
+            type: openai_compatible
+            base_url: http://localhost:9999/v1
+            enabled: true
+            limits:
+              - window: "5h"
+                max_tokens: 1000000
+              - window: "7d"
+                max_requests: 5000
+    """)
+    upstream = load_upstreams(_write(tmp_path, "upstreams.yaml", content))[0]
+    assert upstream.has_declared_limits is True
+    assert len(upstream.limits) == 2
+    assert upstream.limits[0].window == "5h"
+    assert upstream.limits[0].max_tokens == 1000000
+    assert upstream.limits[0].max_requests is None
+    assert upstream.limits[1].window == "7d"
+    assert upstream.limits[1].max_requests == 5000
+
+
+def test_describe_surfaces_limits(tmp_path):
+    content = textwrap.dedent("""
+        upstreams:
+          - name: capped
+            type: openai_compatible
+            base_url: http://localhost:9999/v1
+            enabled: true
+            limits:
+              - window: "5h"
+                max_tokens: 1000000
+    """)
+    upstream = load_upstreams(_write(tmp_path, "upstreams.yaml", content))[0]
+    desc = upstream.describe()
+    assert desc["has_declared_limits"] is True
+    assert desc["limits"] == [{"window": "5h", "max_tokens": 1000000, "max_requests": None}]
+
+    no_limits = load_upstreams(_write(tmp_path, "upstreams2.yaml", _UPSTREAMS))[0]
+    assert no_limits.describe()["has_declared_limits"] is False
+    assert no_limits.describe()["limits"] == []
+
+
+def test_subscription_type_has_no_inference_but_carries_limits(tmp_path):
+    content = textwrap.dedent("""
+        upstreams:
+          - name: codex
+            type: subscription
+            invoke: codex_cli
+            default_model: gpt-5-codex
+            enabled: true
+            limits:
+              - window: "5h"
+                max_tokens: 1000000
+              - window: "7d"
+                max_requests: 5000
+    """)
+    upstream = load_upstreams(_write(tmp_path, "upstreams.yaml", content))[0]
+    assert upstream.type == "subscription"
+    assert upstream.base_url == ""
+    assert upstream.serves_inference is False  # no base_url, ever
+    assert upstream.invoke == "codex_cli"
+    assert upstream.default_model == "gpt-5-codex"
+    assert upstream.has_declared_limits is True
+    assert len(upstream.limits) == 2
+
+
+def test_malformed_limit_degrades_gracefully(tmp_path):
+    content = textwrap.dedent("""
+        upstreams:
+          - name: capped
+            type: openai_compatible
+            base_url: http://localhost:9999/v1
+            enabled: true
+            limits:
+              - window: "5h"
+                max_tokens: 1000000
+              - window: "not-a-window"
+                max_tokens: 999
+              - not_a_dict_entry
+    """)
+    upstream = load_upstreams(_write(tmp_path, "upstreams.yaml", content))[0]
+    # the malformed and non-dict entries are skipped; the valid one survives
+    assert len(upstream.limits) == 1
+    assert upstream.limits[0].window == "5h"
 
 
 # ---------------------------------------------------------------------------

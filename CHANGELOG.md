@@ -4,6 +4,27 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Declared per-upstream usage `limits` (rolling `"5h"`/`"7d"` windows,
+  `max_tokens`/`max_requests`) and a `subscription` provider `type` for
+  CLI-driven providers with no HTTP surface (Codex, Ollama Cloud's CLI path),
+  in `conf/upstreams.yaml`.
+- A live Codex/ChatGPT usage reader (`~/.codex/auth.json`, read-only,
+  percent-of-window only) and an append-only local usage ledger
+  (`A0_USAGE_LEDGER_PATH`, 35-day retention) as the accounting fallback for
+  other declared-limit providers.
+- `GET /compute/budget` — local hardware headroom plus every provider's
+  budget status (`ok`/`warn`/`exhausted`/`unknown`/`tracked`).
+- Budget-aware `POST /routing/request`: exhausted upstream candidates are
+  dropped, near-limit ones are flagged, and the response carries a `budget`
+  status map plus new `est_input_tokens`/`est_output_tokens`/`quality`
+  request fields.
+- MCP `compute_budget()` and `route_task()` tools — both recommend-only, like
+  the rest of the routing MCP surface.
+- A "Compute Providers" tab in the Advanced dashboard showing live/estimated
+  usage windows per provider plus this computer's own hardware headroom.
+
 ## [0.8.0] - 2026-07-14
 
 ### Added

@@ -154,6 +154,7 @@
     .badge.primary { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
     .badge.success { border-color: color-mix(in srgb,var(--success) 45%,var(--border)); color: var(--success); background: var(--success-soft); }
     .badge.warning { border-color: color-mix(in srgb,var(--warning) 45%,var(--border)); color: var(--warning); background: var(--warning-soft); }
+    .badge.danger { border-color: color-mix(in srgb,var(--danger) 45%,var(--border)); color: var(--danger); background: var(--danger-soft); }
     .meta-line { display: flex; flex-wrap: wrap; gap: 10px 20px; color: var(--text-soft); font-size: 13px; }
     .meta-item { display: inline-flex; align-items: center; gap: 7px; }
     .meta-item img { width: 17px; height: 17px; opacity: .75; }
@@ -358,11 +359,49 @@
     };
     dictionary.en.closeAppsRescan="Close other apps, then scan again";
     dictionary.he.closeAppsRescan="יש לסגור יישומים אחרים ואז לסרוק שוב";
+    dictionary.en.computeProviders="Compute Providers";
+    dictionary.en.computeProvidersCopy="Live and estimated usage windows for every upstream provider, plus this computer's own GPU, CPU, and RAM headroom.";
+    dictionary.en.noProviders="No providers configured yet.";
+    dictionary.en.budgetUnavailable="Budget data is unavailable right now.";
+    dictionary.en.thisComputer="This computer";
+    dictionary.en.resetsIn="resets";
+    dictionary.en.tokens="tokens";
+    dictionary.en.requests="requests";
+    dictionary.en.left="left";
+    dictionary.en.disabled="Disabled";
+    dictionary.en.statusOk="OK";
+    dictionary.en.statusWarn="Warning";
+    dictionary.en.statusExhausted="Exhausted";
+    dictionary.en.statusUnknown="Unknown";
+    dictionary.en.statusTracked="Tracked";
+    dictionary.en.sourceLive="Live";
+    dictionary.en.sourceEstimated="Estimated";
+    dictionary.en.sourceTracked="Tracked";
+    dictionary.en.sourceNone="None";
+    dictionary.he.computeProviders="ספקי חישוב";
+    dictionary.he.computeProvidersCopy="חלונות שימוש חיים ומוערכים לכל ספק, וגם מרווח הפעולה של המחשב הזה מבחינת GPU,‏ CPU וזיכרון.";
+    dictionary.he.noProviders="עדיין לא הוגדרו ספקים.";
+    dictionary.he.budgetUnavailable="נתוני התקציב אינם זמינים כרגע.";
+    dictionary.he.thisComputer="המחשב הזה";
+    dictionary.he.resetsIn="מתאפס";
+    dictionary.he.tokens="טוקנים";
+    dictionary.he.requests="בקשות";
+    dictionary.he.left="נותרו";
+    dictionary.he.disabled="מושבת";
+    dictionary.he.statusOk="תקין";
+    dictionary.he.statusWarn="אזהרה";
+    dictionary.he.statusExhausted="מוצה";
+    dictionary.he.statusUnknown="לא ידוע";
+    dictionary.he.statusTracked="במעקב";
+    dictionary.he.sourceLive="חי";
+    dictionary.he.sourceEstimated="מוערך";
+    dictionary.he.sourceTracked="במעקב";
+    dictionary.he.sourceNone="ללא";
     const navSimple = [
       ["home","house","home"],["chat","chat-circle-dots","chat"],["models","cube","models"],["connections","plugs-connected","connections"]
     ];
     const navAdvanced = [
-      ["advanced/fleet","hard-drives","fleet"],["advanced/routing","git-branch","routing"],["advanced/configuration","file-code","configuration"],["advanced/diagnostics","heartbeat","diagnostics"]
+      ["advanced/fleet","hard-drives","fleet"],["advanced/routing","git-branch","routing"],["advanced/providers","graphics-card","computeProviders"],["advanced/configuration","file-code","configuration"],["advanced/diagnostics","heartbeat","diagnostics"]
     ];
     function loadChat() {
       try { const messages=JSON.parse(localStorage.getItem("imperium.chat")||"[]"); return Array.isArray(messages)?messages.filter(message=>["user","assistant"].includes(message?.role)&&typeof message.content==="string").slice(-100):[]; }
@@ -383,7 +422,7 @@
       lang: localStorage.getItem("imperium.lang") || "en",
       theme: localStorage.getItem("imperium.theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
       mode: localStorage.getItem("imperium.mode") || "simple",
-      route: "home", status: null, setup: null, fleet: null, modelsList: [], harnesses: [], cookbook: null, config: null,
+      route: "home", status: null, setup: null, fleet: null, modelsList: [], harnesses: [], cookbook: null, config: null, budget: null,
       modelTab: "recommended", messages: loadChat(), chatModel: localStorage.getItem("imperium.chatModel") || "auto", busy: false, aborter: null,
       wizardStep: savedSetup.step, wizard: {runtime:"native", launch:"background", backend:"", channel:"recommended", modelId:"", existingUrl:"", confirmDownloads:false, confirmConfig:false, scanned:false,...savedSetup.wizard}, setupPlan: savedSetup.plan, setupFailure: null, setupRunning: false, events: [], progress: 0,
       apiKey: localStorage.getItem("imperium.apiKey") || "", error: ""
@@ -422,7 +461,8 @@
       const jobs = [
         ["modelsList",()=>request("/v1/models").then(x=>x.data||[])],
         ["harnesses",()=>request("/harnesses").then(x=>x.harnesses||x.items||[])], ["fleet",()=>request("/fleet/status")],
-        ["config",()=>request("/config/preview")], ["cookbook",()=>request("/cookbook")]
+        ["config",()=>request("/config/preview")], ["cookbook",()=>request("/cookbook")],
+        ["budget",()=>request("/compute/budget").catch(()=>null)]
       ];
       await Promise.all(jobs.map(async ([key,job]) => { try { state[key] = await job(); } catch (_) {} }));
       if (!state.wizard.backend && state.setup?.recommended_backend) state.wizard.backend = state.setup.recommended_backend;
@@ -522,6 +562,57 @@
     function configurationPage() { return `<div class="page">${pageHeader(t("configurationPage"),t("configurationCopy"))}<div class="cards"><section class="card"><h3>${t("apiKey")}</h3><p class="muted">${t("savedBrowser")}</p><div class="field"><label for="api-key">${t("apiKey")}</label><input class="input mono" id="api-key" type="password" value="${esc(state.apiKey)}" autocomplete="off"></div><button class="button primary" data-action="save-api-key">${t("saveLocal")}</button></section><section class="card"><h3>${t("rawPreview")}</h3><p class="muted">${t("redactedPreview")}</p><button class="button" data-action="show-config">${I("file-code")} ${t("rawPreview")}</button></section><section class="card"><h3>${t("customHarnesses")}</h3><p class="muted">${t("customHarnessCopy")}</p><button class="button" data-action="open-harness">${I("plus")} ${t("addHarness")}</button></section></div></div>`; }
     function diagnosticsPage() { const status=state.status||{}; return `<div class="page">${pageHeader(t("diagnosticsPage"),t("diagnosticsCopy"),`<button class="button" data-action="refresh">${I("heartbeat")} ${t("runDoctor")}</button>`)}<div class="cards"><article class="card"><div class="card-icon">${I("heartbeat")}</div><h3>${statusLabel()}</h3><p class="muted">${(status.blocking_issues||[]).length} blocking · ${(status.optional_issues||[]).length} optional</p></article><article class="card"><div class="card-icon">${I("code")}</div><h3>Imperium v__IMPERIUM_VERSION__</h3><p class="muted mono">${esc(location.origin)}</p></article><article class="card"><div class="card-icon">${I("graphics-card")}</div><h3>${esc(status.hardware?.gpu||t("unknown"))}</h3><p class="muted">${status.hardware?.vram_mb?Math.round(status.hardware.vram_mb/1024)+" GB VRAM":t("unknown")}</p></article></div><section style="margin-top:32px"><h2>${t("needsAttention")}</h2>${[...(status.blocking_issues||[]),...(status.optional_issues||[])].length?[...(status.blocking_issues||[]),...(status.optional_issues||[])].map(issue=>`<div class="issue-row"><div><span class="badge ${issue.severity==="blocking"?"warning":""}">${esc(issue.code)}</span> ${localized(issue.message)}</div><button class="button small" data-route="${esc((issue.action?.href||"home").replace(/^#\//,""))}">${localized(issue.action?.label)}</button></div>`).join(""):`<div class="status-banner success">${I("check-circle")}<div>${t("ready")}</div></div>`}</section></div>`; }
     function table(headers,rows) { return `<div class="table-wrap"><table><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${rows.length?rows.map(row=>`<tr>${row.map(cell=>`<td>${esc(cell??"—")}</td>`).join("")}</tr>`).join(""):`<tr><td colspan="${headers.length}">${t("noRows")}</td></tr>`}</tbody></table></div>`; }
+    function providerStatusBadge(status) {
+      const cls={ok:"success",warn:"warning",exhausted:"danger",tracked:"primary"}[status]||"";
+      const label={ok:t("statusOk"),warn:t("statusWarn"),exhausted:t("statusExhausted"),unknown:t("statusUnknown"),tracked:t("statusTracked")}[status]||status;
+      return `<span class="badge ${cls}">${esc(label)}</span>`;
+    }
+    function providerSourceBadge(source) {
+      const label={live:t("sourceLive"),declared_estimate:t("sourceEstimated"),ledger:t("sourceTracked"),none:t("sourceNone")}[source]||source||t("sourceNone");
+      return `<span class="badge">${esc(label)}</span>`;
+    }
+    function resetLabel(resetsAt) {
+      if (resetsAt===null||resetsAt===undefined||resetsAt==="") return t("unknown");
+      let ms=null; const asNumber=typeof resetsAt==="number"?resetsAt:Number(resetsAt);
+      if (!Number.isNaN(asNumber)&&asNumber>0) ms=asNumber>1e12?asNumber:asNumber*1000;
+      else { const parsed=Date.parse(resetsAt); if (!Number.isNaN(parsed)) ms=parsed; }
+      if (ms===null) return String(resetsAt);
+      const diffMin=Math.round((ms-Date.now())/60000);
+      if (diffMin<=0) return t("resetsIn");
+      if (diffMin<60) return `${diffMin}m`;
+      if (diffMin<2880) return `${Math.round(diffMin/60)}h`;
+      return `${Math.round(diffMin/1440)}d`;
+    }
+    function providerWindowHtml(w) {
+      if (w.source==="live") {
+        const pct=Math.max(0,Math.min(100,Math.round(w.used_percent||0)));
+        return `<div style="margin-top:14px"><div class="meta-line" style="justify-content:space-between"><span>${esc(w.label||"")}</span><span class="muted">${pct}% · ${t("resetsIn")} ${esc(resetLabel(w.resets_at))}</span></div><div class="progress-bar"><span style="width:${pct}%"></span></div></div>`;
+      }
+      const pct=Math.max(0,Math.min(100,Math.round(w.pct||0)));
+      const usedLabel=w.max_tokens?`${esc(w.used_tokens??0)} / ${esc(w.max_tokens)} ${t("tokens")}`:w.max_requests?`${esc(w.used_requests??0)} / ${esc(w.max_requests)} ${t("requests")}`:`${pct}%`;
+      const exhausts=typeof w.exhausts_in_hours==="number"?` · ~${Math.round(w.exhausts_in_hours)}h ${t("left")}`:"";
+      return `<div style="margin-top:14px"><div class="meta-line" style="justify-content:space-between"><span>${esc(w.window||"")}</span><span class="muted">${usedLabel} · ${pct}%${exhausts}</span></div><div class="progress-bar"><span style="width:${pct}%"></span></div></div>`;
+    }
+    function providerCard(p) {
+      const windows=(p.windows||[]).map(providerWindowHtml).join("");
+      return `<article class="card"><div class="card-icon">${I("graphics-card")}</div><div class="model-name" style="font-size:18px">${esc(p.provider)}${p.enabled===false?`<span class="badge">${t("disabled")}</span>`:""}</div><div class="meta-line"><span>${esc(p.kind||"")}</span><span class="mono">${esc(p.invoke||"")}</span>${p.plan_type?`<span>${esc(p.plan_type)}</span>`:""}</div><div class="meta-line" style="margin-top:10px">${providerStatusBadge(p.status)}${providerSourceBadge(p.source)}</div>${p.status==="unknown"&&p.reason?`<p class="muted" style="margin-top:10px">${esc(p.reason)}</p>`:""}${windows||`<p class="muted" style="margin-top:14px">${t("noRows")}</p>`}</article>`;
+    }
+    function localCapacityHtml(local) {
+      if (!local||local.available===false||!Object.keys(local).length) return "";
+      const gpus=local.gpus||[]; const ram=local.ram||{}; const cpu=local.cpu||{};
+      const gpuCards=gpus.length?gpus.map(gpu=>{
+        const pct=gpu.total_vram_mb?Math.round((gpu.used_vram_mb/gpu.total_vram_mb)*100):0;
+        return `<article class="card"><div class="card-icon">${I("graphics-card")}</div><h3>${esc(gpu.name||t("gpu"))}</h3><p class="muted">${Math.round((gpu.used_vram_mb||0)/1024)} / ${Math.round((gpu.total_vram_mb||0)/1024)} GB VRAM</p><div class="progress-bar"><span style="width:${pct}%"></span></div></article>`;
+      }).join(""):`<article class="card"><div class="card-icon">${I("graphics-card")}</div><h3>${t("gpu")}</h3><p class="muted">${t("unknown")}</p></article>`;
+      const ramPct=Math.round(ram.utilization_pct||0); const cpuPct=Math.round(cpu.utilization_pct||0);
+      return `<section style="margin-top:38px"><div class="section-title"><h2>${t("thisComputer")}</h2></div><div class="cards">${gpuCards}<article class="card"><div class="card-icon">${I("memory")}</div><h3>${t("memory")}</h3><p class="muted">${Math.round((ram.used_mb||0)/1024)} / ${Math.round((ram.total_mb||0)/1024)} GB</p><div class="progress-bar"><span style="width:${ramPct}%"></span></div></article><article class="card"><div class="card-icon">${I("desktop")}</div><h3>CPU</h3><p class="muted">${cpuPct}%</p><div class="progress-bar"><span style="width:${cpuPct}%"></span></div></article></div></section>`;
+    }
+    function providersView() {
+      const budget=state.budget; const providers=budget?.providers||[];
+      const body=providers.length?`<div class="cards">${providers.map(providerCard).join("")}</div>`:`<div class="empty">${I("graphics-card")}<div><h3>${t("noProviders")}</h3></div></div>`;
+      const banner=!budget?`<div class="status-banner warning">${I("warning-circle")}<div>${t("budgetUnavailable")}</div></div>`:"";
+      return `<div class="page">${pageHeader(t("computeProviders"),t("computeProvidersCopy"),`<button class="button small" data-action="refresh">${I("arrow-clockwise")} ${t("refresh")}</button>`)}${banner}${body}${budget?localCapacityHtml(budget.local):""}</div>`;
+    }
     function wizardSidebar() { const labels=["stepWelcome","stepHardware","stepRuntime","stepModel","stepReview","stepInstall"]; return `<aside class="wizard-side"><h2>Imperium setup</h2><div class="wizard-progress">${labels.map((label,index)=>`<div class="wizard-step ${state.wizardStep===index+1?"active":state.wizardStep>index+1?"done":""}"><span class="wizard-step-number">${state.wizardStep>index+1?"✓":index+1}</span><span>${t(label)}</span></div>`).join("")}</div></aside>`; }
     function option(value,current,title,copy,icon="",disabled=false,group="wizard-option") { return `<label class="option ${current===value?"selected":""} ${disabled?"disabled":""}"><input type="radio" name="${group}" value="${esc(value)}" ${current===value?"checked":""} ${disabled?"disabled":""}>${icon?I(icon):""}<span><strong>${esc(title)}</strong><span>${esc(copy)}</span></span></label>`; }
     function graphicsMemory(gpu) {
@@ -572,7 +663,7 @@
     function render() {
       renderNav(); applyPreferences();
       let html;
-      if (state.route.startsWith("setup")) html=wizardPage(); else if (state.route==="home") html=homePage(); else if (state.route==="chat") html=chatPage(); else if (state.route.startsWith("models")) html=modelsPage(); else if (state.route==="connections") html=connectionsPage(); else if (state.route==="advanced/fleet") html=fleetPage(); else if (state.route==="advanced/routing") html=routingPage(); else if (state.route==="advanced/configuration") html=configurationPage(); else html=diagnosticsPage();
+      if (state.route.startsWith("setup")) html=wizardPage(); else if (state.route==="home") html=homePage(); else if (state.route==="chat") html=chatPage(); else if (state.route.startsWith("models")) html=modelsPage(); else if (state.route==="connections") html=connectionsPage(); else if (state.route==="advanced/fleet") html=fleetPage(); else if (state.route==="advanced/routing") html=routingPage(); else if (state.route==="advanced/providers") html=providersView(); else if (state.route==="advanced/configuration") html=configurationPage(); else html=diagnosticsPage();
       document.getElementById("main").innerHTML=html; document.getElementById("main").focus({preventScroll:true});
       requestAnimationFrame(()=>{ const messages=document.getElementById("chat-messages"); if(messages) messages.scrollTop=messages.scrollHeight; });
     }
