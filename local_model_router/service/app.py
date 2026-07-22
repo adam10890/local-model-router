@@ -69,6 +69,7 @@ from .fleet_manager import (
     slots_model_snapshot,
     vram_unknown_summary,
 )
+from ..helpers import budget_engine
 from ..helpers.compute_monitor import scan_hardware
 from .models_listing import FetchFn, _default_fetch as _models_default_fetch, list_models
 from .observer import ObserverBackend
@@ -791,6 +792,9 @@ def create_app(
         return JSONResponse({
             "backends": [fleet_entry] + [upstream.describe() for upstream in upstreams],
         })
+
+    async def compute_budget_endpoint(request: Request) -> JSONResponse:
+        return JSONResponse(budget_engine.compute_budget(upstreams))
 
     async def apps_list(request: Request) -> JSONResponse:
         return JSONResponse({"apps": app_profiles.list_profiles()})
@@ -1847,6 +1851,7 @@ def create_app(
         Route("/orchestrator/tickets/{ticket_id}/submit", protected(deprecated(orchestrator_ticket_submit)), methods=["POST"]),
         Route("/orchestrator/tickets/{ticket_id}", protected(deprecated(orchestrator_ticket_detail))),
         Route("/backends", protected(backends)),
+        Route("/compute/budget", protected(compute_budget_endpoint)),
         Route("/apps", protected(apps_list)),
         Route("/agents", protected(agents_list)),
         Route("/agents/{agent_id}/runs", protected(agent_run), methods=["POST"]),

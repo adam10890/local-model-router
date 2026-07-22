@@ -102,6 +102,10 @@ async def providers_list() -> dict[str, Any]:
     return await _router_request("GET", "/backends")
 
 
+async def compute_budget() -> dict[str, Any]:
+    return await _router_request("GET", "/compute/budget")
+
+
 async def route_preview(
     role: str = "chat",
     task_type: str = "chat",

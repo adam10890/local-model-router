@@ -200,3 +200,11 @@ def register_tools(mcp: FastMCP, allow_mutating_tools: bool = False) -> None:
             routing_strategy=routing_strategy,
             local_only=local_only,
         )
+
+    @mcp.tool()
+    async def compute_budget() -> dict:
+        """Return the live compute-budget state for every provider — local hardware capacity
+        plus, per subscription/upstream, rolling-window usage vs declared limits (or live
+        Codex usage). Recommend calling before planning heavy or parallel work.
+        """
+        return await bridge.compute_budget()
