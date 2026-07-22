@@ -378,9 +378,23 @@ def create_app(
 
     conf_dir = Path(observer.config_path).resolve().parent
     upstreams = load_upstreams(upstreams_path or conf_dir / "upstreams.yaml")
+
+    def _upstream_budget_status() -> Dict[str, str]:
+        # ponytail: a broken provider_budget degrades to "no budget data" for
+        # this request, not a routing outage — handle() also guards this call.
+        try:
+            return {
+                u.name: budget_engine.provider_budget(u).get("status", "unknown")
+                for u in upstreams
+                if (u.enabled or u.has_declared_limits)
+            }
+        except Exception:
+            return {}
+
     intent_handler = RoutingIntentHandler(
         observer,
         upstream_rows_fn=lambda: [upstream.describe() for upstream in upstreams],
+        budget_status_fn=_upstream_budget_status,
     )
     app_profiles = AppProfiles.load(apps_path or conf_dir / "apps.yaml")
     external_agents_path = conf_dir / "agents.yaml"

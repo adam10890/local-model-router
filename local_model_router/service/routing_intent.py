@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -100,6 +100,12 @@ class RoutingIntentRequest(BaseModel):
     routing_strategy:   str = "balanced_local"
 
     estimated_tokens: Optional[int] = None
+    # Explicit in/out split for budget projection (Phase 6). Independent of
+    # estimated_tokens above — that field is untouched and still authoritative
+    # for context-window sizing unless left unset (see handle()).
+    est_input_tokens:  int = 0
+    est_output_tokens: int = 0
+    quality:           str = ""
     preferred_slot:   Optional[str] = None
     requested_model:   Optional[str] = None
     app_id:            Optional[str] = None
@@ -147,6 +153,7 @@ class RoutingDecisionResponse(BaseModel):
     score:                 Optional[float] = None
     score_inputs:          Dict[str, Any] = Field(default_factory=dict)
     ranked_candidates:     List[Dict[str, Any]] = Field(default_factory=list)
+    budget:                Dict[str, str] = Field(default_factory=dict)
 
     # Policy flags
     local_only_enforced: bool
@@ -173,11 +180,24 @@ class RoutingIntentHandler:
     *upstream_rows_fn* returns UpstreamConfig.describe() dicts; when provided
     and A0_LMM_ROUTER_AUTO_UPSTREAMS=1, declared upstream models join the
     candidate pool as a fallback lane behind the local fleet.
+
+    *budget_status_fn* is an optional no-arg callable returning
+    ``{provider_name: status}`` (status in ok|warn|exhausted|unknown|tracked).
+    When None (default), budget awareness is entirely inert — no behavior
+    change from pre-Phase-6. When set, it is consulted only for upstream
+    candidates: "exhausted" providers are dropped from the candidate pool,
+    "warn" providers are kept but flagged. Never local slots.
     """
 
-    def __init__(self, observer: Any, upstream_rows_fn: Optional[Any] = None) -> None:
+    def __init__(
+        self,
+        observer: Any,
+        upstream_rows_fn: Optional[Any] = None,
+        budget_status_fn: Optional[Callable[[], Dict[str, str]]] = None,
+    ) -> None:
         self._observer = observer
         self._upstream_rows_fn = upstream_rows_fn
+        self._budget_status_fn = budget_status_fn
 
     def _upstream_candidates(self, role: str, local_only: bool) -> list:
         if (
@@ -196,6 +216,7 @@ class RoutingIntentHandler:
         decision_id = str(uuid.uuid4())
         warnings: List[str] = []
         reason_codes: List[str] = []
+        budget_by_provider: Dict[str, str] = {}
 
         # ── 1. Validate known value sets (unknown → warning, not error) ──────
         if req.agent_type not in _KNOWN_AGENT_TYPES:
@@ -273,6 +294,7 @@ class RoutingIntentHandler:
                 reason_codes=reason_codes + ["manager_init_failed"],
                 warnings=warnings + [f"BackendManager init error: {type(exc).__name__}: {exc}"],
                 health_snapshot=None,
+                budget=budget_by_provider,
             )
 
         # ── 6. Route ───────────────────────────────────────────────────────
@@ -293,13 +315,31 @@ class RoutingIntentHandler:
             requires_vision=req.requires_vision,
             requires_json_mode=req.requires_json_mode,
             requires_long_context=req.requires_long_context,
-            estimated_tokens=req.estimated_tokens,
+            estimated_tokens=req.estimated_tokens
+            if req.estimated_tokens is not None
+            else ((req.est_input_tokens + req.est_output_tokens) or None),
             local_only=local_only_enforced,
             strategy=req.routing_strategy,
             preferred_slot=req.preferred_slot,
         )
         candidates = build_slot_candidates(slot_rows)
         upstream_candidates = self._upstream_candidates(role, local_only_enforced)
+        if upstream_candidates and self._budget_status_fn is not None:
+            try:
+                budget_by_provider = self._budget_status_fn() or {}
+            except Exception:
+                budget_by_provider = {}
+            kept_upstream_candidates = []
+            for cand in upstream_candidates:
+                status = budget_by_provider.get(cand.upstream_name or "")
+                if status == "exhausted":
+                    reason_codes.append(f"upstream_budget_exhausted:{cand.upstream_name}")
+                    warnings.append(f"upstream_budget_exhausted:{cand.upstream_name}")
+                    continue
+                if status == "warn":
+                    warnings.append(f"upstream_budget_low:{cand.upstream_name}")
+                kept_upstream_candidates.append(cand)
+            upstream_candidates = kept_upstream_candidates
         if upstream_candidates:
             candidates = candidates + upstream_candidates
             reason_codes.append("auto_upstreams_considered")
@@ -375,6 +415,7 @@ class RoutingIntentHandler:
                     reason_codes=reason_codes,
                     warnings=warnings,
                     health_snapshot=None,
+                    budget=budget_by_provider,
                 )
 
             reason_codes.append("no_healthy_slot_in_chain")
@@ -402,6 +443,7 @@ class RoutingIntentHandler:
                 reason_codes=reason_codes,
                 warnings=warnings,
                 health_snapshot=None,
+                budget=budget_by_provider,
             )
 
         slot_id = decision.get("slot_id")
@@ -467,4 +509,5 @@ class RoutingIntentHandler:
             reason_codes=reason_codes,
             warnings=warnings,
             health_snapshot=health_snapshot,
+            budget=budget_by_provider,
         )

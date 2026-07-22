@@ -208,3 +208,28 @@ def register_tools(mcp: FastMCP, allow_mutating_tools: bool = False) -> None:
         Codex usage). Recommend calling before planning heavy or parallel work.
         """
         return await bridge.compute_budget()
+
+    @mcp.tool()
+    async def route_task(
+        task: str = "",
+        role: str = "chat",
+        est_input_tokens: int = 0,
+        est_output_tokens: int = 0,
+        quality: str = "best_available",
+    ) -> dict:
+        """Recommend-only routing packet for a task: like route_preview, this never forwards
+        the prompt — it reports which local slot or upstream model WOULD serve the task and
+        why, and the calling agent still makes the actual call itself. Unlike route_preview,
+        the recommendation now factors live per-provider compute budgets: a provider whose
+        subscription/rate-limit window is exhausted is excluded from selection, and one
+        running low is kept but flagged, both visible in the response's reason_codes/warnings
+        and budget block. Pass est_input_tokens/est_output_tokens for a token estimate and
+        quality ("best_available" | "fast" | ...) to bias selection.
+        """
+        return await bridge.route_task(
+            task=task,
+            role=role,
+            est_input_tokens=est_input_tokens,
+            est_output_tokens=est_output_tokens,
+            quality=quality,
+        )
