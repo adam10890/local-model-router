@@ -129,8 +129,11 @@ Example MCP client entry:
 }
 ```
 
-Useful read-only tools: `list_models`, `model_card`, `providers_list`, and
-`route_preview`. Mutating fleet tools require `MCP_ALLOW_MUTATING_TOOLS=1`.
+Useful read-only tools: `list_models`, `model_card`, `providers_list`,
+`route_preview`, `compute_budget`, and `route_task`. The last two are
+budget-aware (see `docs/COMPUTE-BUDGET.md`) but still recommend-only — they
+report which model would serve the task and why, the agent still makes the
+call itself. Mutating fleet tools require `MCP_ALLOW_MUTATING_TOOLS=1`.
 
 ## Open WebUI
 
