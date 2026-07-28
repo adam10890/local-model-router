@@ -122,7 +122,8 @@ def test_windows_scripts_prepare_and_stop_the_agent_runner():
 
     assert '.[dev,mcp,agents]' in setup
     assert 'A0_LMM_ROUTER_AGENT_BASE_URL=%BASE_URL%/v1' in start
-    assert 'taskkill /F /T /FI "WINDOWTITLE eq Imperium - Local Model Router"' in stop
+    assert "Get-NetTCPConnection -LocalPort %OBSERVER_PORT%" in stop
+    assert "local_model_router\\s+serve" in stop
     assert "netstat" not in stop.lower()
 
 
@@ -346,7 +347,9 @@ def test_agent_routing_metadata_is_distinguishable_when_auto_upstream_forwards(t
 
     assert forwarded.status_code == 200
     assert calls[0]["url"] == "http://fake.invalid/v1/chat/completions"
-    assert analytics["recent"][0]["status"] == "forwarded_upstream"
+    assert analytics["recent"][0]["status"] == "completed"
+    assert analytics["recent"][0]["upstream_name"] == "fake"
+    assert analytics["recent"][0]["admission_lane"] == "upstream:fake"
     assert analytics["recent"][0]["app_id"] == "agent_library"
     assert analytics["recent"][0]["agent_id"] == "code-review"
 

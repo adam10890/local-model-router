@@ -1,0 +1,15 @@
+{
+  "name": "@imperium/pi-work-pages",
+  "version": "0.1.0",
+  "description": "Pi worker tools for Imperium shared work pages",
+  "license": "MIT",
+  "type": "module",
+  "keywords": ["pi-package", "imperium", "multi-agent"],
+  "pi": {
+    "extensions": ["./extensions"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}

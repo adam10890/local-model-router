@@ -49,6 +49,31 @@ def test_default_command_is_serve():
     assert cli._COMMANDS["serve"] is cli.cmd_serve
 
 
+def test_parser_accepts_model_evaluation_command():
+    args = cli.build_parser().parse_args(
+        ["evaluate-models", "--base-url", "http://127.0.0.1:9000"]
+    )
+
+    assert args.command == "evaluate-models"
+    assert args.force is False
+
+
+def test_config_check_reports_invalid_upstream_capacity(tmp_path, monkeypatch, capsys):
+    _write_config(tmp_path, monkeypatch)
+    (tmp_path / "upstreams.yaml").write_text(
+        "upstreams:\n"
+        "  - name: broken\n"
+        "    type: openai_compatible\n"
+        "    base_url: http://localhost:9999/v1\n"
+        "    enabled: true\n"
+        "    max_queue: 2\n",
+        encoding="utf-8",
+    )
+
+    assert cli.cmd_config_check(cli.build_parser().parse_args(["config-check"])) == 1
+    assert "max_queue requires max_active" in capsys.readouterr().out
+
+
 def test_setup_plan_accepts_windows_utf8_bom(tmp_path, monkeypatch, capsys):
     plan = tmp_path / "plan.json"
     plan.write_bytes('{"backend":"cpu"}'.encode("utf-8-sig"))

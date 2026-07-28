@@ -22,6 +22,28 @@ active_slots:
     router_models_preset: "/etc/llama/preset.ini"
     router_models_max: 2
 
+  # Hermes / multimodal chat — Ornith GGUF + matching mmproj under models_dir.
+  # Place files under global.models_dir (or absolute paths). Do not declare
+  # supports_vision until mmproj is present and an image smoke succeeds.
+  # Enable fleet control (A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1) to start/stop.
+  - id: ornith
+    port: 8081
+    role: chat
+    model_id: ornith
+    model_path: ornith-1.0-9b-Q8_0.gguf
+    mmproj_path: ornith-mmproj.gguf
+    context_size: 32768
+    gpu_layers: -1
+    batch_size: 512
+    threads: 8
+    parallel_slots: 1
+    flash_attention: on
+    enabled: true
+    router_mode: false
+    supports_tools: true
+    supports_vision: true
+    supports_json_mode: true
+
   # Optional CPU utility worker for subagents/background work.
   # Start docker/docker-compose.lmm.cpu-worker.yml and set enabled: true.
   - id: utility_cpu

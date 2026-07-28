@@ -46,6 +46,24 @@ def _engine(tmp_path: Path) -> SetupEngine:
     engine._atomic_json(engine.hardware_path, _hardware())
     # Keep setup tests hermetic while production plans deliberately refresh hardware.
     engine.hardware = lambda *, refresh=False: engine._read_json(engine.hardware_path)
+    # Mock discover() so backend_candidates uses the mocked hardware, not the real disk.
+    engine.discover = lambda: {
+        "managed_runtime": None,
+        "path_runtime": None,
+        "runtime_installed": False,
+        "existing_server_available": False,
+        "runtime_available": False,
+        "models_dir": str(engine.models_dir),
+        "gguf_models": [],
+        "config_path": str(engine.config_path),
+        "config_exists": False,
+        "enabled_slots": 0,
+        "docker_available": False,
+        "ollama_available": False,
+        "servers": [],
+        "ports": {"8080": False, "11434": False, "1234": False, "12434": False},
+        "offline": {"available": False, "directories": [], "assets": []},
+    }
     return engine
 
 
@@ -178,6 +196,9 @@ def test_managed_config_allows_slow_cpu_startup(tmp_path, monkeypatch):
 
     assert config["global"]["startup_timeout"] == 600
     assert config["active_slots"][0]["port"] == 18080
+    assert config["active_slots"][0]["router_mode"] is True
+    assert config["active_slots"][0]["router_models_dir"] == str(engine.models_dir)
+    assert "[qwen3-1.7b-q8]" in Path(config["active_slots"][0]["router_models_preset"]).read_text(encoding="utf-8")
     assert model["runtime_context"] == 4096
     assert config["active_slots"][0]["context_size"] == 4096
 
@@ -360,6 +381,59 @@ def test_verified_offline_runtime_is_preferred_in_closed_environment(tmp_path):
     assert plan["steps"][0]["source"] == "offline"
 
 
+def test_models_directory_is_persisted_and_scans_all_ggufs(tmp_path):
+    home = tmp_path / "home"
+    models = tmp_path / "my-models"
+    (models / "nested").mkdir(parents=True)
+    (models / "nested" / "custom.gguf").touch()
+    engine = SetupEngine(home=home)
+
+    discovery = engine.set_models_dir(str(models))
+
+    assert discovery["local_models"] == [{
+        "id": "nested/custom",
+        "name": "custom",
+        "path": str(models / "nested" / "custom.gguf"),
+    }]
+    assert SetupEngine(home=home).models_dir == models.resolve()
+
+
+def test_setup_uses_an_installed_model_without_downloading_it(tmp_path, monkeypatch):
+    engine = _engine(tmp_path)
+    model = engine.models_dir / "nested" / "custom.gguf"
+    model.parent.mkdir(parents=True)
+    model.write_bytes(b"local-model")
+    runtime = tmp_path / "llama-server.exe"
+    runtime.touch()
+    discovery = _discovery(engine)
+    discovery.update({
+        "path_runtime": str(runtime),
+        "runtime_installed": True,
+        "runtime_available": True,
+        "gguf_models": [str(model)],
+        "local_models": [{"id": "nested/custom", "name": "custom", "path": str(model)}],
+    })
+    monkeypatch.setattr(engine, "discover", lambda: discovery)
+    monkeypatch.setattr(engine, "_available_runtime", lambda: {"binary": str(runtime)})
+
+    plan = engine.plan({"backend": "cpu", "model_id": "nested/custom"})
+
+    assert plan["model"]["path"] == str(model)
+    assert all(step["action"] != "download_model" for step in plan["steps"])
+    config = engine.write_config("nested/custom", "cpu")
+    slot = config["active_slots"][0]
+    assert slot["model_id"] == "nested/custom"
+    assert slot["model_path"] == str(model)
+
+
+def test_setup_accepts_a_shallow_system_python_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(engine_module.sys, "executable", "C:\\Python312\\python.exe")
+
+    engine = SetupEngine(home=tmp_path / "home")
+
+    assert engine.offline_dirs[-1] == Path("C:/Python312/offline")
+
+
 def test_non_windows_platform_is_planned_and_never_offers_cuda(tmp_path):
     engine = _engine(tmp_path)
     hardware = _hardware()
@@ -411,6 +485,7 @@ def test_readiness_returns_stable_next_action_codes():
     assert payload["overall"] == "setup_required"
     assert payload["next_action"]["code"] == "choose_model"
     assert payload["blocking_issues"][0]["code"] == "model_missing"
+    assert payload["blocking_issues"][0]["category"] == "configuration"
     assert payload["next_action"]["label"]["he"]
 
 
@@ -444,6 +519,7 @@ def test_readiness_surfaces_live_memory_pressure_only_before_server_is_healthy()
         issue for issue in pressured["blocking_issues"] if issue["code"] == "memory_pressure"
     )
     assert pressured["hardware"]["ram_available_mb"] == 376
+    assert memory_issue["category"] == "system"
     assert memory_issue["action"]["code"] == "resolve_memory_pressure"
     assert memory_issue["action"]["href"] == "#/setup/hardware"
     assert pressured["next_action"]["code"] == "free_memory"

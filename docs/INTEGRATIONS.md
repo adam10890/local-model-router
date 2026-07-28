@@ -90,6 +90,13 @@ Model:   local
 Agent Zero may use the generic router embedding endpoint at
 `http://host.docker.internal:9000/v1/embeddings` with model `embedding`.
 
+## Hermes planner + Pi workers
+
+The optional Work Pages pilot lets Hermes create a dependency plan and Pi
+workers atomically claim, log, complete, or block individual steps. It does not
+launch workers. See [WORK_PAGES.md](WORK_PAGES.md) for the API contract and the
+ready-to-copy integration packages.
+
 ## Claude Code local mode (optional)
 
 Do not change the normal cloud Opus configuration. Install and run LiteLLM
@@ -198,6 +205,13 @@ Use the read-only catalog before changing client settings:
 curl http://127.0.0.1:9000/routing/models
 curl http://127.0.0.1:9000/routing/models/auto
 curl http://127.0.0.1:9000/routing/analytics
+curl http://127.0.0.1:9000/routing/evaluations
+```
+
+Refresh local model measurements manually before comparing ranked candidates:
+
+```powershell
+python -m local_model_router evaluate-models
 ```
 
 Use dry-run routing for a specific requirement:

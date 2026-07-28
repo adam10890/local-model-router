@@ -60,6 +60,7 @@ class ModelCandidate:
     latency_hint_ms: Optional[float] = None
     quality_hint: float = 0.5
     resource_cost_hint: float = 0.5
+    reliability_hint: Optional[float] = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def public_dict(self) -> dict[str, Any]:
@@ -82,6 +83,7 @@ class ModelCandidate:
                 "latency_ms": self.latency_hint_ms,
                 "quality": self.quality_hint,
                 "resource_cost": self.resource_cost_hint,
+                "reliability": self.reliability_hint,
             },
             "metadata": dict(self.metadata),
         }
@@ -256,6 +258,46 @@ def _resource_cost_hint(slot: dict[str, Any], role: str) -> float:
     return 1.0
 
 
+def apply_evaluation_hints(
+    slots: Iterable[dict[str, Any]], snapshot: Optional[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Merge the latest deterministic evaluation into slot hints."""
+    payload = snapshot.get("payload", snapshot) if isinstance(snapshot, dict) else {}
+    models = payload.get("models") if isinstance(payload, dict) else []
+    by_model = {
+        str(item.get("model_id")): item
+        for item in models or []
+        if isinstance(item, dict) and item.get("model_id")
+    }
+    out: list[dict[str, Any]] = []
+    for slot in slots:
+        row = dict(slot)
+        model_id = str(row.get("router_default_model") or row.get("model_id") or "")
+        evaluated = by_model.get(model_id)
+        if evaluated:
+            roles = evaluated.get("roles") if isinstance(evaluated.get("roles"), dict) else {}
+            role = "embed" if row.get("role") == "embedding" else str(row.get("role") or "chat")
+            metrics = roles.get(role) or roles.get("chat") or next(iter(roles.values()), {})
+            if isinstance(metrics, dict):
+                row["quality_hint"] = metrics.get("pass_rate", row.get("quality_hint"))
+                row["latency_hint_ms"] = metrics.get(
+                    "median_latency_ms", row.get("latency_hint_ms")
+                )
+                row["resource_cost_hint"] = metrics.get(
+                    "resource_cost_hint", row.get("resource_cost_hint")
+                )
+                row["reliability_hint"] = metrics.get("reliability")
+                row["evaluation"] = {
+                    "schema_version": payload.get("schema_version"),
+                    "generated_at": payload.get("generated_at"),
+                    "fingerprint": evaluated.get("fingerprint"),
+                    "role": role,
+                    "metrics": metrics,
+                }
+        out.append(row)
+    return out
+
+
 def build_slot_candidates(slots: Iterable[dict[str, Any]]) -> list[ModelCandidate]:
     candidates: list[ModelCandidate] = []
     for slot in slots:
@@ -287,9 +329,15 @@ def build_slot_candidates(slots: Iterable[dict[str, Any]]) -> list[ModelCandidat
                 latency_hint_ms=float(slot.get("latency_hint_ms") or _role_latency_default(role)),
                 quality_hint=_float_hint(slot.get("quality_hint"), _role_quality_default(role)),
                 resource_cost_hint=_resource_cost_hint(slot, role),
+                reliability_hint=(
+                    _float_hint(slot.get("reliability_hint"), 0.0)
+                    if slot.get("reliability_hint") is not None
+                    else None
+                ),
                 metadata={
                     "router_mode": bool(slot.get("router_mode", False)),
                     "parallel_slots": slot.get("parallel_slots"),
+                    **({"evaluation": slot["evaluation"]} if slot.get("evaluation") else {}),
                 },
             )
         )
@@ -316,10 +364,17 @@ def build_upstream_candidates(upstream_rows: Iterable[dict[str, Any]]) -> list[M
             continue
         capabilities = row.get("capabilities")
         capabilities = set(capabilities) if isinstance(capabilities, (list, tuple)) else set()
+        per_model = row.get("model_capabilities")
+        per_model = per_model if isinstance(per_model, dict) else {}
         for model in models:
             model_id = str(model).strip()
             if not model_id:
                 continue
+            model_caps = per_model.get(model_id)
+            if isinstance(model_caps, (list, tuple)):
+                caps = set(model_caps)
+            else:
+                caps = capabilities
             candidates.append(
                 ModelCandidate(
                     id=f"{name}/{model_id}",
@@ -331,9 +386,9 @@ def build_upstream_candidates(upstream_rows: Iterable[dict[str, Any]]) -> list[M
                     upstream_name=name,
                     base_url=base_url,
                     context_size=0,
-                    supports_tools="tools" in capabilities,
-                    supports_vision="vision" in capabilities,
-                    supports_json_mode="json_mode" in capabilities,
+                    supports_tools="tools" in caps,
+                    supports_vision="vision" in caps,
+                    supports_json_mode="json_mode" in caps,
                     health="unknown",
                     latency_hint_ms=None,
                     quality_hint=_role_quality_default("chat"),
@@ -427,6 +482,7 @@ def rank_candidates(
             "quality_hint": candidate.quality_hint,
             "latency_score": _latency_score(candidate.latency_hint_ms),
             "resource_cost_hint": candidate.resource_cost_hint,
+            "reliability": candidate.reliability_hint,
             "local_score": 1.0 if candidate.source == "local_fleet" else 0.0,
         }
 
@@ -466,6 +522,8 @@ def rank_candidates(
             )
 
         reason_codes = ["candidate_ranked"]
+        if candidate.metadata.get("evaluation"):
+            reason_codes.append("evaluated_model_score")
         if candidate.source == "local_fleet":
             reason_codes.append("local_fleet_preferred")
         if needs.local_only:

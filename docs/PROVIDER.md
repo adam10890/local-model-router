@@ -16,13 +16,18 @@ fleet control is explicitly enabled.
   Completions endpoint.
 - `GET /harnesses` and `GET /harnesses/{id}` emit secret-free setup manifests.
   Dedicated `.../v1/models` and `.../v1/chat/completions` paths pin one model
-  per connection; see `HARNESSES.md`.
-- `GET /fleet/status` returns queue, agent, request, slot, state, and local
-  hardware summaries.
+  per connection; see `HARNESSES.md`. Hermes Vision pins a local llama.cpp
+  slot (for example `ornith` with `mmproj_path`); DMR is optional text/tools
+  only and is not managed for multimodal projectors.
+- `GET /fleet/status` returns the legacy local `queue`, per-lane `queues`,
+  agent, request, slot, state, and local hardware summaries.
 - `GET /fleet/agents` lists registered/observed agents.
 - `POST /fleet/agents/register` registers an agent identity manually.
 - `GET /compute/budget` returns local hardware headroom plus per-provider
   usage vs declared/live limits; see `COMPUTE-BUDGET.md`.
+- `GET /routing/evaluations` returns the latest safe model-evaluation snapshot.
+- `GET /backends` reports each upstream's capacity mode, limits, and any
+  configuration error.
 
 When `A0_LMM_ROUTER_API_KEY` is set, every endpoint except `/health` requires:
 
@@ -50,6 +55,12 @@ Snapshots are cached for five seconds and collected outside the ASGI event
 loop. If a probe fails, fleet status remains HTTP 200 and reports explicit
 unavailable values. Hardware telemetry is local to the router host; remote
 fleet hosts are not probed.
+
+When opt-in fleet control has already initialized a managed slot,
+`GET /fleet/status` adds a safe `runtime` object to that slot. It contains
+only `running`, `healthy`, `failure_code`, `exit_code`, `restart_count`, and
+`uptime_s`; commands, environment variables, model paths, logs, and prompts
+are never included.
 
 ## Windows
 
@@ -79,7 +90,8 @@ python .\scripts\smoke_harnesses.py --api-key "change-me"
 `SETUP.bat` installs the agent runner extra. `START.bat` derives
 `A0_LMM_ROUTER_AGENT_BASE_URL` from the configured bind URL unless `.env`
 overrides it; `STOP.bat` reads the same `OBSERVER_PORT` before stopping the
-router.
+router. On Windows Terminal it validates and stops the router process that
+owns that port; it never terminates an unrelated listener.
 
 ## WSL Or Linux Server
 
@@ -151,10 +163,39 @@ Pydantic AI runner used by `POST /agents/{id}/runs`.
 
 Agent runs call the router asynchronously through
 `A0_LMM_ROUTER_AGENT_BASE_URL`, carry the configured role/task intent, and
-have a 64 KiB input limit plus a 120-second timeout. When auto-upstreams is
-enabled, non-local-only agents may be recorded as `forwarded_upstream` in
-`GET /routing/analytics`; those records retain `app_id=agent_library` and the
-agent id. Agent prompts are never returned by `/agents` or saved in telemetry.
+have a 64 KiB input limit plus a 120-second timeout. Requests finish as
+`completed`, `failed`, or `rejected`; `GET /routing/analytics` retains the
+selected upstream and admission lane together with `app_id=agent_library`
+and the agent id. Agent prompts are never returned by `/agents` or saved in
+telemetry.
+
+## Admission lanes
+
+Local requests use the existing bounded `local` lane. An upstream with
+`max_active` gets its own in-memory `upstream:<name>` lane; `max_queue`
+defaults to 32. An upstream without `max_active` delegates capacity to the
+provider and must omit `max_queue`. Invalid upstream entries remain visible
+through `GET /backends` with `config_error` but never serve inference.
+
+Admission is per process. Run one router worker when the configured limits
+must be hard global limits. The router never starts or stops an upstream.
+Every allocated chat response, including errors, carries
+`X-A0-Request-ID` and `X-A0-Admission-Lane`.
+
+## Model evaluation
+
+Run the deterministic evaluator manually; it never executes model-generated
+code and does not use an LLM judge:
+
+```powershell
+python -m local_model_router evaluate-models
+```
+
+Only reachable local models are evaluated. Results are stored in the existing
+snapshot store, reused while the model/runtime/hardware fingerprint is
+unchanged, and exposed safely through `GET /routing/evaluations` and
+`GET /routing/models`. Prompts, responses, and sensitive content are not
+stored. Use `--force` to refresh an unchanged model.
 
 ## Update Guide
 

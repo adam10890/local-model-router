@@ -33,7 +33,10 @@ upstreams:
     type: openai_compatible
     base_url: http://localhost:12434/engines/v1
     enabled: true
-    notes: "Docker Model Runner. 'docker model pull hf.co/...' then reference as dmr/<model-id>. Peer compute manager — not under the router's VRAM admission control (fork #1)."
+    capabilities: [chat, models, tools]
+    max_active: 4
+    max_queue: 32
+    notes: "Docker Model Runner. Optional text/tools upstream only — Imperium does not manage DMR lifecycle or mmproj. Hermes Vision uses a local llama.cpp slot."
 
   - name: ollama
     type: openai_compatible

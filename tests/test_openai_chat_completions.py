@@ -161,6 +161,8 @@ def test_chat_completions_forwards_to_selected_chat_slot(tmp_path, monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["choices"][0]["message"]["content"] == "ok"
     assert resp.headers["x-a0-router-slot-id"] == "chat"
+    assert resp.headers["x-a0-admission-lane"] == "local"
+    assert resp.headers["x-a0-request-id"].startswith("req_")
     assert resp.headers["x-hard-ctx"] == "65536"
     assert calls[0]["args"][0] == "http://localhost:8080/v1/chat/completions"
     assert calls[0]["kwargs"]["json"]["stream"] is False
@@ -292,6 +294,41 @@ def test_chat_completions_streams_selected_slot_sse(tmp_path, monkeypatch):
     assert b'data: {"choices":[{"delta":{"content":"he"}}]}' in body
     assert b"data: [DONE]" in body
     manager_cls._instance = None
+
+
+def test_incomplete_sse_stream_reports_upstream_stream_incomplete():
+    import asyncio
+
+    from local_model_router.service.app import _stream_upstream_response
+
+    codes: list[str] = []
+
+    class FakeContent:
+        async def iter_chunked(self, size):
+            yield b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'
+
+    class FakeResponse:
+        content = FakeContent()
+
+        def release(self):
+            return None
+
+    class FakeSession:
+        async def close(self):
+            return None
+
+    async def on_error(code: str) -> None:
+        codes.append(code)
+
+    async def drain():
+        chunks = []
+        async for chunk in _stream_upstream_response(FakeResponse(), FakeSession(), on_error):
+            chunks.append(chunk)
+        return chunks
+
+    chunks = asyncio.run(drain())
+    assert chunks
+    assert codes == ["upstream_stream_incomplete"]
 
 
 def test_chat_completions_requires_bearer_token_when_api_key_configured(tmp_path, monkeypatch):

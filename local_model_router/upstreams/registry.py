@@ -71,6 +71,12 @@ class UpstreamConfig:
     # Models declared eligible for auto-routing (bare ids, no "<name>/" prefix).
     # Empty means the upstream is reachable only by explicit "<name>/<model>".
     models: tuple[str, ...] = field(default_factory=tuple)
+    # Per-model capability overrides (bare ids). When set, replaces upstream
+    # capabilities for that model only — never invent vision globally.
+    model_capabilities: Dict[str, tuple[str, ...]] = field(default_factory=dict)
+    max_active: Optional[int] = None
+    max_queue: Optional[int] = None
+    config_error: str = ""
     notes: str = ""
     # Declared rolling-window usage limits (subscription providers only have
     # these — no live quota API to poll).
@@ -80,9 +86,20 @@ class UpstreamConfig:
     invoke: str = ""
     default_model: str = ""
 
+    def effective_capabilities(self, bare_model: str = "") -> tuple[str, ...]:
+        key = str(bare_model or "").strip()
+        if key and key in self.model_capabilities:
+            return self.model_capabilities[key]
+        return self.capabilities
+
     @property
     def serves_inference(self) -> bool:
-        return self.enabled and self.type == TYPE_OPENAI_COMPATIBLE and bool(self.base_url)
+        return (
+            self.enabled
+            and self.type == TYPE_OPENAI_COMPATIBLE
+            and bool(self.base_url)
+            and not self.config_error
+        )
 
     @property
     def has_declared_limits(self) -> bool:
@@ -112,6 +129,13 @@ class UpstreamConfig:
             "serves_inference": self.serves_inference,
             "capabilities": list(self.capabilities),
             "models": list(self.models),
+            "model_capabilities": {
+                model: list(caps) for model, caps in self.model_capabilities.items()
+            },
+            "capacity_mode": "bounded" if self.max_active is not None else "delegated",
+            "max_active": self.max_active,
+            "max_queue": self.max_queue,
+            "config_error": self.config_error or None,
             "auth_configured": bool(self.api_key_env),
             "notes": self.notes,
             "limits": [
@@ -167,8 +191,35 @@ def _parse_entry(raw: Any) -> Optional[UpstreamConfig]:
         limits_raw = []
     limits = [parsed for item in limits_raw if (parsed := _parse_limit(item)) is not None]
 
+    model_capabilities: Dict[str, tuple[str, ...]] = {}
+    raw_model_caps = raw.get("model_capabilities")
+    if isinstance(raw_model_caps, dict):
+        for model_id, caps in raw_model_caps.items():
+            key = str(model_id or "").strip()
+            if not key or not isinstance(caps, list):
+                continue
+            model_capabilities[key] = tuple(
+                str(c).strip() for c in caps if str(c).strip()
+            )
+
     experimental = bool(raw.get("experimental", False))
     enabled = bool(raw.get("enabled", False))
+    max_active = raw.get("max_active")
+    max_queue = raw.get("max_queue")
+    config_error = ""
+    if max_active is None:
+        if max_queue is not None:
+            config_error = "max_queue requires max_active"
+    elif not isinstance(max_active, int) or isinstance(max_active, bool) or max_active < 1:
+        config_error = "max_active must be an integer greater than zero"
+        max_active = None
+        max_queue = None
+    elif max_queue is None:
+        max_queue = 32
+    elif not isinstance(max_queue, int) or isinstance(max_queue, bool) or max_queue < 0:
+        config_error = "max_queue must be a non-negative integer"
+        max_active = None
+        max_queue = None
 
     return UpstreamConfig(
         name=name,
@@ -179,6 +230,10 @@ def _parse_entry(raw: Any) -> Optional[UpstreamConfig]:
         experimental=experimental,
         capabilities=tuple(str(c) for c in capabilities),
         models=tuple(str(m).strip() for m in models if str(m).strip()),
+        model_capabilities=model_capabilities,
+        max_active=max_active,
+        max_queue=max_queue,
+        config_error=config_error,
         notes=str(raw.get("notes") or ""),
         limits=tuple(limits),
         invoke=str(raw.get("invoke") or "").strip(),

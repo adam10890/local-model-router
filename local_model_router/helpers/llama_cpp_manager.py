@@ -186,6 +186,10 @@ class BackendManager:
             "container_id": status.container_id,
             "pid": status.pid,
             "error": status.error,
+            "uptime_s": status.uptime_s,
+            "restart_count": status.restart_count,
+            "failure_code": status.extra.get("failure_code"),
+            "exit_code": status.extra.get("exit_code"),
         }
     
     async def start_all(self) -> Dict[str, Dict[str, Any]]:
@@ -216,6 +220,10 @@ class BackendManager:
                     "healthy": result.healthy,
                     "port": result.port,
                     "error": result.error,
+                    "uptime_s": result.uptime_s,
+                    "restart_count": result.restart_count,
+                    "failure_code": result.extra.get("failure_code"),
+                    "exit_code": result.extra.get("exit_code"),
                 }
         return output
     
@@ -245,6 +253,10 @@ class BackendManager:
                 "container_id": s.container_id,
                 "pid": s.pid,
                 "error": s.error,
+                "uptime_s": s.uptime_s,
+                "restart_count": s.restart_count,
+                "failure_code": s.extra.get("failure_code"),
+                "exit_code": s.extra.get("exit_code"),
                 "role": s.extra.get("role", ""),
                 # Router Mode fields (from slot config)
                 "router_mode": cfg.get("router_mode", False),

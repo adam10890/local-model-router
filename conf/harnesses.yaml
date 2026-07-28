@@ -1,5 +1,9 @@
 # Dedicated client-runtime connections. Each connection is pinned to one model.
 # API keys stay in the environment and never belong in this file.
+#
+# Hermes chat uses DMR Ornith while local llama.cpp slots are down / without
+# mmproj. When a local ornith slot exists with mmproj_path, pin to that slot
+# id instead and set supports_vision after a real image smoke.
 harnesses:
   hermes:
     display_name: Hermes
@@ -27,14 +31,3 @@ harnesses:
     connections:
       default:
         model: dmr/huggingface.co/deepreinforce-ai/ornith-1.0-9b-gguf:Q8_0
-
-  agent_zero:
-    display_name: Agent Zero
-    kind: agent_zero
-    protocol: openai
-    location: docker
-    connections:
-      chat:
-        model: dmr/huggingface.co/deepreinforce-ai/ornith-1.0-9b-gguf:Q8_0
-      utility:
-        model: utility_cpu

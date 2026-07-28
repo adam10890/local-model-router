@@ -7,6 +7,7 @@ touches the plugin's singleton.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -65,6 +66,9 @@ class ObserverBackend:
     def __init__(self, config_path: Optional[str | os.PathLike[str]] = None) -> None:
         self.config_path = os.fspath(config_path) if config_path is not None else resolve_conf_path(__file__)
         self._raw: Dict[str, Any] = {}
+        from local_model_router.helpers.smart_router.health import SlotHealthChecker
+
+        self._health_checker = SlotHealthChecker()
         self._load()
 
     def _load(self) -> None:
@@ -195,19 +199,14 @@ class ObserverBackend:
 
     async def get_slots_health(self) -> List[Dict[str, Any]]:
         """Probe each slot's /health endpoint and return status."""
-        from local_model_router.helpers.smart_router.health import SlotHealthChecker
-        checker = SlotHealthChecker()
-        results = []
-
-        for slot in self.get_slots():
+        async def probe(slot: Dict[str, Any]) -> Dict[str, Any]:
             if not slot.get("enabled"):
-                results.append({**slot, "health": "disabled"})
-                continue
+                return {**slot, "health": "disabled"}
             try:
                 config = {"host": slot["host"], "port": slot["port"]}
-                health = await checker.check_async(config)
+                health = await self._health_checker.check_async(config)
             except Exception:
                 health = "unknown"
-            results.append({**slot, "health": health})
+            return {**slot, "health": health}
 
-        return results
+        return list(await asyncio.gather(*(probe(slot) for slot in self.get_slots())))

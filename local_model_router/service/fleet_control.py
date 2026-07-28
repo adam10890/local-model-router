@@ -113,6 +113,11 @@ class FleetControlHandler:
             "backend": manager.backend_type,
         }
 
+    async def status(self) -> Dict[str, Dict[str, Any]]:
+        from local_model_router.helpers.llama_cpp_manager import BackendManager
+
+        return await BackendManager._instance.status() if BackendManager._instance else {}
+
     async def start_all(self) -> Dict[str, Any]:
         manager = self._manager()
         try:

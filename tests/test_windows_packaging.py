@@ -13,6 +13,9 @@ def test_launchers_persist_settings_and_identify_the_router():
     assert '%IMPERIUM_HOME%\\.env' in start
     assert '%IMPERIUM_HOME%\\.env' in stop
     assert "$health.service -eq 'lmm-router-observer'" in start
+    assert "Get-NetTCPConnection -LocalPort %OBSERVER_PORT%" in stop
+    assert "local_model_router\\s+serve" in stop
+    assert "timeout /t" not in stop.lower()
     assert "exit /b %errorlevel%" not in start
     assert "if errorlevel 1 exit /b 1" in start
     assert "netstat" not in stop.lower()
@@ -59,4 +62,4 @@ def test_application_rollback_swaps_only_fixed_per_user_paths():
     assert 'Programs "Imperium"' in rollback
     assert 'Programs "Imperium.previous"' in rollback
     assert "Move-Item -LiteralPath $Previous -Destination $Target" in rollback
-    assert 'WINDOWTITLE eq Imperium - Local Model Router' in rollback
+    assert 'Join-Path $Target "STOP.bat"' in rollback

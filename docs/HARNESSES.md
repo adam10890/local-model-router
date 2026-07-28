@@ -1,9 +1,9 @@
 # Harness connections
 
-A **harness** is a client runtime such as Hermes, Pi, Agent Zero, or Claude
-Code. An **agent** is a session or persona created inside that runtime. The
-router assigns compute to harness connections; it does not model the
-harness's internal roles.
+A **harness** is a client runtime such as Hermes, Pi, or Claude Code. An
+**agent** is a session or persona created inside that runtime. The router
+assigns compute to harness connections; it does not model the harness's
+internal roles.
 
 ## Contract
 
@@ -19,24 +19,15 @@ harnesses:
     location: host
     connections:
       default:
+        # Prefer a local llama.cpp slot id when that slot is healthy with
+        # mmproj. Until then, DMR Ornith is the working text pin.
         model: dmr/huggingface.co/deepreinforce-ai/ornith-1.0-9b-gguf:Q8_0
 ```
 
-Agent Zero is the current exception because its consumer settings expose
-separate chat and utility providers:
-
-```yaml
-  agent_zero:
-    display_name: Agent Zero
-    kind: agent_zero
-    protocol: openai
-    location: docker
-    connections:
-      chat:
-        model: dmr/huggingface.co/deepreinforce-ai/ornith-1.0-9b-gguf:Q8_0
-      utility:
-        model: utility_cpu
-```
+Prefer a **local** llama.cpp slot (`model: ornith` with `mmproj_path`) for
+Vision once that slot is healthy. DMR may serve text/tools but Imperium does
+not load mmproj into DMR. LiteLLM is only for the optional Claude Code
+Anthropic bridge, not a substitute for the local fleet.
 
 IDs use lowercase ASCII letters, digits, `_`, or `-`. API keys never belong
 in this file.
@@ -50,17 +41,17 @@ http://127.0.0.1:9000/harnesses/hermes/v1
 http://127.0.0.1:9000/harnesses/pi/v1
 ```
 
-Agent Zero runs in Docker, so its named connections use:
-
-```text
-http://host.docker.internal:9000/harnesses/agent_zero/chat/v1
-http://host.docker.internal:9000/harnesses/agent_zero/utility/v1
-```
-
 Each base URL provides `GET /models` and `POST /chat/completions`. Clients may
 send any compatibility model name; the path's pinned model is authoritative.
-An unavailable pinned target returns `503 harness_model_unavailable` and does
-not fail over to a different harness model. Generic `/v1` routing is unchanged.
+An unavailable pinned target (no connection, timeout, or unloaded slot)
+returns `503 harness_model_unavailable` and does not fail over. Capability
+mismatches such as missing mmproj / unsupported image input return
+`upstream_capability_missing` instead of a generic unavailable error.
+Generic `/v1` routing is unchanged.
+Pinned requests use the target's admission lane: `local` for a local model or
+`upstream:<name>` for a capacity-managed upstream. The response includes
+`X-A0-Request-ID` and `X-A0-Admission-Lane`; a full lane returns HTTP 429
+without changing the pinned model.
 
 Verify every configured connection from the router host with:
 
@@ -93,8 +84,8 @@ writes disabled the form only generates a YAML preview.
 
 ## Compatibility
 
-If `conf/harnesses.yaml` does not exist, one compatibility release derives
-harness connections from the old `roles` entries in `conf/apps.yaml`.
+If `conf/harnesses.yaml` does not exist, one compatibility release can derive
+harness connections from legacy `roles` entries in `conf/apps.yaml`.
 `conf/apps.yaml` still controls generic `/v1` app policy; new dedicated
 connections must be declared in `conf/harnesses.yaml`.
 

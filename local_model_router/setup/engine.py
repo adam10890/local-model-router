@@ -73,17 +73,20 @@ class SetupEngine:
     def __init__(self, *, home: str | Path | None = None, config_path: str | Path | None = None) -> None:
         self.home = Path(home or default_home()).expanduser().resolve(strict=False)
         self.runtime_dir = self.home / "runtime" / "llama.cpp"
-        self.models_dir = Path(
-            os.environ.get("LLAMA_MODELS_DIR", "").strip() or self.home / "models"
-        ).expanduser().resolve(strict=False)
         self.state_dir = self.home / "state"
+        self.settings_path = self.state_dir / "settings.json"
+        saved_models_dir = str(self._read_json(self.settings_path).get("models_dir") or "").strip()
+        self.models_dir = Path(
+            os.environ.get("LLAMA_MODELS_DIR", "").strip() or saved_models_dir or self.home / "models"
+        ).expanduser().resolve(strict=False)
         self.config_path = Path(config_path).resolve(strict=False) if config_path else self.home / "conf" / "llama_cpp_servers.yaml"
         self.manifest_path = self.state_dir / "installation-manifest.json"
         self.inventory_path = self.state_dir / "model-inventory.json"
         self.hardware_path = self.state_dir / "hardware-profile.json"
         self.process_path = self.state_dir / "runtime-process.json"
         configured_offline = os.environ.get("IMPERIUM_OFFLINE_DIR", "").strip()
-        packaged_offline = Path(sys.executable).resolve(strict=False).parents[2] / "offline"
+        executable = Path(sys.executable).resolve(strict=False)
+        packaged_offline = (executable.parents[2] if len(executable.parents) > 2 else executable.parent) / "offline"
         self.offline_dirs = [
             path
             for path in (
@@ -191,7 +194,10 @@ class SetupEngine:
         path_binary = shutil.which("llama-server") or shutil.which("llama-server.exe")
         ggufs = []
         if self.models_dir.is_dir():
-            ggufs = [str(path) for path in sorted(self.models_dir.rglob("*.gguf"))[:200]]
+            ggufs = [
+                str(path) for path in sorted(self.models_dir.rglob("*.gguf"))
+                if "\n" not in str(path) and "\r" not in str(path)
+            ][:200]
         config_exists = self.config_path.is_file()
         slots = []
         if config_exists:
@@ -229,6 +235,14 @@ class SetupEngine:
             "runtime_available": bool(managed or path_binary or servers),
             "models_dir": str(self.models_dir),
             "gguf_models": ggufs,
+            "local_models": [
+                {
+                    "id": self._model_id(path),
+                    "name": path.stem,
+                    "path": str(path),
+                }
+                for path in map(Path, ggufs)
+            ],
             "config_path": str(self.config_path),
             "config_exists": config_exists,
             "enabled_slots": sum(1 for slot in slots if slot.get("enabled", True)),
@@ -242,6 +256,92 @@ class SetupEngine:
                 "assets": offline_assets,
             },
         }
+
+    def _model_id(self, path: Path) -> str:
+        relative = path.relative_to(self.models_dir).with_suffix("").as_posix()
+        return relative.translate(str.maketrans({"[": "_", "]": "_", "\r": "_", "\n": "_"}))
+
+    def _local_model(
+        self,
+        model_id: str,
+        rows: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
+        available = rows if rows is not None else self.discover().get("local_models", [])
+        row = next(
+            (item for item in available if item.get("id") == model_id),
+            None,
+        )
+        if not row:
+            return None
+        path = Path(str(row["path"])).resolve(strict=False)
+        try:
+            relative = path.relative_to(self.models_dir).as_posix()
+            size_gb = round(path.stat().st_size / 1024**3, 2)
+        except (OSError, ValueError):
+            return None
+        return {
+            **row,
+            "filename": relative,
+            "size_gb": size_gb,
+            "installed": True,
+            "local": True,
+            "fit": "local",
+            "fit_reason": "Already installed in the selected models folder",
+            "quant": "GGUF",
+            "license": "Local file",
+            "capabilities": [],
+        }
+
+    def set_models_dir(self, value: str) -> dict[str, Any]:
+        if not isinstance(value, str) or not value.strip():
+            raise SetupError("invalid_models_dir", "Choose a local models folder")
+        path = Path(value).expanduser().resolve(strict=False)
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise SetupError("invalid_models_dir", f"The models folder is not writable: {exc}") from exc
+        if not path.is_dir():
+            raise SetupError("invalid_models_dir", "The models path must be a folder")
+        self.models_dir = path
+        self._atomic_json(self.settings_path, {"schema_version": 1, "models_dir": str(path)})
+        self._update_models_config()
+        return self.discover()
+
+    def _update_models_config(self) -> None:
+        if not self.config_path.is_file():
+            return
+        try:
+            payload = yaml.safe_load(self.config_path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError, AttributeError) as exc:
+            raise SetupError("configuration_invalid", "The existing fleet configuration is invalid") from exc
+        payload.setdefault("global", {})["models_dir"] = str(self.models_dir)
+        for slot in payload.get("active_slots", []):
+            if isinstance(slot, dict) and slot.get("router_mode"):
+                model = next(
+                    (row for row in self.catalog.get("models", []) if row.get("id") == slot.get("model_id")),
+                    None,
+                )
+                slot["router_models_dir"] = str(self.models_dir)
+                slot["router_models_preset"] = str(self._write_models_preset(model))
+        temporary = self.config_path.with_suffix(self.config_path.suffix + ".tmp")
+        temporary.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+        os.replace(temporary, self.config_path)
+
+    def _write_models_preset(self, model: dict[str, Any] | None) -> Path:
+        preset = self.state_dir / "models-preset.ini"
+        aliases = {
+            self._model_id(path): path.relative_to(self.models_dir).as_posix()
+            for path in sorted(self.models_dir.rglob("*.gguf"))
+            if "\n" not in str(path) and "\r" not in str(path)
+        }
+        if model:
+            aliases[str(model["id"])] = str(model["filename"])
+        preset.parent.mkdir(parents=True, exist_ok=True)
+        preset.write_text(
+            "\n".join(f"[{alias}]\nmodel = {relative}\n" for alias, relative in aliases.items()),
+            encoding="utf-8",
+        )
+        return preset
 
     @staticmethod
     def _port_open(host: str, port: int) -> bool:
@@ -441,9 +541,13 @@ class SetupEngine:
         model_id = "" if requested_backend == "existing" else str(
             request.get("model_id") or (recommendation or {}).get("id") or ""
         )
-        model = next((row for row in models if row["id"] == model_id), None)
+        model = next((row for row in models if row["id"] == model_id), None) or (
+            self._local_model(model_id, state["discovery"].get("local_models"))
+            if model_id
+            else None
+        )
         if model_id and not model:
-            raise SetupError("unknown_model", f"Unknown catalog model: {model_id}")
+            raise SetupError("unknown_model", f"Unknown catalog or installed model: {model_id}")
         if model and model.get("fit") == "incompatible":
             raise SetupError("model_incompatible", str(model.get("fit_reason") or "The selected model does not fit"))
         backend = requested_backend
@@ -745,7 +849,15 @@ class SetupEngine:
     ) -> dict[str, Any]:
         runtime = self._available_runtime()
         model = next((row for row in self.catalog.get("models", []) if row.get("id") == model_id), None)
-        model_path = self.models_dir / str(model["filename"]) if model else None
+        local_model = None if model else self._local_model(str(model_id or ""))
+        model = model or local_model
+        model_path = (
+            Path(str(local_model["path"]))
+            if local_model
+            else self.models_dir / str(model["filename"])
+            if model
+            else None
+        )
         if backend != "existing" and not runtime:
             raise SetupError("runtime_missing", "Install or select llama.cpp before writing the managed configuration")
         if model and not model_path.is_file():
@@ -758,6 +870,7 @@ class SetupEngine:
             if host not in {"127.0.0.1", "localhost", "::1"}:
                 raise SetupError("existing_server_not_local", "First-run existing servers must use a loopback address")
             port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        preset_path = self._write_models_preset(model) if backend != "existing" else None
         payload = {
             "global": {
                 "backend": "remote" if backend == "existing" else "subprocess",
@@ -776,6 +889,12 @@ class SetupEngine:
                     "enabled": True,
                     "model_id": model_id or "local",
                     "model_path": str(model_path) if model_path else "",
+                    "router_mode": backend != "existing",
+                    "router_models_dir": str(self.models_dir) if backend != "existing" else "",
+                    "router_models_preset": str(preset_path) if preset_path else "",
+                    "router_default_model": model_id or "",
+                    "router_models_autoload": True,
+                    "router_models_max": 1,
                     "context_size": int((model or {}).get("runtime_context") or 4096),
                     "gpu_layers": -1 if backend != "cpu" else 0,
                     "parallel_slots": 1,

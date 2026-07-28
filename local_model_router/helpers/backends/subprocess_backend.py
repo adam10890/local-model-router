@@ -5,7 +5,7 @@ This is the legacy behavior: expects llama.cpp binary installed on the
 host (or accessible via WSL). Works on Windows, Linux, macOS.
 
 Suitable when:
-  - Running Agent Zero directly on host (not in container)
+  - Running llama.cpp directly on the host (not in a container)
   - llama.cpp is already compiled locally
   - Docker is not available
 """
@@ -34,6 +34,7 @@ class SubprocessBackend(InferenceBackend):
         super().__init__(global_config)
         self._processes: Dict[str, subprocess.Popen] = {}
         self._slots: Dict[str, SlotStatus] = {}
+        self._started_at: Dict[str, float] = {}
 
     @property
     def backend_type(self) -> BackendType:
@@ -42,13 +43,16 @@ class SubprocessBackend(InferenceBackend):
     # ── Public API ──────────────────────────────────────────────────
 
     async def start_slot(self, name: str, config: Dict[str, Any]) -> SlotStatus:
+        restart_count = 0
         if name in self._processes:
             proc = self._processes[name]
             if proc.poll() is None:  # still running
                 self.logger.info(f"Slot '{name}' already running (pid={proc.pid})")
-                return self._slots[name]
+                return await self.health_check(name)
             # Process exited — clean up
+            restart_count = self._slots.get(name, SlotStatus(name=name)).restart_count + 1
             del self._processes[name]
+            self._started_at.pop(name, None)
 
         port = int(config.get("port", 8080))
         status = SlotStatus(
@@ -56,16 +60,19 @@ class SubprocessBackend(InferenceBackend):
             port=port,
             host="localhost",
             model_id=config.get("model_id", ""),
+            restart_count=restart_count,
         )
 
         # Check model file
         model_path = config.get("model_path", "")
         if not model_path or not os.path.exists(model_path):
             status.error = f"Model file not found: {model_path}"
+            status.extra["failure_code"] = "model_missing"
             self.logger.error(status.error)
             self._slots[name] = status
             return status
 
+        proc = None
         try:
             cmd = self._build_command(config)
             self.logger.info(f"Starting slot '{name}': {' '.join(cmd[:6])}...")
@@ -109,19 +116,34 @@ class SubprocessBackend(InferenceBackend):
                 )
 
             self._processes[name] = proc
+            self._started_at[name] = time.monotonic()
             status.pid = proc.pid
 
             timeout = self._get_startup_timeout()
             if await self._wait_healthy(port, timeout, proc):
                 status.running = True
                 status.healthy = True
+                status.uptime_s = time.monotonic() - self._started_at[name]
                 self.logger.info(f"Slot '{name}' ready on port {port} (pid={proc.pid})")
             else:
-                status.error = "Process started but health check failed"
+                exit_code = proc.poll()
+                status.running = exit_code is None
+                if exit_code is None:
+                    status.error = "Process started but health check timed out"
+                    status.extra["failure_code"] = "health_timeout"
+                else:
+                    status.error = f"Process exited during startup (exit code {exit_code})"
+                    status.extra.update(failure_code="process_exited", exit_code=exit_code)
                 self.logger.error(f"Slot '{name}' failed health check")
 
         except Exception as e:
             status.error = str(e)
+            status.extra["failure_code"] = "start_failed"
+            if proc is not None:
+                exit_code = proc.poll()
+                status.running = exit_code is None
+                if exit_code is not None:
+                    status.extra["exit_code"] = exit_code
             self.logger.error(f"Failed to start slot '{name}': {e}")
 
         self._slots[name] = status
@@ -134,6 +156,7 @@ class SubprocessBackend(InferenceBackend):
 
         proc = self._processes.pop(name, None)
         self._slots.pop(name, None)
+        self._started_at.pop(name, None)
 
         if not proc:
             return False
@@ -169,10 +192,14 @@ class SubprocessBackend(InferenceBackend):
             return SlotStatus(name=name, error="Unknown slot")
 
         proc = self._processes.get(name)
-        if not proc or proc.poll() is not None:
+        exit_code = proc.poll() if proc else None
+        if not proc or exit_code is not None:
             status.running = False
             status.healthy = False
             status.error = "Process not running"
+            status.extra["failure_code"] = "process_exited"
+            if exit_code is not None:
+                status.extra["exit_code"] = exit_code
             return status
 
         try:
@@ -188,6 +215,17 @@ class SubprocessBackend(InferenceBackend):
                         status.healthy = False
         except Exception:
             status.healthy = False
+
+        if status.healthy:
+            status.error = None
+            status.extra.pop("failure_code", None)
+            status.extra.pop("exit_code", None)
+            started_at = self._started_at.get(name)
+            if started_at is not None:
+                status.uptime_s = time.monotonic() - started_at
+        else:
+            status.error = "Health check failed"
+            status.extra["failure_code"] = "health_probe_failed"
 
         return status
 
@@ -317,6 +355,12 @@ class SubprocessBackend(InferenceBackend):
             cmd.append("--jinja")
         elif config.get("jinja") is False:
             cmd.append("--no-jinja")
+
+        mmproj = str(config.get("mmproj_path") or "").strip()
+        if mmproj:
+            if use_wsl:
+                mmproj = self._convert_wsl_path(mmproj)
+            cmd.extend(["--mmproj", mmproj])
 
         # Extra args passthrough
         extra = config.get("extra_args", [])

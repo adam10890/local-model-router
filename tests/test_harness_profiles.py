@@ -27,18 +27,18 @@ def test_loads_single_and_agent_zero_connections(tmp_path):
             protocol: openai
             location: host
             connections:
-              default: {model: dmr/ornith}
+              default: {model: ornith}
           agent_zero:
             display_name: Agent Zero
             kind: agent_zero
             protocol: openai
             location: docker
             connections:
-              chat: {model: dmr/ornith}
+              chat: {model: ornith}
               utility: {model: utility_cpu}
     """))
 
-    assert profiles.resolve("hermes").model == "dmr/ornith"
+    assert profiles.resolve("hermes").model == "ornith"
     assert profiles.resolve("agent_zero", "utility").model == "utility_cpu"
     assert profiles.get("agent_zero").location == "docker"
 
@@ -94,17 +94,17 @@ def test_falls_back_to_legacy_apps_when_canonical_file_is_missing(tmp_path):
             display_name: Hermes
             default_model: chat
             roles:
-              chat: dmr/ornith
+              chat: ornith
           agent_zero:
             display_name: Agent Zero
             roles:
-              chat: dmr/ornith
+              chat: ornith
               utility: utility_cpu
     """)
     profiles = HarnessProfiles.load(tmp_path / "missing.yaml", legacy_path=legacy)
 
-    assert profiles.resolve("hermes").model == "dmr/ornith"
-    assert profiles.resolve("agent_zero", "chat").model == "dmr/ornith"
+    assert profiles.resolve("hermes").model == "ornith"
+    assert profiles.resolve("agent_zero", "chat").model == "ornith"
     assert profiles.source == "legacy_apps"
 
 
@@ -135,11 +135,21 @@ def test_committed_profiles_cover_current_harnesses_and_claude_adapter():
     path = Path(__file__).resolve().parents[1] / "conf" / "harnesses.yaml"
     profiles = HarnessProfiles.load(path)
     assert {item.harness_id for item in profiles.list_profiles()} == {
-        "agent_zero", "claude_code_local", "hermes", "pi",
+        "claude_code_local", "hermes", "pi",
     }
+    assert profiles.resolve("hermes").model.startswith("dmr/")
     claude = profiles.get("claude_code_local")
     manifest = setup_manifest(claude, auth_required=False)
     assert "LiteLLM" in manifest["setup"]["target"]
     setup = manifest["setup"]["content"]
     assert "litellm --config" in setup
     assert "ANTHROPIC_BASE_URL" in setup
+
+    hermes = setup_manifest(
+        profiles.get("hermes"),
+        auth_required=False,
+        capabilities_by_connection={"default": {"tools": True, "vision": True, "json_mode": True}},
+    )
+    assert "supports_vision: true" in hermes["setup"]["content"]
+    hermes_off = setup_manifest(profiles.get("hermes"), auth_required=False)
+    assert "supports_vision: false" in hermes_off["setup"]["content"]

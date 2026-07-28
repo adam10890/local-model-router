@@ -39,6 +39,15 @@ def build_parser() -> argparse.ArgumentParser:
     route.add_argument("--task-type", default="chat", help="task type for auto-routing")
     route.add_argument("--model", default=None, help="model alias to resolve (auto, fast, coder, ...)")
 
+    evaluate = sub.add_parser("evaluate-models", help="benchmark reachable local models and save ranking hints")
+    evaluate.add_argument(
+        "--base-url",
+        default=os.environ.get("A0_LMM_ROUTER_BASE_URL")
+        or f"http://127.0.0.1:{os.environ.get('OBSERVER_PORT', '9000')}",
+        help="running router base URL",
+    )
+    evaluate.add_argument("--force", action="store_true", help="ignore unchanged model fingerprints")
+
     setup = sub.add_parser("setup", help="open first-run setup or inspect managed runtime state")
     setup.add_argument("--status", action="store_true", help="print current setup state as JSON")
     setup.add_argument("--repair", action="store_true", help="print repair guidance for incomplete setup")
@@ -90,6 +99,9 @@ def cmd_mcp(_args: argparse.Namespace) -> int:
 
 def cmd_config_check(_args: argparse.Namespace) -> int:
     import yaml
+    from pathlib import Path
+
+    from local_model_router.upstreams.registry import load_upstreams
 
     config_path = _resolve_config()
     print(f"config: {config_path}")
@@ -114,7 +126,13 @@ def cmd_config_check(_args: argparse.Namespace) -> int:
         print(f"  - {slot_id}: role={slot.get('role', '?')} port={slot.get('port', '?')} router_mode={bool(slot.get('router_mode'))}")
     if not enabled:
         print("WARN: no enabled slots — the router will have nothing to route to")
-    return 0
+    upstream_errors = [
+        upstream for upstream in load_upstreams(Path(config_path).resolve().parent / "upstreams.yaml")
+        if upstream.config_error
+    ]
+    for upstream in upstream_errors:
+        print(f"FAIL: upstream {upstream.name}: {upstream.config_error}")
+    return 1 if upstream_errors else 0
 
 
 def cmd_list_models(_args: argparse.Namespace) -> int:
@@ -171,6 +189,23 @@ def cmd_test_route(args: argparse.Namespace) -> int:
     decision = asyncio.run(handler.handle(intent))
     print(json.dumps(decision.model_dump(), indent=2))
     return 0 if not decision.no_slot_available else 2
+
+
+def cmd_evaluate_models(args: argparse.Namespace) -> int:
+    from local_model_router.evaluation import evaluate_models, http_requester
+    from local_model_router.service.fleet_manager import FleetStore
+
+    try:
+        payload = evaluate_models(
+            http_requester(args.base_url, os.environ.get("A0_LMM_ROUTER_API_KEY", "")),
+            FleetStore(),
+            force=args.force,
+        )
+    except RuntimeError as exc:
+        print(json.dumps({"error": "evaluation_failed", "detail": str(exc)}, indent=2))
+        return 2
+    print(json.dumps(payload, indent=2))
+    return 0 if payload["models"] else 2
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -362,6 +397,7 @@ _COMMANDS = {
     "doctor": cmd_doctor,
     "list-models": cmd_list_models,
     "test-route": cmd_test_route,
+    "evaluate-models": cmd_evaluate_models,
     "config-check": cmd_config_check,
     "setup": cmd_setup,
     "update": cmd_update,

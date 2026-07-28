@@ -45,6 +45,25 @@ def test_dashboard_receives_ephemeral_setup_token(tmp_path, monkeypatch):
     assert client.get("/ui/icons/cube.svg").status_code == 200
 
 
+def test_dashboard_can_set_and_scan_models_directory(tmp_path, monkeypatch):
+    monkeypatch.delenv("A0_LMM_ROUTER_API_KEY", raising=False)
+    app = create_app(
+        str(tmp_path / "missing.yaml"),
+        setup_home=str(tmp_path / "home"),
+        upstreams_path=str(tmp_path / "upstreams.yaml"),
+        apps_path=str(tmp_path / "apps.yaml"),
+        harnesses_path=str(tmp_path / "harnesses.yaml"),
+    )
+    models = tmp_path / "models"
+    models.mkdir()
+    (models / "local.gguf").touch()
+
+    response = TestClient(app).post("/models/directory", json={"path": str(models)})
+
+    assert response.status_code == 200
+    assert response.json()["discovery"]["local_models"][0]["id"] == "local"
+
+
 def test_health_serializes_a_path_config_during_first_run(tmp_path, monkeypatch):
     monkeypatch.delenv("A0_LMM_ROUTER_API_KEY", raising=False)
     config = tmp_path / "missing.yaml"

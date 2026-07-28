@@ -175,6 +175,7 @@ def test_fleet_status_reports_queue_agents_and_slots(tmp_path, monkeypatch):
     assert body["service"] == "a0-fleet-manager"
     assert body["docker_socket_enabled"] is False
     assert body["queue"]["max_active"] == 1
+    assert body["queues"]["local"] == {"mode": "bounded", **body["queue"]}
     assert body["agents"]["count"] == 1
     assert body["vram"] == {
         "total_gb": 24.0,
@@ -313,6 +314,25 @@ def test_fleet_store_creates_sqlite_tables(tmp_path):
 
     assert {"agents", "requests", "queue_events", "model_residency_snapshots"}.issubset(tables)
     assert store.request_summary()["by_status"]["completed"] == 1
+
+
+def test_fleet_store_migrates_lane_fields_and_returns_latest_snapshot(tmp_path):
+    from local_model_router.service.fleet_manager import AgentIdentity, FleetStore
+
+    store = FleetStore(str(tmp_path / "fleet.sqlite3"))
+    request_id = store.create_request(AgentIdentity(agent_id="agent-1"))
+    store.update_request(
+        request_id,
+        status="completed",
+        upstream_name="dmr",
+        admission_lane="upstream:dmr",
+    )
+    store.record_model_snapshot("model_evaluation", {"schema_version": 1})
+
+    analytics = store.routing_analytics()
+    assert analytics["recent"][0]["admission_lane"] == "upstream:dmr"
+    assert analytics["by_upstream"] == {"dmr": 1}
+    assert store.latest_model_snapshot("model_evaluation")["payload"]["schema_version"] == 1
 
 
 def test_fleet_queue_prioritizes_waiters():

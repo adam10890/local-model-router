@@ -166,6 +166,8 @@ class FleetStore:
                     resolved_model TEXT,
                     routing_strategy TEXT,
                     selected_source TEXT,
+                    upstream_name TEXT,
+                    admission_lane TEXT,
                     status TEXT NOT NULL,
                     slot_id TEXT,
                     model TEXT,
@@ -188,6 +190,7 @@ class FleetStore:
                     event_type TEXT NOT NULL,
                     queue_depth INTEGER NOT NULL,
                     active_count INTEGER NOT NULL,
+                    admission_lane TEXT,
                     created_at TEXT NOT NULL
                 );
 
@@ -200,6 +203,7 @@ class FleetStore:
                 """
             )
             self._ensure_request_columns(conn)
+            self._ensure_queue_event_columns(conn)
 
     def _ensure_request_columns(self, conn: sqlite3.Connection) -> None:
         existing = {
@@ -212,6 +216,8 @@ class FleetStore:
             "resolved_model": "TEXT",
             "routing_strategy": "TEXT",
             "selected_source": "TEXT",
+            "upstream_name": "TEXT",
+            "admission_lane": "TEXT",
             "fallback_used": "INTEGER NOT NULL DEFAULT 0",
             "reason_codes_json": "TEXT NOT NULL DEFAULT '[]'",
             "cache_status": "TEXT",
@@ -221,6 +227,12 @@ class FleetStore:
         for name, ddl in columns.items():
             if name not in existing:
                 conn.execute(f"ALTER TABLE requests ADD COLUMN {name} {ddl}")
+
+    @staticmethod
+    def _ensure_queue_event_columns(conn: sqlite3.Connection) -> None:
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(queue_events)").fetchall()}
+        if "admission_lane" not in existing:
+            conn.execute("ALTER TABLE queue_events ADD COLUMN admission_lane TEXT")
 
     def upsert_agent(self, agent: AgentIdentity, metadata: Optional[Dict[str, Any]] = None) -> None:
         metadata_json = _json_dumps(metadata or {})
@@ -317,6 +329,8 @@ class FleetStore:
         resolved_model: Optional[str] = None,
         routing_strategy: Optional[str] = None,
         selected_source: Optional[str] = None,
+        upstream_name: Optional[str] = None,
+        admission_lane: Optional[str] = None,
         fallback_used: Optional[bool] = None,
         reason_codes: Optional[list[str]] = None,
         cache_status: Optional[str] = None,
@@ -335,6 +349,8 @@ class FleetStore:
                     resolved_model = COALESCE(?, resolved_model),
                     routing_strategy = COALESCE(?, routing_strategy),
                     selected_source = COALESCE(?, selected_source),
+                    upstream_name = COALESCE(?, upstream_name),
+                    admission_lane = COALESCE(?, admission_lane),
                     slot_id = COALESCE(?, slot_id),
                     model = COALESCE(?, model),
                     queued_ms = COALESCE(?, queued_ms),
@@ -355,6 +371,8 @@ class FleetStore:
                     resolved_model,
                     routing_strategy,
                     selected_source,
+                    upstream_name,
+                    admission_lane,
                     slot_id,
                     model,
                     queued_ms,
@@ -378,16 +396,21 @@ class FleetStore:
         event_type: str,
         queue_depth: int,
         active_count: int,
+        admission_lane: Optional[str] = None,
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO queue_events (
-                    request_id, agent_id, event_type, queue_depth, active_count, created_at
+                    request_id, agent_id, event_type, queue_depth, active_count,
+                    admission_lane, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (request_id, agent.agent_id, event_type, queue_depth, active_count, _now_iso()),
+                (
+                    request_id, agent.agent_id, event_type, queue_depth,
+                    active_count, admission_lane, _now_iso(),
+                ),
             )
 
     def record_model_snapshot(self, source: str, payload: Any) -> None:
@@ -400,6 +423,26 @@ class FleetStore:
                 (source, _json_dumps(payload), _now_iso()),
             )
 
+    def latest_model_snapshot(self, source: str) -> Optional[Dict[str, Any]]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT payload_json, created_at
+                FROM model_residency_snapshots
+                WHERE source = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (source,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except Exception:
+            payload = {}
+        return {"source": source, "created_at": row["created_at"], "payload": payload}
+
     def request_summary(self) -> Dict[str, Any]:
         with self._connect() as conn:
             total = conn.execute("SELECT COUNT(*) AS n FROM requests").fetchone()["n"]
@@ -408,7 +451,8 @@ class FleetStore:
             ).fetchall()
             recent_rows = conn.execute(
                 """
-                SELECT request_id, agent_id, priority, status, slot_id, model, error_code, updated_at
+                SELECT request_id, agent_id, priority, status, slot_id, model,
+                       upstream_name, admission_lane, error_code, updated_at
                 FROM requests
                 ORDER BY updated_at DESC
                 LIMIT 10
@@ -427,6 +471,7 @@ class FleetStore:
                 SELECT request_id, agent_id, agent_type, app_id, priority, status,
                        requested_model, resolved_model, routing_strategy,
                        selected_source, slot_id, model, duration_ms, queued_ms,
+                       upstream_name, admission_lane,
                        error_code, fallback_used, cache_status, prompt_tokens,
                        completion_tokens, reason_codes_json, updated_at
                 FROM requests
@@ -434,6 +479,14 @@ class FleetStore:
                 LIMIT ?
                 """,
                 (limit,),
+            ).fetchall()
+            by_upstream_rows = conn.execute(
+                """
+                SELECT COALESCE(upstream_name, 'local') AS upstream, COUNT(*) AS n
+                FROM requests
+                GROUP BY COALESCE(upstream_name, 'local')
+                ORDER BY n DESC, upstream ASC
+                """
             ).fetchall()
             by_status_rows = conn.execute(
                 "SELECT status, COUNT(*) AS n FROM requests GROUP BY status ORDER BY status"
@@ -483,6 +536,7 @@ class FleetStore:
             "by_status": {row["status"]: row["n"] for row in by_status_rows},
             "by_app": {row["app_id"]: row["n"] for row in by_app_rows},
             "by_model": {row["model"]: row["n"] for row in by_model_rows},
+            "by_upstream": {row["upstream"]: row["n"] for row in by_upstream_rows},
             "fallback_count": fallback_count,
             "no_slot_count": no_slot_count,
             "cache": {row["cache_status"]: row["n"] for row in cache_rows},

@@ -32,6 +32,7 @@ from local_model_router.apps.profiles import AppProfiles
 from local_model_router.harnesses import HarnessConfigError, HarnessProfiles, setup_manifest
 from local_model_router.routing.aliases import public_aliases, resolve_alias
 from local_model_router.routing.catalog import (
+    apply_evaluation_hints,
     build_slot_candidates,
     required_capabilities_from_chat_body,
     role_from_chat_body,
@@ -123,6 +124,7 @@ def _openai_error(
     error_type: str = "invalid_request_error",
     param: Optional[str] = None,
     extra: Optional[Dict[str, Any]] = None,
+    headers: Optional[Dict[str, str]] = None,
 ) -> JSONResponse:
     body: Dict[str, Any] = {
         "error": {
@@ -134,7 +136,68 @@ def _openai_error(
     }
     if extra:
         body.update(extra)
-    return JSONResponse(body, status_code=status_code)
+    return JSONResponse(body, status_code=status_code, headers=headers)
+
+
+def _upstream_error_text(body: Any) -> str:
+    if isinstance(body, dict):
+        err = body.get("error")
+        if isinstance(err, dict):
+            return str(err.get("message") or err.get("code") or "")[:500]
+        if isinstance(err, str):
+            return err[:500]
+        return str(body.get("message") or "")[:500]
+    return str(body or "")[:500]
+
+
+def _classify_upstream_failure(
+    status: int,
+    body: Any,
+    *,
+    pinned_harness: bool,
+) -> tuple[str, int, str]:
+    """Map upstream HTTP failures to stable router codes.
+
+    Connection/timeout paths stay outside this helper. Capability gaps
+    (missing mmproj / image input) must not look like an unloaded model.
+    """
+    message = _upstream_error_text(body) or "upstream request failed"
+    lowered = message.lower()
+    if any(
+        token in lowered
+        for token in ("mmproj", "image input is not supported", "vision projector")
+    ):
+        http_status = status if 400 <= status < 500 else 400
+        return "upstream_capability_missing", http_status, message
+    if pinned_harness:
+        return "upstream_error", status if status >= 400 else 502, message
+    return "upstream_error", status if status >= 400 else 502, message
+
+
+def _capabilities_for_pinned_model(
+    model: str,
+    slots: list,
+    upstream_list: list,
+) -> Dict[str, bool]:
+    matched = match_upstream_model(model, upstream_list)
+    if matched is not None:
+        upstream, bare = matched
+        caps = set(upstream.effective_capabilities(bare))
+        return {
+            "tools": "tools" in caps,
+            "vision": "vision" in caps,
+            "json_mode": "json_mode" in caps or upstream.serves_inference,
+        }
+    target = str(model or "").strip()
+    for candidate in build_slot_candidates(slots):
+        if target in {candidate.slot_id, candidate.model_id, candidate.id}:
+            public = candidate.public_dict().get("capabilities") or {}
+            return {
+                "tools": bool(public.get("tools")),
+                "vision": bool(public.get("vision")),
+                "json_mode": bool(public.get("json_mode", True)),
+            }
+    return {"tools": False, "vision": False, "json_mode": True}
 
 
 def _configured_api_key() -> str:
@@ -347,12 +410,27 @@ def _context_headers(context: Dict[str, Any], prompt_tokens: int, selected_model
     }
 
 
-async def _stream_upstream_response(resp: aiohttp.ClientResponse, session: aiohttp.ClientSession):
+async def _stream_upstream_response(
+    resp: aiohttp.ClientResponse,
+    session: aiohttp.ClientSession,
+    on_error: Optional[Callable[[str], Awaitable[None]]] = None,
+):
+    saw_done = False
     try:
         async for chunk in resp.content.iter_chunked(8192):
             if chunk:
+                if b"data: [DONE]" in chunk:
+                    saw_done = True
+                elif b'"finish_reason"' in chunk and b'"finish_reason":null' not in chunk.replace(b" ", b""):
+                    # Non-null finish_reason is a usable completion signal when
+                    # the upstream omits the terminal [DONE] marker.
+                    saw_done = True
                 yield chunk
+        if not saw_done and on_error is not None:
+            await on_error("upstream_stream_incomplete")
     except aiohttp.ClientError as exc:
+        if on_error is not None:
+            await on_error("upstream_stream_error")
         import json as _json
 
         payload = {
@@ -401,7 +479,6 @@ def create_app(
 
     conf_dir = Path(observer.config_path).resolve().parent
     upstreams = load_upstreams(upstreams_path or conf_dir / "upstreams.yaml")
-
     def _upstream_budget_status() -> Dict[str, str]:
         # ponytail: a broken provider_budget degrades to "no budget data" for
         # this request, not a routing outage — handle() also guards this call.
@@ -414,10 +491,17 @@ def create_app(
         except Exception:
             return {}
 
+    admission_queues = {"local": queue}
+    admission_queues.update({
+        f"upstream:{upstream.name}": FleetQueue(upstream.max_active, upstream.max_queue)
+        for upstream in upstreams
+        if upstream.max_active is not None and not upstream.config_error
+    })
     intent_handler = RoutingIntentHandler(
         observer,
         upstream_rows_fn=lambda: [upstream.describe() for upstream in upstreams],
         budget_status_fn=_upstream_budget_status,
+        evaluation_snapshot_fn=lambda: store.latest_model_snapshot("model_evaluation"),
     )
     app_profiles = AppProfiles.load(apps_path or conf_dir / "apps.yaml")
     external_agents_path = conf_dir / "agents.yaml"
@@ -545,11 +629,15 @@ def create_app(
         return JSONResponse(results)
 
     async def ui_status(request: Request) -> JSONResponse:
-        try:
-            setup_state_payload = await asyncio.to_thread(setup_engine.state)
-        except Exception as exc:
-            logger.warning("Setup state failed: %s", exc)
-            setup_state_payload = {
+        setup_result, slots_result, compute_result = await asyncio.gather(
+            asyncio.to_thread(setup_engine.state),
+            observer.get_slots_health(),
+            compute_status(),
+            return_exceptions=True,
+        )
+        if isinstance(setup_result, BaseException):
+            logger.warning("Setup state failed: %s", setup_result)
+            setup_state_payload: dict[str, Any] = {
                 "hardware": {},
                 "discovery": {
                     "runtime_installed": False,
@@ -558,12 +646,18 @@ def create_app(
                     "enabled_slots": len([slot for slot in observer.get_slots() if slot.get("enabled")]),
                 },
             }
-        try:
-            slot_rows = await observer.get_slots_health()
-        except Exception as exc:
-            logger.warning("Slot readiness failed: %s", exc)
+        else:
+            setup_state_payload = setup_result
+        if isinstance(slots_result, BaseException):
+            logger.warning("Slot readiness failed: %s", slots_result)
             slot_rows = observer.get_slots()
-        _vram, compute = await compute_status()
+        else:
+            slot_rows = slots_result
+        if isinstance(compute_result, BaseException):  # compute_status is defensive; keep a safe fallback.
+            logger.warning("Compute status failed: %s", compute_result)
+            compute = {"available": False, "gpus": [], "cpu": None, "ram": None}
+        else:
+            _vram, compute = compute_result
         payload = build_ui_status(
             setup_state=setup_state_payload,
             slots_health=slot_rows,
@@ -579,6 +673,18 @@ def create_app(
 
     async def setup_scan(request: Request) -> JSONResponse:
         return JSONResponse(await asyncio.to_thread(setup_engine.state, refresh_hardware=True))
+
+    async def models_directory(request: Request) -> JSONResponse:
+        try:
+            discovery = await asyncio.to_thread(
+                setup_engine.set_models_dir,
+                str((await _json_body(request)).get("path") or ""),
+            )
+            observer.reload()
+            _cookbook_cache.update({"key": None, "at": 0.0, "report": None})
+            return JSONResponse({"ok": True, "discovery": discovery})
+        except SetupError as exc:
+            return JSONResponse(exc.payload(), status_code=400)
 
     async def setup_plan(request: Request) -> JSONResponse:
         try:
@@ -631,6 +737,19 @@ def create_app(
         store.record_model_snapshot("observer_slots", snapshot)
         agents = store.list_agents()
         vram, compute = await compute_status()
+        managed_slots = await fleet_control.status() if control_enabled else {}
+        runtime_fields = (
+            "running",
+            "healthy",
+            "failure_code",
+            "exit_code",
+            "restart_count",
+            "uptime_s",
+        )
+        for slot in slots:
+            managed = managed_slots.get(str(slot.get("id") or ""))
+            if managed:
+                slot["runtime"] = {field: managed.get(field) for field in runtime_fields}
         return JSONResponse(
             {
                 "ok": True,
@@ -638,6 +757,23 @@ def create_app(
                 "version": _VERSION,
                 "config": fleet_config_from_env(),
                 "queue": queue.snapshot(),
+                "queues": {
+                    "local": {"mode": "bounded", **queue.snapshot()},
+                    **{
+                        f"upstream:{upstream.name}": (
+                            {"mode": "bounded", **admission_queues[f"upstream:{upstream.name}"].snapshot()}
+                            if f"upstream:{upstream.name}" in admission_queues
+                            else {
+                                "mode": "delegated",
+                                "active": None,
+                                "queued": None,
+                                "max_active": None,
+                                "max_queue": None,
+                            }
+                        )
+                        for upstream in upstreams
+                    },
+                },
                 "agents": {
                     "count": len(agents),
                     "items": agents,
@@ -707,8 +843,10 @@ def create_app(
             fleet_conf = {}
 
         models_dir = (
-            os.environ.get("LLAMA_MODELS_DIR", "").strip()
+            str(setup_engine._read_json(setup_engine.settings_path).get("models_dir") or "").strip()
+            or os.environ.get("LLAMA_MODELS_DIR", "").strip()
             or str((fleet_conf.get("global") or {}).get("models_dir", "") or "").strip()
+            or str(setup_engine.models_dir)
         )
         if not models_dir or not os.path.isdir(models_dir):
             return JSONResponse(
@@ -798,10 +936,11 @@ def create_app(
                 if namespaced in existing_ids:
                     continue
                 existing_ids.add(namespaced)
+                caps = set(upstream.effective_capabilities(bare_id))
                 capabilities = {
-                    "tools": "tools" in upstream.capabilities,
-                    "vision": "vision" in upstream.capabilities,
-                    "json_mode": "json_mode" in upstream.capabilities or upstream.serves_inference,
+                    "tools": "tools" in caps,
+                    "vision": "vision" in caps,
+                    "json_mode": "json_mode" in caps or upstream.serves_inference,
                 }
                 listing["data"].append({
                     "id": namespaced,
@@ -842,10 +981,17 @@ def create_app(
             for connection_name in profile.connections
             if f"{profile.harness_id}/{connection_name}" in harness_activity
         }
+        caps_by_connection = {
+            connection.name: _capabilities_for_pinned_model(
+                connection.model, observer.get_slots(), upstreams
+            )
+            for connection in profile.connections.values()
+        }
         return setup_manifest(
             profile,
             auth_required=bool(api_key),
             verification_by_connection=activity,
+            capabilities_by_connection=caps_by_connection,
         )
 
     def resolve_harness_request(request: Request) -> tuple[Any, Any] | JSONResponse:
@@ -921,7 +1067,10 @@ def create_app(
         if isinstance(resolved, JSONResponse):
             return resolved
         profile, connection = resolved
-        mark_harness_activity(profile, connection, "verified")
+        mark_harness_activity(profile, connection, "connected")
+        capabilities = _capabilities_for_pinned_model(
+            connection.model, observer.get_slots(), upstreams
+        )
         return JSONResponse({
             "object": "list",
             "data": [{
@@ -929,10 +1078,12 @@ def create_app(
                 "object": "model",
                 "created": 0,
                 "owned_by": profile.harness_id,
+                "capabilities": capabilities,
                 "meta": {
                     "harness_id": profile.harness_id,
                     "connection": connection.name,
                     "pinned_model": connection.model,
+                    "capabilities": capabilities,
                 },
             }],
         })
@@ -948,11 +1099,16 @@ def create_app(
             "model": connection.model,
         }
         mark_harness_activity(profile, connection, "seen")
-        return await chat_completions(request)
+        response = await chat_completions(request)
+        if getattr(response, "status_code", 500) < 400:
+            mark_harness_activity(profile, connection, "verified")
+        return response
 
     def routing_catalog_models() -> list[Dict[str, Any]]:
         slots_with_health: list[Dict[str, Any]] = []
-        for slot in observer.get_slots():
+        for slot in apply_evaluation_hints(
+            observer.get_slots(), store.latest_model_snapshot("model_evaluation")
+        ):
             row = dict(slot)
             # /routing/models is read-only and fast; avoid live probes here.
             row.setdefault("health", row.get("health") or "unknown")
@@ -1004,6 +1160,14 @@ def create_app(
 
     async def routing_models(request: Request) -> JSONResponse:
         return JSONResponse({"models": routing_catalog_models()})
+
+    async def routing_evaluations(request: Request) -> JSONResponse:
+        snapshot = store.latest_model_snapshot("model_evaluation")
+        return JSONResponse(snapshot or {
+            "source": "model_evaluation",
+            "created_at": None,
+            "payload": {"schema_version": 1, "models": []},
+        })
 
     async def routing_model_card(request: Request) -> JSONResponse:
         requested = str(request.path_params.get("model_id") or "").strip()
@@ -1106,6 +1270,47 @@ def create_app(
         except OrchestratorError as exc:
             return _orchestrator_error(exc)
 
+    async def orchestrator_ticket_claim(request: Request) -> JSONResponse:
+        ticket_id = str(request.path_params.get("ticket_id") or "")
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid_json", "detail": "request body is not valid JSON"}, status_code=400)
+        try:
+            return JSONResponse(agent_orchestrator.claim_ticket(ticket_id, body))
+        except OrchestratorError as exc:
+            return _orchestrator_error(exc)
+
+    async def orchestrator_ticket_log(request: Request) -> JSONResponse:
+        ticket_id = str(request.path_params.get("ticket_id") or "")
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid_json", "detail": "request body is not valid JSON"}, status_code=400)
+        try:
+            return JSONResponse(agent_orchestrator.append_ticket_log(ticket_id, body))
+        except OrchestratorError as exc:
+            return _orchestrator_error(exc)
+
+    async def _orchestrator_ticket_finish(request: Request, status: str) -> JSONResponse:
+        ticket_id = str(request.path_params.get("ticket_id") or "")
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid_json", "detail": "request body is not valid JSON"}, status_code=400)
+        try:
+            return JSONResponse(
+                agent_orchestrator.finish_claimed_ticket(ticket_id, body, status=status)
+            )
+        except OrchestratorError as exc:
+            return _orchestrator_error(exc)
+
+    async def orchestrator_ticket_complete(request: Request) -> JSONResponse:
+        return await _orchestrator_ticket_finish(request, "completed")
+
+    async def orchestrator_ticket_block(request: Request) -> JSONResponse:
+        return await _orchestrator_ticket_finish(request, "blocked")
+
     async def orchestrator_ticket_submit(request: Request) -> JSONResponse:
         ticket_id = str(request.path_params.get("ticket_id") or "")
         try:
@@ -1124,11 +1329,14 @@ def create_app(
         *,
         pinned_harness: Optional[Dict[str, str]] = None,
         strategy_label: str = "explicit_upstream",
+        response_headers: Optional[Dict[str, str]] = None,
+        finalize: Optional[Callable[..., Awaitable[None]]] = None,
     ) -> Response:
         wants_stream = body.get("stream") is True
         payload = _forward_payload(body, bare_model, stream=wants_stream)
         url = upstream.base_url + "/chat/completions"
         out_headers = {
+            **(response_headers or {}),
             "x-a0-router-upstream": upstream.name,
             "x-a0-router-model": bare_model,
             "x-a0-router-requested-model": str(body.get("model") or ""),
@@ -1153,15 +1361,52 @@ def create_app(
                         upstream_json = await resp.text()
                     resp.release()
                     await session.close()
-                    return _openai_error(
-                        f"upstream {upstream.name} stream request failed",
-                        "harness_model_unavailable" if pinned_harness else "upstream_error",
-                        503 if pinned_harness else resp.status,
-                        error_type="server_error",
-                        extra={"upstream": upstream_json, **(pinned_harness or {})},
+                    code, http_status, message = _classify_upstream_failure(
+                        resp.status, upstream_json, pinned_harness=bool(pinned_harness)
                     )
+                    if finalize is not None:
+                        await finalize("failed", error_code=code)
+                    return _openai_error(
+                        message if code == "upstream_capability_missing" else (
+                            f"upstream {upstream.name} stream request failed"
+                        ),
+                        code,
+                        http_status,
+                        error_type="server_error",
+                        extra={
+                            "upstream_status": resp.status,
+                            "upstream_message": _upstream_error_text(upstream_json),
+                            "upstream": upstream_json,
+                            **(pinned_harness or {}),
+                        },
+                        headers=out_headers,
+                    )
+
+                async def managed_upstream_stream():
+                    stream_state = {"failed": False}
+
+                    async def stream_failed(code: str) -> None:
+                        stream_state["failed"] = True
+                        if finalize is not None:
+                            await finalize("failed", error_code=code)
+
+                    try:
+                        async for chunk in _stream_upstream_response(resp, session, stream_failed):
+                            yield chunk
+                    except asyncio.CancelledError:
+                        if finalize is not None:
+                            await finalize("failed", error_code="client_disconnected")
+                        raise
+                    except Exception:
+                        if finalize is not None:
+                            await finalize("failed", error_code="upstream_stream_error")
+                        raise
+                    else:
+                        if finalize is not None and not stream_state["failed"]:
+                            await finalize("completed")
+
                 return StreamingResponse(
-                    _stream_upstream_response(resp, session),
+                    managed_upstream_stream(),
                     status_code=resp.status,
                     media_type="text/event-stream",
                     headers={**out_headers, "cache-control": "no-cache", "x-accel-buffering": "no"},
@@ -1178,39 +1423,89 @@ def create_app(
                         upstream_json = await resp.json(content_type=None)
                     except Exception:
                         upstream_text = await resp.text()
+                        if finalize is not None:
+                            await finalize("failed", error_code="upstream_invalid_json")
                         return _openai_error(
                             f"upstream {upstream.name} response was not valid JSON",
                             "upstream_invalid_json",
                             502,
                             error_type="server_error",
                             extra={"upstream_status": resp.status, "upstream_body": upstream_text[:1000]},
+                            headers=out_headers,
                         )
                     if pinned_harness and resp.status >= 400:
+                        code, http_status, message = _classify_upstream_failure(
+                            resp.status, upstream_json, pinned_harness=True
+                        )
+                        if finalize is not None:
+                            await finalize("failed", error_code=code)
                         return _openai_error(
-                            f"pinned model '{pinned_harness['pinned_model']}' is unavailable",
-                            "harness_model_unavailable",
-                            503,
+                            message if code == "upstream_capability_missing" else (
+                                f"pinned model '{pinned_harness['pinned_model']}' request failed"
+                            ),
+                            code,
+                            http_status if code != "harness_model_unavailable" else 503,
                             error_type="server_error",
-                            extra={"upstream_status": resp.status, **pinned_harness},
+                            extra={
+                                "upstream_status": resp.status,
+                                "upstream_message": _upstream_error_text(upstream_json),
+                                **pinned_harness,
+                            },
+                            headers=out_headers,
+                        )
+                    if finalize is not None:
+                        await finalize(
+                            "completed" if resp.status < 400 else "failed",
+                            error_code=None if resp.status < 400 else "upstream_error",
+                            usage=_dict_or_empty(upstream_json.get("usage"))
+                            if isinstance(upstream_json, dict)
+                            else {},
                         )
                     if resp.status < 400:
                         _record_upstream_usage(upstream.name, _dict_or_empty(upstream_json).get("usage"), bare_model)
                     return JSONResponse(upstream_json, status_code=resp.status, headers=out_headers)
+        except asyncio.CancelledError:
+            if finalize is not None:
+                await finalize("failed", error_code="client_disconnected")
+            raise
         except aiohttp.ClientError as exc:
+            if finalize is not None:
+                await finalize(
+                    "failed",
+                    error_code="harness_model_unavailable" if pinned_harness else "upstream_unreachable",
+                )
             return _openai_error(
                 f"could not reach upstream {upstream.name}: {exc}",
                 "harness_model_unavailable" if pinned_harness else "upstream_unreachable",
                 503 if pinned_harness else 502,
                 error_type="server_error",
                 extra=pinned_harness,
+                headers=out_headers,
             )
         except TimeoutError:
+            if finalize is not None:
+                await finalize(
+                    "failed",
+                    error_code="harness_model_unavailable" if pinned_harness else "upstream_timeout",
+                )
             return _openai_error(
                 f"upstream {upstream.name} timed out",
                 "harness_model_unavailable" if pinned_harness else "upstream_timeout",
                 503 if pinned_harness else 504,
                 error_type="server_error",
                 extra=pinned_harness,
+                headers=out_headers,
+            )
+        except Exception:
+            if finalize is not None:
+                await finalize("failed", error_code="upstream_error")
+            return _openai_error(
+                f"upstream {upstream.name} request failed",
+                "harness_model_unavailable" if pinned_harness else "upstream_error",
+                503 if pinned_harness else 502,
+                error_type="server_error",
+                extra=pinned_harness,
+                headers=out_headers,
             )
 
     async def dashboard_page(request: Request) -> HTMLResponse:
@@ -1428,78 +1723,20 @@ def create_app(
                 extra={"detail": str(exc)},
             )
 
-        upstream_match = match_upstream_model(effective_model, upstreams)
-        if upstream_match is not None:
-            pinned_harness = None
-            if dedicated:
-                pinned_harness = {
-                    "harness_id": dedicated["harness_id"],
-                    "connection": dedicated["connection"],
-                    "pinned_model": effective_model,
-                }
-            return await forward_to_upstream(
-                upstream_match[0], upstream_match[1], body, pinned_harness=pinned_harness
-            )
-
-        if dedicated and not pinned_slot_id:
-            return _openai_error(
-                f"pinned model '{effective_model}' is not configured in the local fleet",
-                "harness_model_unavailable",
-                503,
-                error_type="server_error",
-                extra={
-                    "harness_id": dedicated["harness_id"],
-                    "connection": dedicated["connection"],
-                    "pinned_model": effective_model,
-                },
-            )
-
         request_id = store.create_request(agent)
         started = time.monotonic()
-        try:
-            admission = await queue.acquire(agent.priority)
-        except QueueFull as exc:
-            store.update_request(
-                request_id,
-                status="rejected",
-                error_code="queue_full",
-                app_id=app_id,
-                requested_model=requested_model,
-                routing_strategy=intent.routing_strategy,
-                cache_status="BYPASS",
-            )
-            store.record_queue_event(
-                request_id=request_id,
-                agent=agent,
-                event_type="queue_full",
-                queue_depth=exc.queue_depth,
-                active_count=queue.snapshot()["active"],
-            )
-            return _openai_error(
-                "local fleet queue is full",
-                "queue_full",
-                429,
-                error_type="server_error",
-                extra={
-                    "queue": {
-                        "queue_depth": exc.queue_depth,
-                        "max_queue": exc.max_queue,
-                    }
-                },
-            )
-
-        store.update_request(request_id, status="admitted", queued_ms=admission.queued_ms)
-        store.record_queue_event(
-            request_id=request_id,
-            agent=agent,
-            event_type="admitted",
-            queue_depth=admission.queue_depth_at_admit,
-            active_count=admission.active_at_admit,
-        )
+        admission = None
+        acquired_queue: Optional[FleetQueue] = None
+        admission_lane = "unresolved"
+        upstream_name: Optional[str] = None
+        finished = False
+        route_reason_codes: list[str] = []
 
         def fleet_headers(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-            current = queue.snapshot()
+            current = acquired_queue.snapshot() if acquired_queue is not None else {"queued": 0}
             headers = {
+                "x-a0-request-id": request_id,
+                "x-a0-admission-lane": admission_lane,
                 "x-a0-agent-id": agent.agent_id,
                 "x-a0-agent-type": agent.agent_type,
                 "x-a0-fleet-request-id": request_id,
@@ -1520,28 +1757,152 @@ def create_app(
             cache_status: Optional[str] = None,
             usage: Optional[Dict[str, Any]] = None,
         ) -> None:
+            nonlocal finished
+            if finished:
+                return
+            finished = True
             duration_ms = int((time.monotonic() - started) * 1000)
             usage = usage or {}
+            try:
+                store.update_request(
+                    request_id,
+                    status=status,
+                    slot_id=slot_id,
+                    model=model,
+                    queued_ms=admission.queued_ms if admission is not None else 0,
+                    duration_ms=duration_ms,
+                    error_code=error_code,
+                    app_id=app_id,
+                    requested_model=requested_model,
+                    resolved_model=model or getattr(decision, "selected_model", None),
+                    routing_strategy=getattr(decision, "routing_strategy", intent.routing_strategy),
+                    selected_source=getattr(decision, "selected_source", None)
+                    or ("upstream" if upstream_name else "local"),
+                    upstream_name=upstream_name,
+                    admission_lane=admission_lane,
+                    fallback_used=getattr(decision, "fallback_used", False),
+                    reason_codes=getattr(decision, "reason_codes", None) or route_reason_codes,
+                    cache_status=cache_status,
+                    prompt_tokens=usage.get("prompt_tokens"),
+                    completion_tokens=usage.get("completion_tokens"),
+                )
+            finally:
+                if acquired_queue is not None:
+                    await acquired_queue.release()
+
+        async def admit(lane: str) -> Optional[Response]:
+            nonlocal admission_lane, admission, acquired_queue
+            admission_lane = lane
+            target_queue = admission_queues.get(lane)
+            if target_queue is None:
+                store.update_request(
+                    request_id,
+                    status="admitted",
+                    queued_ms=0,
+                    app_id=app_id,
+                    requested_model=requested_model,
+                    routing_strategy=intent.routing_strategy,
+                    upstream_name=upstream_name,
+                    admission_lane=lane,
+                )
+                store.record_queue_event(
+                    request_id=request_id,
+                    agent=agent,
+                    event_type="admitted",
+                    queue_depth=0,
+                    active_count=0,
+                    admission_lane=lane,
+                )
+                return None
+            try:
+                admission = await target_queue.acquire(agent.priority)
+                acquired_queue = target_queue
+            except QueueFull as exc:
+                await finish("rejected", error_code="queue_full", cache_status="BYPASS")
+                store.record_queue_event(
+                    request_id=request_id,
+                    agent=agent,
+                    event_type="queue_full",
+                    queue_depth=exc.queue_depth,
+                    active_count=target_queue.snapshot()["active"],
+                    admission_lane=lane,
+                )
+                return _openai_error(
+                    f"admission lane '{lane}' is full",
+                    "queue_full",
+                    429,
+                    error_type="server_error",
+                    extra={
+                        "queue": {
+                            "admission_lane": lane,
+                            "queue_depth": exc.queue_depth,
+                            "max_queue": exc.max_queue,
+                            "max_active": target_queue.max_active,
+                        }
+                    },
+                    headers=fleet_headers(),
+                )
             store.update_request(
                 request_id,
-                status=status,
-                slot_id=slot_id,
-                model=model,
+                status="admitted",
                 queued_ms=admission.queued_ms,
-                duration_ms=duration_ms,
-                error_code=error_code,
                 app_id=app_id,
                 requested_model=requested_model,
-                resolved_model=model or getattr(decision, "selected_model", None),
-                routing_strategy=getattr(decision, "routing_strategy", intent.routing_strategy),
-                selected_source=getattr(decision, "selected_source", None),
-                fallback_used=getattr(decision, "fallback_used", False),
-                reason_codes=getattr(decision, "reason_codes", None),
-                cache_status=cache_status,
-                prompt_tokens=usage.get("prompt_tokens"),
-                completion_tokens=usage.get("completion_tokens"),
+                routing_strategy=intent.routing_strategy,
+                upstream_name=upstream_name,
+                admission_lane=lane,
             )
-            await queue.release()
+            store.record_queue_event(
+                request_id=request_id,
+                agent=agent,
+                event_type="admitted",
+                queue_depth=admission.queue_depth_at_admit,
+                active_count=admission.active_at_admit,
+                admission_lane=lane,
+            )
+            return None
+
+        upstream_match = match_upstream_model(effective_model, upstreams)
+        if upstream_match is not None:
+            upstream_name = upstream_match[0].name
+            route_reason_codes.append("pinned_harness" if dedicated else "explicit_upstream")
+            pinned_harness = None
+            if dedicated:
+                pinned_harness = {
+                    "harness_id": dedicated["harness_id"],
+                    "connection": dedicated["connection"],
+                    "pinned_model": effective_model,
+                }
+            admission_error = await admit(f"upstream:{upstream_name}")
+            if admission_error is not None:
+                return admission_error
+            return await forward_to_upstream(
+                upstream_match[0],
+                upstream_match[1],
+                body,
+                pinned_harness=pinned_harness,
+                response_headers=fleet_headers(),
+                finalize=lambda status, **kwargs: finish(
+                    status, model=upstream_match[1], **kwargs
+                ),
+            )
+
+        if dedicated and not pinned_slot_id:
+            admission_lane = "local"
+            route_reason_codes.append("pinned_harness")
+            await finish("failed", error_code="harness_model_unavailable", model=effective_model)
+            return _openai_error(
+                f"pinned model '{effective_model}' is not configured in the local fleet",
+                "harness_model_unavailable",
+                503,
+                error_type="server_error",
+                extra={
+                    "harness_id": dedicated["harness_id"],
+                    "connection": dedicated["connection"],
+                    "pinned_model": effective_model,
+                },
+                headers=fleet_headers(),
+            )
 
         try:
             decision = await intent_handler.handle(intent)
@@ -1552,9 +1913,11 @@ def create_app(
                 "routing_error",
                 500,
                 error_type="server_error",
+                headers=fleet_headers(),
             )
         decision_body = decision.model_dump()
         if decision.no_slot_available or not decision.selected_url:
+            admission_lane = "local"
             await finish("failed", error_code="no_slot_available", decision=decision, cache_status="BYPASS")
             return _openai_error(
                 (
@@ -1577,9 +1940,11 @@ def create_app(
                         else {}
                     ),
                 },
+                headers=fleet_headers(),
             )
 
         if pinned_slot_id and decision.selected_slot_id != pinned_slot_id:
+            admission_lane = "local"
             await finish(
                 "failed",
                 error_code="harness_model_unavailable",
@@ -1596,12 +1961,11 @@ def create_app(
                     "connection": dedicated["connection"],
                     "pinned_model": effective_model,
                 },
+                headers=fleet_headers(),
             )
 
         if decision.selected_upstream:
-            # Auto-routing fell back to a declared upstream model. Upstream
-            # requests do not hold the fleet queue (it guards local VRAM), so
-            # release the admission before forwarding.
+            upstream_name = decision.selected_upstream
             upstream_cfg = next(
                 (
                     upstream
@@ -1611,6 +1975,7 @@ def create_app(
                 None,
             )
             if upstream_cfg is None or not decision.selected_model:
+                admission_lane = f"upstream:{decision.selected_upstream}"
                 await finish(
                     "failed",
                     error_code="upstream_not_configured",
@@ -1623,20 +1988,29 @@ def create_app(
                     503,
                     error_type="server_error",
                     extra={"routing": decision_body},
+                    headers=fleet_headers(),
                 )
-            await finish(
-                "forwarded_upstream",
-                model=decision.selected_model,
-                decision=decision,
-                cache_status="BYPASS",
-            )
+            admission_error = await admit(f"upstream:{upstream_name}")
+            if admission_error is not None:
+                return admission_error
             return await forward_to_upstream(
                 upstream_cfg,
                 decision.selected_model,
                 body,
                 strategy_label="auto_upstream_fallback",
+                response_headers=fleet_headers(),
+                finalize=lambda status, **kwargs: finish(
+                    status,
+                    model=decision.selected_model,
+                    decision=decision,
+                    cache_status="BYPASS",
+                    **kwargs,
+                ),
             )
 
+        admission_error = await admit("local")
+        if admission_error is not None:
+            return admission_error
         url = decision.selected_url.rstrip("/") + "/chat/completions"
         wants_stream = body.get("stream") is True
         forward_model = _forward_model_for(body, intent.task_type, decision.selected_model)
@@ -1714,42 +2088,85 @@ def create_app(
                         upstream_json = await resp.text()
                     resp.release()
                     await session.close()
+                    code, http_status, message = _classify_upstream_failure(
+                        resp.status, upstream_json, pinned_harness=bool(dedicated)
+                    )
                     await finish(
                         "failed",
-                        error_code="upstream_error",
+                        error_code=code,
                         slot_id=decision.selected_slot_id,
                         model=decision.selected_model,
                         decision=decision,
                         cache_status="BYPASS",
                     )
-
-                    message = "upstream llama.cpp stream request failed"
-                    if isinstance(upstream_json, dict):
-                        upstream_error = upstream_json.get("error")
-                        if isinstance(upstream_error, dict) and upstream_error.get("message"):
-                            message = str(upstream_error["message"])
-                        elif isinstance(upstream_error, str):
-                            message = upstream_error
+                    if code != "upstream_capability_missing":
+                        message = "upstream llama.cpp stream request failed"
+                        if isinstance(upstream_json, dict):
+                            upstream_error = upstream_json.get("error")
+                            if isinstance(upstream_error, dict) and upstream_error.get("message"):
+                                message = str(upstream_error["message"])
+                            elif isinstance(upstream_error, str):
+                                message = upstream_error
                     return _openai_error(
                         message,
-                        "upstream_error",
-                        resp.status,
+                        code,
+                        http_status,
                         error_type="server_error",
-                        extra={"upstream": upstream_json, "routing": decision_body},
+                        extra={
+                            "upstream_status": resp.status,
+                            "upstream_message": _upstream_error_text(upstream_json),
+                            "upstream": upstream_json,
+                            "routing": decision_body,
+                        },
+                        headers=fleet_headers(),
                     )
 
                 async def managed_stream():
-                    try:
-                        async for chunk in _stream_upstream_response(resp, session):
-                            yield chunk
-                    finally:
+                    stream_state = {"failed": False}
+
+                    async def stream_failed(code: str) -> None:
+                        stream_state["failed"] = True
                         await finish(
-                            "completed",
+                            "failed",
+                            error_code=code,
                             slot_id=decision.selected_slot_id,
                             model=decision.selected_model,
                             decision=decision,
                             cache_status="BYPASS",
                         )
+
+                    try:
+                        async for chunk in _stream_upstream_response(resp, session, stream_failed):
+                            yield chunk
+                    except asyncio.CancelledError:
+                        await finish(
+                            "failed",
+                            error_code="client_disconnected",
+                            slot_id=decision.selected_slot_id,
+                            model=decision.selected_model,
+                            decision=decision,
+                            cache_status="BYPASS",
+                        )
+                        raise
+                    except Exception:
+                        await finish(
+                            "failed",
+                            error_code="upstream_stream_error",
+                            slot_id=decision.selected_slot_id,
+                            model=decision.selected_model,
+                            decision=decision,
+                            cache_status="BYPASS",
+                        )
+                        raise
+                    else:
+                        if not stream_state["failed"]:
+                            await finish(
+                                "completed",
+                                slot_id=decision.selected_slot_id,
+                                model=decision.selected_model,
+                                decision=decision,
+                                cache_status="BYPASS",
+                            )
 
                 return StreamingResponse(
                     managed_stream(),
@@ -1783,33 +2200,46 @@ def create_app(
                             502,
                             error_type="server_error",
                             extra={"upstream_status": resp.status, "upstream_body": upstream_text[:1000]},
+                            headers=fleet_headers(),
                         )
 
                     headers = router_response_headers(cache_status)
 
                     if resp.status >= 400:
-                        message = "upstream llama.cpp request failed"
-                        if isinstance(upstream_json, dict):
-                            upstream_error = upstream_json.get("error")
-                            if isinstance(upstream_error, dict) and upstream_error.get("message"):
-                                message = str(upstream_error["message"])
-                            elif isinstance(upstream_error, str):
-                                message = upstream_error
+                        code, http_status, message = _classify_upstream_failure(
+                            resp.status, upstream_json, pinned_harness=bool(dedicated)
+                        )
+                        if code != "upstream_capability_missing":
+                            message = "upstream llama.cpp request failed"
+                            if isinstance(upstream_json, dict):
+                                upstream_error = upstream_json.get("error")
+                                if isinstance(upstream_error, dict) and upstream_error.get("message"):
+                                    message = str(upstream_error["message"])
+                                elif isinstance(upstream_error, str):
+                                    message = upstream_error
                         await finish(
                             "failed",
-                            error_code="upstream_error",
+                            error_code=code,
                             slot_id=decision.selected_slot_id,
                             model=decision.selected_model,
                             decision=decision,
                             cache_status=cache_status,
-                            usage=_dict_or_empty(upstream_json.get("usage")),
+                            usage=_dict_or_empty(upstream_json.get("usage"))
+                            if isinstance(upstream_json, dict)
+                            else {},
                         )
                         return _openai_error(
                             message,
-                            "upstream_error",
-                            resp.status,
+                            code,
+                            http_status,
                             error_type="server_error",
-                            extra={"upstream": upstream_json, "routing": decision_body},
+                            extra={
+                                "upstream_status": resp.status,
+                                "upstream_message": _upstream_error_text(upstream_json),
+                                "upstream": upstream_json,
+                                "routing": decision_body,
+                            },
+                            headers=fleet_headers(),
                         )
 
                     await finish(
@@ -1823,6 +2253,16 @@ def create_app(
                     if cache_status == "MISS" and cache_lookup_key is not None and prompt_cache is not None:
                         prompt_cache.set(cache_lookup_key, upstream_json)
                     return JSONResponse(upstream_json, status_code=resp.status, headers=headers)
+        except asyncio.CancelledError:
+            await finish(
+                "failed",
+                error_code="client_disconnected",
+                slot_id=decision.selected_slot_id,
+                model=decision.selected_model,
+                decision=decision,
+                cache_status=cache_status,
+            )
+            raise
         except aiohttp.ClientError as exc:
             await finish(
                 "failed",
@@ -1838,6 +2278,7 @@ def create_app(
                 502,
                 error_type="server_error",
                 extra={"routing": decision_body},
+                headers=fleet_headers(),
             )
         except TimeoutError:
             await finish(
@@ -1854,6 +2295,24 @@ def create_app(
                 504,
                 error_type="server_error",
                 extra={"routing": decision_body},
+                headers=fleet_headers(),
+            )
+        except Exception:
+            await finish(
+                "failed",
+                error_code="upstream_error",
+                slot_id=decision.selected_slot_id,
+                model=decision.selected_model,
+                decision=decision,
+                cache_status=cache_status,
+            )
+            return _openai_error(
+                "selected llama.cpp slot request failed",
+                "upstream_error",
+                502,
+                error_type="server_error",
+                extra={"routing": decision_body},
+                headers=fleet_headers(),
             )
 
     routes = [
@@ -1863,6 +2322,7 @@ def create_app(
         Route("/routing/preview", protected(routing_preview)),
         Route("/health/slots", protected(health_slots)),
         Route("/ui/status", protected(ui_status)),
+        Route("/models/directory", protected(models_directory), methods=["POST"]),
         Route("/setup/state", setup_protected(setup_state)),
         Route("/setup/scan", setup_protected(setup_scan), methods=["POST"]),
         Route("/setup/plan", setup_protected(setup_plan), methods=["POST"]),
@@ -1879,6 +2339,7 @@ def create_app(
         Route("/fleet/slots/{slot_id}/stop", protected(control_gated(fleet_slot_stop)), methods=["POST"]),
         Route("/routing/request", protected(routing_request), methods=["POST"]),
         Route("/routing/models", protected(routing_models)),
+        Route("/routing/evaluations", protected(routing_evaluations)),
         Route("/routing/models/{model_id:path}", protected(routing_model_card)),
         Route("/routing/analytics", protected(routing_analytics)),
         Route("/orchestrator/plans", protected(deprecated(orchestrator_create_plan)), methods=["POST"]),
@@ -1887,6 +2348,10 @@ def create_app(
         Route("/orchestrator/instances", protected(deprecated(orchestrator_list_instances))),
         Route("/orchestrator/instances/{instance_id}", protected(deprecated(orchestrator_instance_upsert)), methods=["POST"]),
         Route("/orchestrator/plans/{plan_id}", protected(deprecated(orchestrator_plan_detail))),
+        Route("/orchestrator/tickets/{ticket_id}/claim", protected(deprecated(orchestrator_ticket_claim)), methods=["POST"]),
+        Route("/orchestrator/tickets/{ticket_id}/log", protected(deprecated(orchestrator_ticket_log)), methods=["POST"]),
+        Route("/orchestrator/tickets/{ticket_id}/complete", protected(deprecated(orchestrator_ticket_complete)), methods=["POST"]),
+        Route("/orchestrator/tickets/{ticket_id}/block", protected(deprecated(orchestrator_ticket_block)), methods=["POST"]),
         Route("/orchestrator/tickets/{ticket_id}/submit", protected(deprecated(orchestrator_ticket_submit)), methods=["POST"]),
         Route("/orchestrator/tickets/{ticket_id}", protected(deprecated(orchestrator_ticket_detail))),
         Route("/backends", protected(backends)),

@@ -15,8 +15,8 @@ def test_harness_smoke_checks_models_and_completion(monkeypatch):
         if url.endswith("/harnesses"):
             return {
                 "harnesses": [{
-                    "harness_id": "agent_zero",
-                    "connections": [{"name": "chat"}, {"name": "utility"}],
+                    "harness_id": "hermes",
+                    "connections": [{"name": "default"}],
                 }]
             }
         return {}
@@ -26,8 +26,6 @@ def test_harness_smoke_checks_models_and_completion(monkeypatch):
 
     assert [call[:2] for call in calls] == [
         ("GET", "http://router:9000/harnesses"),
-        ("GET", "http://router:9000/harnesses/agent_zero/chat/v1/models"),
-        ("POST", "http://router:9000/harnesses/agent_zero/chat/v1/chat/completions"),
-        ("GET", "http://router:9000/harnesses/agent_zero/utility/v1/models"),
-        ("POST", "http://router:9000/harnesses/agent_zero/utility/v1/chat/completions"),
+        ("GET", "http://router:9000/harnesses/hermes/default/v1/models"),
+        ("POST", "http://router:9000/harnesses/hermes/default/v1/chat/completions"),
     ]

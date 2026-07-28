@@ -12,9 +12,17 @@ def _action(code: str, href: str, en: str, he: str) -> dict[str, Any]:
     return {"code": code, "href": href, "label": _text(en, he)}
 
 
-def _issue(code: str, severity: str, href: str, en: str, he: str) -> dict[str, Any]:
+def _issue(
+    code: str,
+    category: str,
+    severity: str,
+    href: str,
+    en: str,
+    he: str,
+) -> dict[str, Any]:
     return {
         "code": code,
+        "category": category,
         "severity": severity,
         "message": _text(en, he),
         "action": _action(f"resolve_{code}", href, "Resolve", "פתרון"),
@@ -66,6 +74,7 @@ def build_ui_status(
         blocking.append(
             _issue(
                 "memory_pressure",
+                "system",
                 "blocking",
                 "#/setup/hardware",
                 "Close other model servers or applications, then scan the system again.",
@@ -76,6 +85,7 @@ def build_ui_status(
         blocking.append(
             _issue(
                 "platform_planned",
+                "configuration",
                 "blocking",
                 "#/setup/runtime",
                 "Managed installation is planned for this platform; connect an existing local server.",
@@ -86,6 +96,7 @@ def build_ui_status(
         blocking.append(
             _issue(
                 "runtime_missing",
+                "configuration",
                 "blocking",
                 "#/setup/runtime",
                 "llama.cpp is not installed or connected.",
@@ -96,6 +107,7 @@ def build_ui_status(
         blocking.append(
             _issue(
                 "model_missing",
+                "configuration",
                 "blocking",
                 "#/models/recommended",
                 "Choose a local model to continue.",
@@ -106,6 +118,7 @@ def build_ui_status(
         blocking.append(
             _issue(
                 "configuration_missing",
+                "configuration",
                 "blocking",
                 "#/setup/plan",
                 "Finish the local server configuration.",
@@ -116,6 +129,7 @@ def build_ui_status(
         blocking.append(
             _issue(
                 "server_stopped",
+                "system",
                 "blocking",
                 "#/advanced/fleet",
                 "The model server is configured but not responding.",
@@ -129,6 +143,7 @@ def build_ui_status(
         optional.append(
             _issue(
                 "low_disk_space",
+                "system",
                 "optional",
                 "#/advanced/diagnostics",
                 "Less than 10 GB is free in the model destination.",
@@ -156,7 +171,7 @@ def build_ui_status(
         next_action = _action("finish_setup", "#/setup/plan", "Finish setup", "סיום ההגדרה")
     else:
         overall = "needs_attention"
-        next_action = _action("start_server", "#/advanced/fleet", "Start model server", "הפעלת שרת המודל")
+        next_action = _action("open_fleet", "#/advanced/fleet", "Open fleet controls", "פתיחת בקרות הצי")
 
     active_slot = healthy_slots[0] if healthy_slots else next(
         (slot for slot in slots_health if slot.get("enabled")),

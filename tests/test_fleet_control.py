@@ -88,6 +88,39 @@ def test_fleet_status_reports_control_block(tmp_path, monkeypatch):
     manager_cls._instance = None
 
 
+def test_fleet_status_includes_safe_managed_runtime(tmp_path, monkeypatch):
+    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True)
+
+    async def fake_status(self):
+        return {
+            "chat": {
+                "running": False,
+                "healthy": False,
+                "failure_code": "process_exited",
+                "exit_code": 17,
+                "restart_count": 1,
+                "uptime_s": 3.5,
+                "pid": 1234,
+                "error": "not exposed",
+            }
+        }
+
+    monkeypatch.setattr(manager_cls, "status", fake_status)
+    manager_cls._instance = object.__new__(manager_cls)
+
+    runtime = client.get("/fleet/status").json()["slots"][0]["runtime"]
+
+    assert runtime == {
+        "running": False,
+        "healthy": False,
+        "failure_code": "process_exited",
+        "exit_code": 17,
+        "restart_count": 1,
+        "uptime_s": 3.5,
+    }
+    manager_cls._instance = None
+
+
 def test_start_slot_delegates_to_backend_manager(tmp_path, monkeypatch):
     client, manager_cls = _make_app(tmp_path, monkeypatch, control=True)
 

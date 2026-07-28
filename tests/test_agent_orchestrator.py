@@ -302,6 +302,101 @@ def test_instance_stale_and_finish_counts(tmp_path, monkeypatch):
     assert summary["instances"]["stale"] == 0
 
 
+def test_ticket_claim_lease_log_and_owned_completion(tmp_path, monkeypatch):
+    client, orchestrator, _repo_root = _make_client(tmp_path, monkeypatch)
+    client.post("/orchestrator/plans", json=_plan_payload())
+
+    claimed = client.post(
+        "/orchestrator/tickets/ticket-code/claim",
+        json={"worker_id": "pi-code-1", "lease_seconds": 60},
+    )
+    assert claimed.status_code == 200
+    assert claimed.headers["Deprecation"] == "true"
+    assert claimed.json()["ticket"]["status"] == "running"
+    assert claimed.json()["ticket"]["claimed_by"] == "pi-code-1"
+    assert claimed.json()["ticket"]["attempt"] == 1
+
+    renewed = client.post(
+        "/orchestrator/tickets/ticket-code/claim",
+        json={"worker_id": "pi-code-1", "lease_seconds": 120},
+    )
+    assert renewed.status_code == 200
+    assert renewed.json()["ticket"]["attempt"] == 1
+    assert renewed.json()["events"][-1]["event"] == "ticket_lease_renewed"
+
+    contested = client.post(
+        "/orchestrator/tickets/ticket-code/claim",
+        json={"worker_id": "pi-code-2"},
+    )
+    assert contested.status_code == 409
+    assert contested.json()["error"] == "ticket_claimed"
+
+    with sqlite3.connect(orchestrator.db_path) as conn:
+        conn.execute(
+            "UPDATE tickets SET lease_until = ? WHERE ticket_id = ?",
+            ("2000-01-01T00:00:00Z", "ticket-code"),
+        )
+
+    reclaimed = client.post(
+        "/orchestrator/tickets/ticket-code/claim",
+        json={"worker_id": "pi-code-2"},
+    )
+    assert reclaimed.status_code == 200
+    assert reclaimed.json()["ticket"]["claimed_by"] == "pi-code-2"
+    assert reclaimed.json()["ticket"]["attempt"] == 2
+
+    wrong_log = client.post(
+        "/orchestrator/tickets/ticket-code/log",
+        json={"worker_id": "pi-code-1", "detail": "should be rejected"},
+    )
+    assert wrong_log.status_code == 409
+    assert wrong_log.json()["error"] == "ticket_not_owned"
+
+    logged = client.post(
+        "/orchestrator/tickets/ticket-code/log",
+        json={"worker_id": "pi-code-2", "event": "tests", "detail": "Focused tests pass."},
+    )
+    assert logged.status_code == 200
+    assert logged.json()["events"][-1]["detail"]["detail"] == "Focused tests pass."
+
+    wrong_finish = client.post(
+        "/orchestrator/tickets/ticket-code/complete",
+        json={
+            "worker_id": "pi-code-1",
+            "summary": "wrong worker",
+            "dox_unchanged_reason": "No DOX changes.",
+        },
+    )
+    assert wrong_finish.status_code == 409
+    assert wrong_finish.json()["error"] == "ticket_not_owned"
+
+    completed = client.post(
+        "/orchestrator/tickets/ticket-code/complete",
+        json={
+            "worker_id": "pi-code-2",
+            "summary": "API done.",
+            "artifacts": ["artifacts/api-notes.md"],
+            "dox_unchanged_reason": "No DOX contract changes.",
+        },
+    )
+    assert completed.status_code == 200
+    assert completed.json()["ticket"]["status"] == "completed"
+    assert completed.headers["Deprecation"] == "true"
+
+
+def test_pending_ticket_cannot_be_claimed(tmp_path, monkeypatch):
+    client, _orchestrator, _repo_root = _make_client(tmp_path, monkeypatch)
+    client.post("/orchestrator/plans", json=_plan_payload())
+
+    response = client.post(
+        "/orchestrator/tickets/ticket-docs/claim",
+        json={"worker_id": "pi-docs-1"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "ticket_not_ready"
+
+
 def test_dashboard_hides_legacy_orchestration_surface():
     from local_model_router.dashboard import dashboard_html
 

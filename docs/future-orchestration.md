@@ -9,6 +9,11 @@ existing clients in 0.8.0. It is authenticated, hidden from the dashboard, and
 returns `Deprecation: true`. No removal date is currently assigned. The
 router-backed Agent Library (`/agents`) is separate and is not deprecated.
 
+The compatibility pilot now also supports atomic ticket claims with renewable
+leases, owned progress logs, and owned complete/block actions. The bundled
+Hermes skill and Pi extension exercise that boundary, but do not dispatch or
+start workers. This does not satisfy or bypass the replacement re-entry gates.
+
 ## Direction
 
 A future execution surface should provide visible workspaces, controllable

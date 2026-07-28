@@ -29,7 +29,7 @@ Agent Zero is client #1, not the owner.
 
 ## Status
 
-**0.8.0 - Guided local AI from first launch.** What works today:
+**0.9.0 - Measured models and predictable admission.** What works today:
 
 | Surface | Endpoint | Notes |
 |---|---|---|
@@ -37,20 +37,20 @@ Agent Zero is client #1, not the owner.
 | Slots | `GET /slots`, `GET /health/slots` | fleet view + live probes |
 | Routing (dry-run) | `POST /routing/request` | explainable capability-aware intent routing |
 | Routing preview | `GET /routing/preview` | which slot a role would get |
-| Routing catalog | `GET /routing/models`, `GET /routing/models/{id}`, `GET /routing/analytics` | safe model cards, recent decisions, latency/fallback/cache stats |
+| Routing catalog | `GET /routing/models`, `GET /routing/models/{id}`, `GET /routing/evaluations`, `GET /routing/analytics` | safe model cards, deterministic evaluation hints, recent decisions, latency/fallback/cache stats |
 | Legacy orchestration | protected `/orchestrator/*` | deprecated compatibility API; hidden from the dashboard, with no removal date assigned |
 | Agent library | `GET /agents`, `POST /agents/{id}/runs` | four built-in prompt-backed agents through router-selected models; runner included in Windows bundles |
 | OpenAI-compatible | `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/embeddings` | aliases + live/upstream models; chat streaming and local embedding forwarding |
 | Harnesses | `GET /harnesses`, `GET /harnesses/{id}`, dedicated `.../v1/models` + `.../v1/chat/completions` | one authoritative model per connection; Agent Zero has chat + utility |
-| Fleet Manager | `GET /fleet/status`, `GET /fleet/agents`, `POST /fleet/agents/register` | agent identity, bounded queueing, SQLite + cached GPU/CPU/RAM telemetry |
+| Fleet Manager | `GET /fleet/status`, `GET /fleet/agents`, `POST /fleet/agents/register` | agent identity, per-target bounded queueing, SQLite + cached GPU/CPU/RAM telemetry |
 | Fleet control (opt-in) | `POST /fleet/start`, `POST /fleet/stop`, `POST /fleet/slots/{id}/start` + `/stop` | start/stop slots; off unless `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1` |
-| Backends | `GET /backends` | local fleet + configured upstreams with capabilities |
+| Backends | `GET /backends` | local fleet + configured upstreams with capabilities and capacity mode |
 | Compute budget | `GET /compute/budget` | local hardware headroom + per-provider usage vs declared/live limits |
 | App profiles | `GET /apps` | per-client routing policy |
 | Config preview | `GET /config/preview` | secrets redacted |
-| Simple dashboard | `GET /ui` | Home, Chat, Models, and Connections; light/dark, English/Hebrew, LTR/RTL |
+| Simple dashboard | `GET /ui` | Home, Chat, Models, Connections, and a global configuration/system alert center; light/dark, English/Hebrew, LTR/RTL |
 | Advanced dashboard | `GET /ui#/advanced/fleet` | Fleet, Routing, Configuration, and Diagnostics |
-| Readiness | `GET /ui/status` | stable blocking/optional issues and one recommended next action |
+| Readiness | `GET /ui/status` | categorized configuration/system issues, stable severity/action codes, and one recommended next action |
 | First-run setup | loopback-only `/setup/*` | hardware discovery, reviewed plan, managed downloads, progress, cancellation, and smoke test |
 | Cookbook | `GET /cookbook` | scans your GGUF folder, VRAM fit math, per-role model recommendations with confidence grades |
 | A2A | `GET /.well-known/agent-card.json`, `POST /a2a` | agent card + skills for agent-to-agent use |
@@ -68,13 +68,20 @@ verbatim to the selected slot (Router Mode fleets can hot-swap to it). Send
 backend configured in `conf/upstreams.yaml` — one `openai_compatible`
 adapter covers Ollama, vLLM, LocalAI, and LM Studio.
 
+An upstream may declare `max_active` and `max_queue`. Bounded upstreams use an
+independent `upstream:<name>` admission lane; upstreams without those fields
+manage their own capacity and never consume the local VRAM queue. DMR ships at
+4 active and 32 queued requests. Harness pins remain authoritative.
+
 **Routing strategies:** `auto` uses the local catalog to rank slots by
 capabilities (`tools`, vision payloads, JSON mode, context size), health,
 latency hints, quality hints, resource cost hints, app profile, and privacy
 flags. Supported strategies are `balanced_local` (default), `fastest`,
 `quality`, and `economy`. Decisions expose reason codes, score inputs, and
 response headers for requested model, resolved model, selected slot, selected
-strategy, and cache status.
+strategy, cache status, request ID, and admission lane. When an evaluation
+snapshot exists, its quality, latency, reliability, and resource-fit evidence
+feeds the same ranking strategies and adds `evaluated_model_score`.
 
 **App profiles:** identify your client with the `X-App-Id` header and
 `conf/apps.yaml` controls its default model and allowed models. Unknown apps
@@ -129,7 +136,17 @@ declared upstream only after local routing is exhausted; local-only agents
 never leave the fleet. Input is limited to 64 KiB and a run times out after
 120 seconds. Prompts are not exposed by the catalog or stored in telemetry.
 
-**CLI:** `imperium [serve|setup|doctor|list-models|test-route|config-check|update|rollback]`
+**CLI:** `imperium [serve|setup|doctor|list-models|test-route|evaluate-models|config-check|update|rollback]`
+
+Evaluate each reachable local model with deterministic instruction, JSON,
+tool, coding, scribe, or embedding checks:
+
+```powershell
+imperium evaluate-models --base-url http://127.0.0.1:9000
+```
+
+The evaluator runs sequentially, reuses unchanged fingerprints, never executes
+generated code, and stores only aggregate metrics—never prompts or responses.
 
 Roadmap (see `AGENTS.md`): first-run stabilization, per-app API keys, rate
 limits, Prometheus-style `/metrics`, and one-click cookbook recommendations.
@@ -144,6 +161,10 @@ license, size, destination, estimated fit, and configuration preview before
 consent. Qwen3 1.7B Q8 is the first-run default with a conservative managed
 4K context. If current free memory is too low, setup asks the user to close
 other model servers or applications and scan again before it starts llama.cpp.
+The Model step and Models > Installed page share the same local GGUF folder
+setting. Choosing a populated folder rescans it immediately and makes those
+installed files selectable during first run and in Chat, without downloading
+the generic starter model. Long model names and paths wrap inside their cards.
 
 The application installs under `%LOCALAPPDATA%\Programs\Imperium`. Models,
 state, backups, and managed configuration live under

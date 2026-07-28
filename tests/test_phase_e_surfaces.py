@@ -85,6 +85,34 @@ def test_dashboard_has_six_resumable_setup_stages_and_simple_model_aliases(tmp_p
     assert 'request("/orchestrator/' not in html
 
 
+def test_dashboard_setup_reuses_local_models_folder_and_contains_long_model_text(tmp_path, monkeypatch):
+    client = TestClient(_make_app(tmp_path, monkeypatch))
+    html = client.get("/ui").text
+
+    assert 'data-action="models-folder"' in html
+    assert "const localModels=(state.setup?.discovery?.local_models||[]).map(localModelDetails)" in html
+    assert 'modelDetails(state.wizard.modelId)' in html
+    assert "!state.wizard.preferLocal" in html
+    assert 'step.action==="install_runtime"||step.action==="download_model"' in html
+    assert ".card { min-width: 0; overflow: hidden;" in html
+    assert ".card .mono { min-width: 0; overflow-wrap: anywhere;" in html
+    assert ".card-footer { display: flex; flex-wrap: wrap;" in html
+
+
+def test_dashboard_has_global_categorized_system_alerts(tmp_path, monkeypatch):
+    client = TestClient(_make_app(tmp_path, monkeypatch))
+    html = client.get("/ui").text
+
+    assert 'id="alerts-button"' in html
+    assert 'aria-controls="drawer"' in html
+    assert 'data-action="show-alerts"' in html
+    assert "function statusIssues()" in html
+    assert "function issuesHtml(" in html
+    assert '["configuration","system"]' in html
+    assert 'if(key==="status")state.error=""' in html
+    assert ".drawer { position: fixed; z-index: 70;" in html
+
+
 # ---------------------------------------------------------------------------
 # A2A
 # ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ from typing import Any, Callable, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from local_model_router.routing.catalog import (
+    apply_evaluation_hints,
     RoutingNeeds,
     build_slot_candidates,
     build_upstream_candidates,
@@ -187,6 +188,9 @@ class RoutingIntentHandler:
     change from pre-Phase-6. When set, it is consulted only for upstream
     candidates: "exhausted" providers are dropped from the candidate pool,
     "warn" providers are kept but flagged. Never local slots.
+
+    *evaluation_snapshot_fn* optionally supplies safe local-model quality,
+    latency, resource, and reliability hints to the existing ranker.
     """
 
     def __init__(
@@ -194,10 +198,12 @@ class RoutingIntentHandler:
         observer: Any,
         upstream_rows_fn: Optional[Any] = None,
         budget_status_fn: Optional[Callable[[], Dict[str, str]]] = None,
+        evaluation_snapshot_fn: Optional[Any] = None,
     ) -> None:
         self._observer = observer
         self._upstream_rows_fn = upstream_rows_fn
         self._budget_status_fn = budget_status_fn
+        self._evaluation_snapshot_fn = evaluation_snapshot_fn
 
     def _upstream_candidates(self, role: str, local_only: bool) -> list:
         if (
@@ -322,7 +328,8 @@ class RoutingIntentHandler:
             strategy=req.routing_strategy,
             preferred_slot=req.preferred_slot,
         )
-        candidates = build_slot_candidates(slot_rows)
+        snapshot = self._evaluation_snapshot_fn() if self._evaluation_snapshot_fn else None
+        candidates = build_slot_candidates(apply_evaluation_hints(slot_rows, snapshot))
         upstream_candidates = self._upstream_candidates(role, local_only_enforced)
         if upstream_candidates and self._budget_status_fn is not None:
             try:

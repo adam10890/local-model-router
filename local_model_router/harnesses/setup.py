@@ -12,9 +12,15 @@ def connection_base_url(profile: HarnessProfile, connection_name: str, *, port: 
     return f"http://{host}:{port}/harnesses/{profile.harness_id}{connection_path}/v1"
 
 
-def _setup(profile: HarnessProfile, connections: list[Dict[str, Any]]) -> Dict[str, str]:
+def _setup(
+    profile: HarnessProfile,
+    connections: list[Dict[str, Any]],
+    *,
+    supports_vision: bool = False,
+) -> Dict[str, str]:
     first = connections[0]
     base_url = first["base_url"]
+    vision_flag = "true" if supports_vision else "false"
     if profile.kind == "pi":
         return {
             "target": "~/.pi/agent/models.json and ~/.pi/agent/settings.json",
@@ -35,6 +41,7 @@ def _setup(profile: HarnessProfile, connections: list[Dict[str, Any]]) -> Dict[s
                 "  provider: lmm-router\n"
                 f"  base_url: {base_url}\n"
                 "  api_key: ${ROUTER_API_KEY:-local}\n"
+                f"  supports_vision: {vision_flag}\n"
                 "providers:\n"
                 "  lmm-router:\n"
                 "    name: LMM Router\n"
@@ -84,31 +91,64 @@ def _setup(profile: HarnessProfile, connections: list[Dict[str, Any]]) -> Dict[s
     }
 
 
+def _readiness_for_connection(
+    connection: Dict[str, Any],
+    verification: Dict[str, Any],
+) -> Dict[str, Any]:
+    caps = connection.get("capabilities") or {}
+    state = str(verification.get("state") or "not_seen")
+    pinned = str(connection.get("model") or "")
+    unmanaged_upstream = "/" in pinned and not pinned.startswith("alias:")
+    return {
+        "service_alive": True,
+        "upstream_connected": state in {"connected", "seen", "verified", "text_ready"},
+        "model_ready": state in {"verified", "text_ready"},
+        "vision_ready": bool(caps.get("vision")),
+        "lifecycle_managed": not unmanaged_upstream,
+        "repair_hint": (
+            "Start the pinned local slot via fleet control when enabled"
+            if not unmanaged_upstream
+            else "Pinned upstream is not managed by Imperium; verify the upstream host directly"
+        ),
+    }
+
+
 def setup_manifest(
     profile: HarnessProfile,
     *,
     auth_required: bool,
     verification_by_connection: Optional[Dict[str, Dict[str, Any]]] = None,
+    capabilities_by_connection: Optional[Dict[str, Dict[str, bool]]] = None,
 ) -> Dict[str, Any]:
     activity = verification_by_connection or {}
-    connections = [
-        {
+    caps_map = capabilities_by_connection or {}
+    connections = []
+    for connection in profile.connections.values():
+        caps = caps_map.get(
+            connection.name,
+            {"tools": False, "vision": False, "json_mode": True},
+        )
+        verification = activity.get(
+            connection.name, {"state": "not_seen", "last_seen": None}
+        )
+        row = {
             **connection.describe(),
             "client_model": "local",
             "base_url": connection_base_url(profile, connection.name),
             "endpoints": ["models", "chat/completions"],
-            "verification": activity.get(
-                connection.name, {"state": "not_seen", "last_seen": None}
-            ),
+            "capabilities": caps,
+            "verification": verification,
         }
-        for connection in profile.connections.values()
-    ]
+        row["readiness"] = _readiness_for_connection(row, verification)
+        connections.append(row)
     seen = [item["verification"] for item in connections if item["verification"]["last_seen"]]
     state = max(seen, key=lambda item: item["last_seen"]) if seen else {
         "state": "not_seen",
         "last_seen": None,
     }
     smoke_url = connections[0]["base_url"] + "/models"
+    default_caps = connections[0].get("capabilities") or {}
+    supports_vision = bool(default_caps.get("vision"))
     return {
         "harness_id": profile.harness_id,
         "display_name": profile.display_name,
@@ -117,7 +157,8 @@ def setup_manifest(
         "location": profile.location,
         "connections": connections,
         "authentication_required": auth_required,
-        "setup": _setup(profile, connections),
+        "setup": _setup(profile, connections, supports_vision=supports_vision),
         "smoke": f"curl {smoke_url}",
         "verification": state,
+        "readiness": connections[0]["readiness"],
     }

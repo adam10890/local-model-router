@@ -12,7 +12,7 @@ import sqlite3
 import tempfile
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
@@ -177,6 +177,9 @@ class AgentOrchestrator:
                     summary TEXT,
                     dox_unchanged_reason TEXT,
                     handoff_to TEXT,
+                    claimed_by TEXT,
+                    lease_until TEXT,
+                    attempt INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY(plan_id) REFERENCES plans(plan_id)
@@ -233,6 +236,9 @@ class AgentOrchestrator:
                     "persona_id": "TEXT",
                     "persona_name": "TEXT",
                     "persona_prompt_path": "TEXT",
+                    "claimed_by": "TEXT",
+                    "lease_until": "TEXT",
+                    "attempt": "INTEGER NOT NULL DEFAULT 0",
                 },
             )
             self._ensure_columns(
@@ -682,14 +688,167 @@ class AgentOrchestrator:
     def get_ticket(self, ticket_id: str) -> dict[str, Any]:
         row = self._ticket_lookup(ticket_id)
         ticket = self._ticket_row(row)
+        with self._connect() as conn:
+            events = conn.execute(
+                """
+                SELECT event_type, payload_json, created_at
+                FROM ticket_events
+                WHERE ticket_id = ?
+                ORDER BY id DESC
+                LIMIT 200
+                """,
+                (ticket_id,),
+            ).fetchall()
+        events = list(reversed(events))
         return {
             "ok": True,
             "ticket": ticket,
             "task": self._read_text(ticket.get("task_path")),
             "dox_chain": self._read_text(ticket.get("dox_chain_path")),
+            "events": [
+                {
+                    "event": event["event_type"],
+                    "detail": _json_loads(event["payload_json"], {}),
+                    "created_at": event["created_at"],
+                }
+                for event in events
+            ],
         }
 
-    def submit_ticket(self, ticket_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    def claim_ticket(self, ticket_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(body, dict):
+            raise OrchestratorError("request body must be a JSON object", "invalid_request_body", 400)
+        raw_worker_id = str(body.get("worker_id") or "").strip()
+        if not raw_worker_id:
+            raise OrchestratorError("missing required field: worker_id", "missing_worker_id", 422)
+        worker_id = _safe_id("worker", raw_worker_id)
+        try:
+            lease_seconds = int(body.get("lease_seconds", 900))
+        except (TypeError, ValueError):
+            raise OrchestratorError("lease_seconds must be an integer", "invalid_lease", 422)
+        if not 30 <= lease_seconds <= 86400:
+            raise OrchestratorError("lease_seconds must be between 30 and 86400", "invalid_lease", 422)
+
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        lease_until = (now + timedelta(seconds=lease_seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM tickets WHERE ticket_id = ?", (ticket_id,)).fetchone()
+            if row is None:
+                raise OrchestratorError(f"ticket '{ticket_id}' not found", "ticket_not_found", 404)
+
+            current_owner = str(row["claimed_by"] or "")
+            renewing = row["status"] == "running" and current_owner == worker_id
+            expired = _iso_to_epoch(row["lease_until"]) <= now.timestamp()
+            if row["status"] == "running" and not renewing and not expired:
+                raise OrchestratorError(
+                    f"ticket '{ticket_id}' is claimed by another worker",
+                    "ticket_claimed",
+                    409,
+                )
+            if row["status"] not in {"ready", "running"}:
+                raise OrchestratorError(
+                    f"ticket '{ticket_id}' is not ready",
+                    "ticket_not_ready",
+                    409,
+                )
+
+            attempt_delta = 0 if renewing else 1
+            conn.execute(
+                """
+                UPDATE tickets
+                SET status = 'running', claimed_by = ?, lease_until = ?,
+                    attempt = attempt + ?, updated_at = ?
+                WHERE ticket_id = ?
+                """,
+                (worker_id, lease_until, attempt_delta, now_iso, ticket_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO ticket_events (plan_id, ticket_id, event_type, payload_json, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    row["plan_id"],
+                    ticket_id,
+                    "ticket_lease_renewed" if renewing else "ticket_claimed",
+                    _json_dumps({"worker_id": worker_id, "lease_until": lease_until}),
+                    now_iso,
+                ),
+            )
+        return self.get_ticket(ticket_id)
+
+    def append_ticket_log(self, ticket_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(body, dict):
+            raise OrchestratorError("request body must be a JSON object", "invalid_request_body", 400)
+        worker_id = str(body.get("worker_id") or "").strip()
+        detail = str(body.get("detail") or "").strip()
+        event = str(body.get("event") or "progress").strip()
+        if not worker_id:
+            raise OrchestratorError("missing required field: worker_id", "missing_worker_id", 422)
+        worker_id = _safe_id("worker", worker_id)
+        if not detail:
+            raise OrchestratorError("missing required field: detail", "missing_log_detail", 422)
+        if len(detail.encode("utf-8")) > 4096:
+            raise OrchestratorError("log detail exceeds 4096 bytes", "log_detail_too_large", 413)
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", event):
+            raise OrchestratorError("invalid log event", "invalid_log_event", 422)
+
+        now = _now_iso()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM tickets WHERE ticket_id = ?", (ticket_id,)).fetchone()
+            if row is None:
+                raise OrchestratorError(f"ticket '{ticket_id}' not found", "ticket_not_found", 404)
+            ticket = self._ticket_row(row)
+            if ticket.get("status") != "running" or ticket.get("claimed_by") != worker_id:
+                raise OrchestratorError(
+                    f"ticket '{ticket_id}' is not claimed by worker '{worker_id}'",
+                    "ticket_not_owned",
+                    409,
+                )
+            conn.execute(
+                """
+                INSERT INTO ticket_events (plan_id, ticket_id, event_type, payload_json, created_at)
+                VALUES (?, ?, 'ticket_log', ?, ?)
+                """,
+                (
+                    ticket["plan_id"],
+                    ticket_id,
+                    _json_dumps({"worker_id": worker_id, "event": event, "detail": detail}),
+                    now,
+                ),
+            )
+            conn.execute("UPDATE tickets SET updated_at = ? WHERE ticket_id = ?", (now, ticket_id))
+        return self.get_ticket(ticket_id)
+
+    def finish_claimed_ticket(
+        self,
+        ticket_id: str,
+        body: dict[str, Any],
+        *,
+        status: str,
+    ) -> dict[str, Any]:
+        if not isinstance(body, dict):
+            raise OrchestratorError("request body must be a JSON object", "invalid_request_body", 400)
+        worker_id = str(body.get("worker_id") or "").strip()
+        if not worker_id:
+            raise OrchestratorError("missing required field: worker_id", "missing_worker_id", 422)
+        worker_id = _safe_id("worker", worker_id)
+        return self.submit_ticket(
+            ticket_id,
+            {**body, "status": status},
+            expected_worker=worker_id,
+        )
+
+    def submit_ticket(
+        self,
+        ticket_id: str,
+        body: dict[str, Any],
+        *,
+        expected_worker: Optional[str] = None,
+    ) -> dict[str, Any]:
         if not isinstance(body, dict):
             raise OrchestratorError("request body must be a JSON object", "invalid_request_body", 400)
         status = str(body.get("status") or "").strip().lower()
@@ -708,30 +867,46 @@ class AgentOrchestrator:
                 422,
             )
 
-        row = self._ticket_lookup(ticket_id)
-        ticket = self._ticket_row(row)
         summary = str(body.get("summary") or "").strip()
         artifacts = body.get("artifacts") if isinstance(body.get("artifacts"), list) else []
         handoff_to = str(body.get("handoff_to") or "").strip() or None
-        marker_name = {"completed": "DONE.json", "blocked": "BLOCKED.json", "failed": "FAILED.json"}[status]
-        marker_path = Path(ticket["workspace_path"]) / marker_name
-        if dox_report:
-            Path(ticket["dox_report_path"]).write_text(dox_report + "\n", encoding="utf-8")
-        marker_payload = {
-            "ticket_id": ticket_id,
-            "plan_id": ticket["plan_id"],
-            "status": status,
-            "summary": summary,
-            "artifacts": artifacts,
-            "dox_report_path": ticket["dox_report_path"],
-            "dox_unchanged_reason": dox_unchanged_reason,
-            "handoff_to": handoff_to,
-            "created_at": _now_iso(),
-        }
-        marker_path.write_text(_json_dumps(marker_payload) + "\n", encoding="utf-8")
-
         now = _now_iso()
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM tickets WHERE ticket_id = ?", (ticket_id,)).fetchone()
+            if row is None:
+                raise OrchestratorError(f"ticket '{ticket_id}' not found", "ticket_not_found", 404)
+            ticket = self._ticket_row(row)
+            if expected_worker and (
+                ticket.get("status") != "running"
+                or ticket.get("claimed_by") != expected_worker
+            ):
+                raise OrchestratorError(
+                    f"ticket '{ticket_id}' is not claimed by worker '{expected_worker}'",
+                    "ticket_not_owned",
+                    409,
+                )
+
+            marker_name = {
+                "completed": "DONE.json",
+                "blocked": "BLOCKED.json",
+                "failed": "FAILED.json",
+            }[status]
+            marker_path = Path(ticket["workspace_path"]) / marker_name
+            if dox_report:
+                Path(ticket["dox_report_path"]).write_text(dox_report + "\n", encoding="utf-8")
+            marker_payload = {
+                "ticket_id": ticket_id,
+                "plan_id": ticket["plan_id"],
+                "status": status,
+                "summary": summary,
+                "artifacts": artifacts,
+                "dox_report_path": ticket["dox_report_path"],
+                "dox_unchanged_reason": dox_unchanged_reason,
+                "handoff_to": handoff_to,
+                "created_at": now,
+            }
+            marker_path.write_text(_json_dumps(marker_payload) + "\n", encoding="utf-8")
             conn.execute(
                 """
                 UPDATE tickets
@@ -1064,6 +1239,7 @@ class AgentOrchestrator:
     def _ticket_row(row: sqlite3.Row) -> dict[str, Any]:
         item = dict(row)
         item["required"] = bool(item.get("required"))
+        item["attempt"] = int(item.get("attempt") or 0)
         item["dependencies"] = _json_loads(item.pop("dependencies_json", "[]"), [])
         item["target_paths"] = _json_loads(item.pop("target_paths_json", "[]"), [])
         item["capability_bundles"] = _json_loads(item.pop("capability_bundles_json", "[]"), [])

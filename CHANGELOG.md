@@ -24,6 +24,56 @@ All notable changes to this project are documented here.
   the rest of the routing MCP surface.
 - A "Compute Providers" tab in the Advanced dashboard showing live/estimated
   usage windows per provider plus this computer's own hardware headroom.
+- The dashboard now has a persistent alert button with a count and a bilingual
+  drawer that separates configuration faults from system faults and links to
+  the existing remediation screens.
+- The protected Work Pages pilot now supports atomic ticket leases, owned
+  progress/completion, a Hermes planning skill, and a Pi worker extension.
+
+### Fixed
+
+- Docker Model Runner now declares tool support, so its Ornith Q8 model is no
+  longer reported as tool-incapable.
+- Managed llama.cpp processes now report stable startup/health failure codes,
+  exit codes, restarts, and uptime, and clear stale errors after recovery.
+
+## [0.9.0] - 2026-07-17
+
+### Added
+
+- Per-target admission lanes with optional upstream `max_active` and
+  `max_queue` limits, plus lane telemetry in fleet and routing APIs.
+- Deterministic local-model evaluation through `imperium evaluate-models`,
+  reusable ranking hints, and `GET /routing/evaluations`.
+- The Models page can persist and rescan a shared GGUF directory; installed
+  files from that directory are available in first-run setup and the local
+  chat model selector.
+
+### Changed
+
+- Chat requests now share one final lifecycle across local, explicit,
+  auto-selected, and harness-pinned targets; streaming holds admission until
+  completion, failure, or client disconnect.
+- The dashboard now renders real harness connections and lane capacity,
+  filters Fleet rows, summarizes model/routing details, and loads independent
+  status surfaces concurrently.
+- Managed llama.cpp setup uses its configured models directory for the Qwen3
+  first-run download and enables directory-backed model hot-swapping.
+
+### Fixed
+
+- Upstream requests now record their actual final result instead of bypassing
+  telemetry or stopping at `forwarded_upstream`.
+- Slot health probes run concurrently and reuse the configured TTL cache.
+- Chat errors render their message instead of `[object Object]`, installed
+  model details resolve from Cookbook data, and empty chat sends are disabled.
+- Setup tests no longer depend on a machine-local `llama-server` executable
+  when verifying offline runtime planning.
+- Setup no longer crashes when Python is installed near the filesystem root.
+- `STOP.bat` now replaces stale router processes reliably under Windows
+  Terminal by validating the process that owns the configured port.
+- Long installed-model names, metadata, and paths now wrap inside their
+  dashboard cards instead of overflowing the card boundary.
 
 ## [0.8.0] - 2026-07-14
 

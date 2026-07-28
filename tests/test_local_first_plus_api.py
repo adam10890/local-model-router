@@ -179,7 +179,7 @@ def test_dashboard_exposes_compare_routing_and_integration_snippets():
     from local_model_router.dashboard import dashboard_html
 
     html = dashboard_html()
-    assert "v0.8.0" in html
+    assert "v0.9.0" in html
     assert "__IMPERIUM_VERSION__" not in html
     assert "Routing" in html
     assert "Claude Code MCP" in html
@@ -187,3 +187,36 @@ def test_dashboard_exposes_compare_routing_and_integration_snippets():
     assert "Vercel AI SDK" in html
     assert "Pinned model" in html
     assert "Connect an agent" not in html
+
+
+def test_routing_evaluation_endpoint_and_decision_use_latest_snapshot(tmp_path, monkeypatch):
+    client, store, manager_cls = _make_client(tmp_path, monkeypatch)
+    store.record_model_snapshot("model_evaluation", {
+        "schema_version": 1,
+        "generated_at": "2026-07-17T00:00:00Z",
+        "models": [{
+            "model_id": "utility-model",
+            "fingerprint": "safe-hash",
+            "roles": {"utility": {
+                "pass_rate": 0.95,
+                "reliability": 1.0,
+                "median_latency_ms": 20,
+                "resource_cost_hint": 0.3,
+            }},
+        }],
+    })
+
+    snapshot = client.get("/routing/evaluations")
+    decision = client.post("/routing/request", json={
+        "agent_id": "test",
+        "agent_type": "custom",
+        "task_type": "coding",
+        "routing_strategy": "quality",
+    })
+
+    assert snapshot.status_code == 200
+    assert snapshot.json()["payload"]["models"][0]["fingerprint"] == "safe-hash"
+    assert decision.status_code == 200
+    assert "evaluated_model_score" in decision.json()["reason_codes"]
+    assert "prompt" not in str(snapshot.json()).lower()
+    manager_cls._instance = None

@@ -354,6 +354,35 @@ class TestHealthSlotsEndpoint:
             if slot.get("enabled"):
                 assert slot["health"] == "unhealthy"
 
+    def test_enabled_slots_are_probed_concurrently_and_cached(self, tmp_path, monkeypatch):
+        from local_model_router.service.app import create_app
+
+        cfg = tmp_path / "llama_cpp_servers.yaml"
+        cfg.write_text(_BASE_CONFIG)
+        active = 0
+        max_active = 0
+        calls = 0
+
+        async def slow_probe(url, timeout):
+            nonlocal active, max_active, calls
+            calls += 1
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            return {"ok": True}
+
+        monkeypatch.setattr(
+            "local_model_router.helpers.smart_router.health._aiohttp_probe",
+            slow_probe,
+        )
+        client = TestClient(create_app(str(cfg)))
+
+        assert client.get("/health/slots").status_code == 200
+        assert client.get("/health/slots").status_code == 200
+        assert max_active == 2
+        assert calls == 2
+
     def test_empty_config_returns_empty_list(self, tmp_path):
         from local_model_router.service.app import create_app
         body = TestClient(create_app(str(tmp_path / "nonexistent.yaml"))).get("/health/slots").json()

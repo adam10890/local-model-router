@@ -27,7 +27,11 @@ $CurrentPython = Join-Path $Target "runtime\python\python.exe"
 if (Test-Path -LiteralPath $CurrentPython) {
     & $CurrentPython -m local_model_router setup --stop-runtime | Out-Null
 }
-& taskkill.exe /F /T /FI "WINDOWTITLE eq Imperium - Local Model Router" 2>$null | Out-Null
+$Stop = Join-Path $Target "STOP.bat"
+if (Test-Path -LiteralPath $Stop) {
+    & $Stop
+    if ($LASTEXITCODE -ne 0) { throw "The running Imperium process could not be stopped safely." }
+}
 Set-Location -LiteralPath $Programs
 
 try {

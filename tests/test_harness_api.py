@@ -7,24 +7,6 @@ from starlette.testclient import TestClient
 
 from local_model_router.service.app import create_app
 
-_FLEET = """\
-active_slots:
-  - id: chat
-    host: localhost
-    port: 8080
-    role: chat
-    enabled: true
-    model_id: chat-model
-  - id: utility
-    host: localhost
-    port: 8088
-    role: utility
-    enabled: true
-    model_id: utility_cpu
-global:
-  backend: remote
-"""
-
 _HARNESSES = """\
 harnesses:
   hermes:
@@ -33,7 +15,7 @@ harnesses:
     protocol: openai
     location: host
     connections:
-      default: {model: dmr/ornith}
+      default: {model: ornith}
   pi:
     display_name: Pi
     kind: pi
@@ -47,8 +29,42 @@ harnesses:
     protocol: openai
     location: docker
     connections:
-      chat: {model: dmr/ornith}
+      chat: {model: ornith}
       utility: {model: utility_cpu}
+  hermes_dmr:
+    display_name: Hermes DMR
+    kind: hermes
+    protocol: openai
+    location: host
+    connections:
+      default: {model: dmr/ornith}
+"""
+
+_FLEET = """\
+active_slots:
+  - id: chat
+    host: localhost
+    port: 8080
+    role: chat
+    enabled: true
+    model_id: chat-model
+  - id: ornith
+    host: localhost
+    port: 8081
+    role: chat
+    enabled: true
+    model_id: ornith
+    mmproj_path: ornith-mmproj.gguf
+    supports_vision: true
+    supports_tools: true
+  - id: utility
+    host: localhost
+    port: 8088
+    role: utility
+    enabled: true
+    model_id: utility_cpu
+global:
+  backend: remote
 """
 
 _UPSTREAMS = """\
@@ -147,7 +163,59 @@ def test_single_connection_models_endpoint_lists_only_stable_client_model(tmp_pa
     response = client.get("/harnesses/hermes/v1/models")
     assert response.status_code == 200
     assert [item["id"] for item in response.json()["data"]] == ["local"]
-    assert response.json()["data"][0]["meta"]["pinned_model"] == "dmr/ornith"
+    row = response.json()["data"][0]
+    assert row["meta"]["pinned_model"] == "ornith"
+    assert row["capabilities"]["vision"] is True
+    assert row["capabilities"]["tools"] is True
+    detail = client.get("/harnesses/hermes").json()
+    assert detail["connections"][0]["verification"]["state"] == "connected"
+    assert "supports_vision: true" in detail["setup"]["content"]
+    assert detail["readiness"]["vision_ready"] is True
+    assert detail["readiness"]["lifecycle_managed"] is True
+
+
+def test_upstream_mmproj_error_is_capability_missing_not_unavailable(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    import aiohttp
+
+    class FakeResponse:
+        status = 500
+
+        async def json(self, content_type=None):
+            return {
+                "error": {
+                    "message": "image input is not supported ... you may need to provide the mmproj",
+                }
+            }
+
+        async def text(self):
+            return "mmproj"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+    class FakeSession:
+        def post(self, *args, **kwargs):
+            return FakeResponse()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+    monkeypatch.setattr(aiohttp, "ClientSession", lambda *args, **kwargs: FakeSession())
+    response = client.post(
+        "/harnesses/hermes_dmr/v1/chat/completions",
+        json={"model": "local", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error"]["code"] == "upstream_capability_missing"
+    assert "mmproj" in body["upstream_message"].lower() or "image input" in body["error"]["message"].lower()
 
 
 def test_agent_zero_requires_named_connection_and_supports_chat(tmp_path, monkeypatch):
@@ -172,7 +240,7 @@ def test_dedicated_upstream_chat_ignores_client_model_and_routing(tmp_path, monk
     client = _client(tmp_path, monkeypatch)
     calls = _patch_forward(monkeypatch)
     response = client.post(
-        "/harnesses/hermes/v1/chat/completions",
+        "/harnesses/hermes_dmr/v1/chat/completions",
         json={
             "model": "try-to-escape",
             "messages": [{"role": "user", "content": "hi"}],
@@ -186,6 +254,19 @@ def test_dedicated_upstream_chat_ignores_client_model_and_routing(tmp_path, monk
 
 
 def test_dedicated_local_chat_pins_matching_slot(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    calls = _patch_forward(monkeypatch)
+    response = client.post(
+        "/harnesses/hermes/v1/chat/completions",
+        json={"model": "chat", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert response.status_code == 200
+    assert calls[0]["args"][0] == "http://localhost:8081/v1/chat/completions"
+    assert calls[0]["kwargs"]["json"]["model"] == "ornith"
+    assert response.headers["x-a0-router-slot-id"] == "ornith"
+
+
+def test_dedicated_utility_slot_still_pins(tmp_path, monkeypatch):
     client = _client(tmp_path, monkeypatch)
     calls = _patch_forward(monkeypatch)
     response = client.post(

@@ -159,3 +159,38 @@ def test_build_slot_candidates_enriches_local_slot_metadata():
     assert candidate.context_size == 65536
     assert candidate.supports_tools is True
     assert candidate.resource_cost_hint == 1.0
+
+
+def test_evaluation_hints_feed_existing_ranker_without_second_score_formula():
+    from local_model_router.routing.catalog import apply_evaluation_hints
+
+    slots = [{
+        "id": "chat",
+        "model_id": "evaluated-model",
+        "role": "chat",
+        "enabled": True,
+        "health": "healthy",
+    }]
+    snapshot = {"payload": {
+        "schema_version": 1,
+        "generated_at": "2026-07-17T00:00:00Z",
+        "models": [{
+            "model_id": "evaluated-model",
+            "fingerprint": "abc",
+            "roles": {"chat": {
+                "pass_rate": 0.9,
+                "reliability": 0.8,
+                "median_latency_ms": 40,
+                "resource_cost_hint": 0.35,
+            }},
+        }],
+    }}
+
+    ranked = rank_candidates(
+        RoutingNeeds(role="chat", strategy="quality"),
+        build_slot_candidates(apply_evaluation_hints(slots, snapshot)),
+    )
+
+    assert ranked[0].score_inputs["quality_hint"] == 0.9
+    assert ranked[0].score_inputs["reliability"] == 0.8
+    assert "evaluated_model_score" in ranked[0].reason_codes

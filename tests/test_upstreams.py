@@ -90,6 +90,51 @@ def test_load_upstreams_missing_file_yields_empty(tmp_path):
     assert load_upstreams(tmp_path / "nope.yaml") == []
 
 
+def test_model_capabilities_override_upstream_defaults(tmp_path):
+    content = textwrap.dedent("""
+        upstreams:
+          - name: dmr
+            type: openai_compatible
+            base_url: http://localhost:12434/engines/v1
+            enabled: true
+            capabilities: [chat, models, tools]
+            models: [ornith, text-only]
+            model_capabilities:
+              ornith: [chat, tools, vision]
+              text-only: [chat, tools]
+    """)
+    upstreams = load_upstreams(_write(tmp_path, "upstreams.yaml", content))
+    dmr = upstreams[0]
+    assert "vision" not in dmr.capabilities
+    assert "vision" in dmr.effective_capabilities("ornith")
+    assert "vision" not in dmr.effective_capabilities("text-only")
+    assert dmr.describe()["model_capabilities"]["ornith"] == ["chat", "tools", "vision"]
+
+
+def test_upstream_capacity_is_validated_without_dropping_entry(tmp_path):
+    content = textwrap.dedent("""
+        upstreams:
+          - name: bounded
+            type: openai_compatible
+            base_url: http://localhost:9998/v1
+            enabled: true
+            max_active: 4
+          - name: broken
+            type: openai_compatible
+            base_url: http://localhost:9999/v1
+            enabled: true
+            max_queue: 2
+    """)
+
+    bounded, broken = load_upstreams(_write(tmp_path, "upstreams.yaml", content))
+
+    assert bounded.max_active == 4
+    assert bounded.max_queue == 32
+    assert bounded.describe()["capacity_mode"] == "bounded"
+    assert broken.serves_inference is False
+    assert broken.describe()["config_error"] == "max_queue requires max_active"
+
+
 def test_api_key_comes_from_env_only(tmp_path):
     content = textwrap.dedent("""
         upstreams:
@@ -331,5 +376,7 @@ def test_chat_completions_forwards_to_matching_upstream(tmp_path, monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["choices"][0]["message"]["content"] == "from-ollama"
     assert resp.headers["x-a0-router-upstream"] == "ollama"
+    assert resp.headers["x-a0-admission-lane"] == "upstream:ollama"
+    assert resp.headers["x-a0-request-id"].startswith("req_")
     assert calls[0]["url"] == "http://localhost:11434/v1/chat/completions"
     assert calls[0]["kwargs"]["json"]["model"] == "llama3.3:70b"  # prefix stripped

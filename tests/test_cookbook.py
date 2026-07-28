@@ -199,7 +199,7 @@ def _client(tmp_path, monkeypatch, models_dir, api_key=None):
         monkeypatch.setenv("A0_LMM_ROUTER_API_KEY", api_key)
     else:
         monkeypatch.delenv("A0_LMM_ROUTER_API_KEY", raising=False)
-    return TestClient(create_app(str(cfg))), BackendManager
+    return TestClient(create_app(str(cfg), setup_home=str(tmp_path / "imperium-home"))), BackendManager
 
 
 def test_cookbook_endpoint_returns_report(tmp_path, monkeypatch):
