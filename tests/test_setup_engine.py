@@ -427,11 +427,12 @@ def test_setup_uses_an_installed_model_without_downloading_it(tmp_path, monkeypa
 
 
 def test_setup_accepts_a_shallow_system_python_path(tmp_path, monkeypatch):
-    monkeypatch.setattr(engine_module.sys, "executable", "C:\\Python312\\python.exe")
+    shallow_python = Path(Path.cwd().anchor) / "Python312" / "python"
+    monkeypatch.setattr(engine_module.sys, "executable", str(shallow_python))
 
     engine = SetupEngine(home=tmp_path / "home")
 
-    assert engine.offline_dirs[-1] == Path("C:/Python312/offline")
+    assert engine.offline_dirs[-1] == shallow_python.parent / "offline"
 
 
 def test_non_windows_platform_is_planned_and_never_offers_cuda(tmp_path):

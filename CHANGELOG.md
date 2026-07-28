@@ -32,6 +32,8 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- Optional MCP installs now stay on the compatible 1.x SDK after 2.0 removed
+  the FastMCP import surface used by Imperium.
 - Docker Model Runner now declares tool support, so its Ornith Q8 model is no
   longer reported as tool-incapable.
 - Managed llama.cpp processes now report stable startup/health failure codes,
