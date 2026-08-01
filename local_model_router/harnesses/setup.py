@@ -53,13 +53,21 @@ def _setup(
             ),
         }
     if profile.kind == "agent_zero":
-        lines = [
-            f"{item['name']}: base_url={item['base_url']} model=local api_key=${{ROUTER_API_KEY:-local}}"
-            for item in connections
-        ]
+        labels = {"chat": "Main model", "utility": "Utility model"}
+        lines = ["Agent Zero v2.7: Settings > Agent > Models > Edit presets"]
+        for item in connections:
+            lines.append(
+                f"{labels.get(item['name'], item['name'])}: "
+                f"provider=other model=local api_base={item['base_url']} "
+                "api_key=<A0_LMM_ROUTER_API_KEY, or local when auth is disabled>"
+            )
+        lines.append(
+            "provider=other is Agent Zero's 'Other OpenAI compatible' provider "
+            "and sets a0_api_mode=chat."
+        )
         return {
-            "target": "Agent Zero model provider settings",
-            "format": "env",
+            "target": "Agent Zero v2.7 Model Presets",
+            "format": "text",
             "content": "\n".join(lines),
         }
     if profile.kind == "claude_code":

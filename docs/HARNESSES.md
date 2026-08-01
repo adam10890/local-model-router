@@ -32,6 +32,18 @@ Anthropic bridge, not a substitute for the local fleet.
 IDs use lowercase ASCII letters, digits, `_`, or `-`. API keys never belong
 in this file.
 
+## Runtime compatibility policy
+
+Before adding or updating any harness, verify its integration against its
+official repository and documentation. Check both the latest stable release
+and the version actually installed; the installed version is authoritative
+for configuration, while the latest release identifies upgrade gaps. Record
+the verified release or commit in the integration documentation, validate the
+provider names, settings schema, endpoints, authentication, model IDs, and
+stream/tool behavior, then rerun the harness tests. Repeat the check whenever
+the runtime or its setup manifest changes. A generic "OpenAI-compatible"
+claim alone is not sufficient evidence of compatibility.
+
 ## URLs
 
 Single-connection host harnesses use:
@@ -61,6 +73,30 @@ python .\scripts\smoke_harnesses.py
 
 Pass `--api-key <key>` when router authentication is enabled. The command
 checks `/models` and sends one short completion per connection.
+
+## Agent Zero 2.7
+
+This setup was verified against the official
+[`agent0ai/agent-zero` v2.7 release](https://github.com/agent0ai/agent-zero/releases/tag/v2.7)
+at commit `87e1e591e1ba2e8b1a19d34e134fcae490c8dded`.
+
+In Agent Zero, open **Settings → Agent → Models → Edit presets** and create or
+edit a preset with these values:
+
+| Slot | Provider | Model | API base |
+| --- | --- | --- | --- |
+| Main model | `other` (`Other OpenAI compatible`) | `local` | `http://host.docker.internal:9000/harnesses/agent_zero/chat/v1` |
+| Utility model | `other` (`Other OpenAI compatible`) | `local` | `http://host.docker.internal:9000/harnesses/agent_zero/utility/v1` |
+
+Under **External Services → Other OpenAI-compatible API keys**, use the value
+of `A0_LMM_ROUTER_API_KEY`; use `local` only when router authentication is
+disabled. Provider `other` sets Agent Zero's `a0_api_mode` to `chat`, matching
+Imperium's Chat Completions contract without probing `/v1/responses`. Set each
+Agent Zero context window no higher than the corresponding pinned model.
+
+Agent Zero runs inside Docker, so `127.0.0.1` would address the container
+itself. Keep the `host.docker.internal` URLs above and ensure port 9000 is
+reachable from the container before running `scripts/smoke_harnesses.py`.
 
 ## Add a harness
 

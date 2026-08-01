@@ -32,6 +32,9 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- Agent Zero is now present in the canonical harness configuration, and its
+  generated setup uses the supported Agent Zero 2.7 `other` provider with
+  separate Docker-reachable Main and Utility Chat Completions URLs.
 - Optional MCP installs now stay on the compatible 1.x SDK after 2.0 removed
   the FastMCP import surface used by Imperium.
 - Docker Model Runner now declares tool support, so its Ornith Q8 model is no

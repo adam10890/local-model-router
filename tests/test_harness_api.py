@@ -147,9 +147,14 @@ def test_harness_list_and_detail_emit_exact_setup_urls(tmp_path, monkeypatch):
     assert by_id["hermes"]["connections"][0]["base_url"] == (
         "http://127.0.0.1:9000/harnesses/hermes/v1"
     )
-    assert by_id["agent_zero"]["connections"][0]["base_url"].startswith(
+    agent_zero = by_id["agent_zero"]
+    assert agent_zero["connections"][0]["base_url"].startswith(
         "http://host.docker.internal:9000/harnesses/agent_zero/"
     )
+    setup = agent_zero["setup"]["content"]
+    assert "provider=other" in setup
+    assert "/agent_zero/chat/v1" in setup
+    assert "/agent_zero/utility/v1" in setup
 
     detail = client.get("/harnesses/pi").json()
     assert detail["connections"][0]["model"] == "utility_cpu"
