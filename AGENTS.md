@@ -63,6 +63,9 @@ codebase.
   `ready/<slug>` for verified merge candidates, and delete merged branches
   locally and remotely. Detailed rules live in
   `docs/development/git-workflow.md`.
+- Default to one task branch at a time: rename `dev/<slug>` to `ready/<slug>`,
+  then verify, merge, confirm GitHub's `main` SHA, and clean up before starting
+  the next task. Never re-merge a branch already integrated by squash.
 - Agent handoffs between Codex, Claude Code, or humans must name the current
   branch, changed files, verification commands, and unresolved risks.
 - Phase roadmap: (1) ✅ `GET /v1/models` + model aliases; (2) ✅ upstream

@@ -30,6 +30,10 @@ the current session.
   merge candidates, and `spike/<slug>` for throwaway experiments. Claude's own
   `claude/<slug>` branches are allowed as short-lived scratch branches, but
   classify or merge them into `dev/` or `ready/` before handoff.
+- Keep one task branch by default. Promote `dev/` to `ready/` by renaming the
+  same ref, then verify, merge, confirm GitHub's `main` SHA, and delete the
+  temporary branch before starting another task. Do not re-merge a stale
+  squash-merged branch.
 
 ## Verification
 
