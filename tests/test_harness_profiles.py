@@ -135,15 +135,23 @@ def test_committed_profiles_cover_current_harnesses_and_claude_adapter():
     path = Path(__file__).resolve().parents[1] / "conf" / "harnesses.yaml"
     profiles = HarnessProfiles.load(path)
     assert {item.harness_id for item in profiles.list_profiles()} == {
-        "claude_code_local", "hermes", "pi",
+        "agent_zero", "claude_code_local", "hermes", "pi",
     }
     assert profiles.resolve("hermes").model.startswith("dmr/")
+    assert profiles.resolve("agent_zero", "utility").model.startswith("dmr/")
+    agent_zero = setup_manifest(profiles.get("agent_zero"), auth_required=False)
+    assert agent_zero["setup"]["target"] == "Agent Zero v2.7 Model Presets"
+    setup = agent_zero["setup"]["content"]
+    assert "provider=other" in setup
+    assert "a0_api_mode=chat" in setup
+    assert "/agent_zero/chat/v1" in setup
+    assert "/agent_zero/utility/v1" in setup
     claude = profiles.get("claude_code_local")
     manifest = setup_manifest(claude, auth_required=False)
     assert "LiteLLM" in manifest["setup"]["target"]
-    setup = manifest["setup"]["content"]
-    assert "litellm --config" in setup
-    assert "ANTHROPIC_BASE_URL" in setup
+    claude_setup = manifest["setup"]["content"]
+    assert "litellm --config" in claude_setup
+    assert "ANTHROPIC_BASE_URL" in claude_setup
 
     hermes = setup_manifest(
         profiles.get("hermes"),

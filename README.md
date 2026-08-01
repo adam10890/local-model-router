@@ -281,8 +281,10 @@ Claude Code local:  http://127.0.0.1:9000/harnesses/claude_code_local/v1 (throug
 ```
 
 Use model ID `local` in the consumers. The router ignores that compatibility
-label and forwards the model pinned in `conf/harnesses.yaml`. See
-`docs/HARNESSES.md` for the setup contract.
+label and forwards the model pinned in `conf/harnesses.yaml`. For Agent Zero
+2.7, select provider `other` (`Other OpenAI compatible`) for both Main and
+Utility Model Preset slots and use the two URLs above. See
+`docs/HARNESSES.md` for the versioned setup and runtime compatibility policy.
 
 ## Docker
 
