@@ -68,6 +68,10 @@ verbatim to the selected slot (Router Mode fleets can hot-swap to it). Send
 backend configured in `conf/upstreams.yaml` — one `openai_compatible`
 adapter covers Ollama, vLLM, LocalAI, and LM Studio.
 
+Keep optional providers disabled in the committed defaults and enable them per
+machine with `A0_LMM_ROUTER_ENABLED_UPSTREAMS=ollama` (comma-separated). This
+changes only declared providers; unknown names are ignored.
+
 An upstream may declare `max_active` and `max_queue`. Bounded upstreams use an
 independent `upstream:<name>` admission lane; upstreams without those fields
 manage their own capacity and never consume the local VRAM queue. DMR ships at

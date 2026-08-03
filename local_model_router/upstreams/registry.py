@@ -24,6 +24,7 @@ import yaml
 
 TYPE_OPENAI_COMPATIBLE = "openai_compatible"
 TYPE_SUBSCRIPTION = "subscription"
+ENABLED_UPSTREAMS_ENV = "A0_LMM_ROUTER_ENABLED_UPSTREAMS"
 _KNOWN_TYPES = frozenset({TYPE_OPENAI_COMPATIBLE, TYPE_SUBSCRIPTION})
 
 _SERVING_CAPABILITIES = ("chat", "models")
@@ -260,7 +261,17 @@ def load_upstreams(path: str | Path) -> List[UpstreamConfig]:
 
     out: List[UpstreamConfig] = []
     seen: set[str] = set()
+    enabled_names = {
+        name.strip().lower()
+        for name in os.environ.get(ENABLED_UPSTREAMS_ENV, "").split(",")
+        if name.strip()
+    }
     for raw in entries:
+        if (
+            isinstance(raw, dict)
+            and str(raw.get("name") or "").strip().lower() in enabled_names
+        ):
+            raw = {**raw, "enabled": True}
         upstream = _parse_entry(raw)
         if upstream is not None and upstream.name not in seen:
             seen.add(upstream.name)
