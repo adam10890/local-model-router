@@ -31,8 +31,8 @@ except ImportError:
 
 # Patterns that identify sensitive config fields to redact.
 _SENSITIVE_PATTERNS = (
-    "api_key", "token", "secret", "password", "bearer", "auth_key",
-    "private_key", "access_key",
+    "api_key", "token", "secret", "password", "passwd", "bearer", "auth_key",
+    "authorization", "credential", "private_key", "access_key",
 )
 
 

@@ -478,6 +478,19 @@ class TestObserverBackend:
         assert result["items"][0]["api_key"] == "[REDACTED]"
         assert result["items"][1]["name"] == "y"
 
+    def test_redact_covers_authorization_credentials_and_passwd(self, tmp_path):
+        from local_model_router.service.observer import _redact
+        result = _redact({
+            "authorization": "Bearer x",
+            "client_credentials": "y",
+            "passwd": "z",
+            "backend": "remote",
+        })
+        assert result["authorization"] == "[REDACTED]"
+        assert result["client_credentials"] == "[REDACTED]"
+        assert result["passwd"] == "[REDACTED]"
+        assert result["backend"] == "remote"
+
     def test_missing_config_yields_empty_slots(self, tmp_path):
         from local_model_router.service.observer import ObserverBackend
         obs = ObserverBackend(str(tmp_path / "missing.yaml"))

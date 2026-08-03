@@ -19,6 +19,10 @@ Apply this checklist to every code change before merge.
 8. For provider changes, run the safe `/health` smoke. Run the live
    `/v1/chat/completions` smoke only when a fleet is available and report when
    it was not available.
+9. For release-affecting merges, confirm `docs/1.0-beta-evidence.md` G4 /
+   gate 6 still records zero known security invariant violations (prompt
+   bodies and secrets absent from telemetry and config previews; public
+   no-auth binds refused unless explicitly acknowledged).
 
 Do not merge while any applicable check fails. Keep release fragments for the
 repository audit trail; a release commit may consolidate them into the
