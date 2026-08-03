@@ -78,6 +78,9 @@ def test_lifecycle_recovery_commands_are_documented_for_operators():
     assert 'sub.add_parser("rollback"' in cli
     assert 'sub.add_parser("update"' in cli
     assert 'sub.add_parser("doctor"' in cli
+
+
+def test_application_rollback_swaps_only_fixed_per_user_paths():
     rollback = (ROOT / "installer" / "windows" / "Rollback-Imperium.ps1").read_text(encoding="utf-8")
 
     assert "Test-StrictChildPath" in rollback

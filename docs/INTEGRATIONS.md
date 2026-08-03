@@ -34,6 +34,11 @@ local-first `A0_LMM_ROUTER_AUTO_UPSTREAMS=1` policy.
 
 ## Hermes
 
+Verified setup shape against Hermes Agent **v0.20.0**
+([`v2026.8.3`](https://github.com/NousResearch/hermes-agent/releases/tag/v2026.8.3)).
+Record your installed Hermes version in
+[`1.0-beta-evidence.md`](1.0-beta-evidence.md) when you smoke.
+
 In `%LOCALAPPDATA%\hermes\config.yaml`, keep provider `lmm-router` and change
 both `model.base_url` and `providers.lmm-router.base_url` to the dedicated URL.
 Set `model.default`, `providers.lmm-router.default_model`, and its `models`
@@ -54,6 +59,11 @@ providers:
 Keep the existing API-key value; use `local` only when router auth is off.
 
 ## Pi
+
+Verified setup shape against Pi **v0.81.1**
+([release](https://github.com/earendil-works/pi/releases/tag/v0.81.1)).
+Record your installed Pi version in
+[`1.0-beta-evidence.md`](1.0-beta-evidence.md) when you smoke.
 
 In `~/.pi/agent/models.json`, set the `lmm-router` provider's `baseUrl` to:
 

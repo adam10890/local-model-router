@@ -38,11 +38,24 @@ Before adding or updating any harness, verify its integration against its
 official repository and documentation. Check both the latest stable release
 and the version actually installed; the installed version is authoritative
 for configuration, while the latest release identifies upgrade gaps. Record
-the verified release or commit in the integration documentation, validate the
-provider names, settings schema, endpoints, authentication, model IDs, and
+the verified release or commit in the matrix below, validate the provider
+names, settings schema, endpoints, authentication, model IDs, and
 stream/tool behavior, then rerun the harness tests. Repeat the check whenever
 the runtime or its setup manifest changes. A generic "OpenAI-compatible"
 claim alone is not sufficient evidence of compatibility.
+
+### Version matrix (2026-08-03)
+
+| Harness | Official repo | Current stable checked | Installed (operator) | Router path | Setup doc |
+| --- | --- | --- | --- | --- | --- |
+| Agent Zero | [agent0ai/agent-zero](https://github.com/agent0ai/agent-zero) | **v2.7** (`87e1e591…`) verified | fill when validating | `/harnesses/agent_zero/{chat,utility}/v1` | section below |
+| Hermes | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) | **v0.20.0** (`v2026.8.3`) checked against docs | fill when validating | `/harnesses/hermes/v1` | [INTEGRATIONS.md](INTEGRATIONS.md#hermes) |
+| Pi | [earendil-works/pi](https://github.com/earendil-works/pi) (`badlogic/pi-mono`) | **v0.81.1** checked against docs | fill when validating | `/harnesses/pi/v1` | [INTEGRATIONS.md](INTEGRATIONS.md#pi) |
+| Claude Code (local) | Anthropic Claude Code + LiteLLM bridge | cloud Opus default; local via LiteLLM | fill when validating | `/harnesses/claude_code_local/v1` | section below |
+
+"Checked against docs" means the Imperium setup snippet was reviewed against
+that release's OpenAI-compatible / provider settings. It is not a substitute
+for recording the operator's installed version and a live smoke Pass.
 
 ## URLs
 
@@ -71,8 +84,10 @@ Verify every configured connection from the router host with:
 python .\scripts\smoke_harnesses.py
 ```
 
-Pass `--api-key <key>` when router authentication is enabled. The command
-checks `/models` and sends one short completion per connection.
+Pass `--api-key <key>` when router authentication is enabled. By default the
+command checks `/models`, one short completion, and one streaming completion
+per connection. Add `--tools` to include a no-op tools array; add `--no-stream`
+to skip streaming.
 
 ## Agent Zero 2.7
 

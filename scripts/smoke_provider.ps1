@@ -57,6 +57,8 @@ function Invoke-SmokeRequest {
 
 Invoke-SmokeRequest -Name "health" -Method GET -Path "/health"
 
+Invoke-SmokeRequest -Name "models" -Method GET -Path "/v1/models"
+
 Invoke-SmokeRequest -Name "fleet status" -Method GET -Path "/fleet/status"
 
 Invoke-SmokeRequest `
@@ -83,4 +85,16 @@ Invoke-SmokeRequest `
         messages = @(@{ role = "user"; content = "phase9 smoke test" })
     }
 
-Write-Host "Smoke complete."
+Invoke-SmokeRequest `
+    -Name "chat completions stream" `
+    -Method POST `
+    -Path "/v1/chat/completions" `
+    -AllowedStatus @(200, 503) `
+    -Body @{
+        model = "local-chat"
+        stream = $true
+        messages = @(@{ role = "user"; content = "phase9 stream smoke" })
+        max_tokens = 1
+    }
+
+Write-Host "Smoke complete. Record the result in docs/1.0-beta-evidence.md (live provider smoke)."
