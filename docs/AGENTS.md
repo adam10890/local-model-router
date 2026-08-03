@@ -8,6 +8,10 @@ Durable documentation for operators, contributors, and coding agents.
 
 - `../GOALS.md` owns product outcomes and 1.0 beta exit gates; docs must not
   contradict that contract.
+- `1.0-beta-evidence.md` owns Pass/Partial/Fail/Unknown records for beta
+  gates; missing evidence is Unknown, not Pass.
+- `1.0-beta-roadmap.html` owns accepted sequencing toward beta; it must stay
+  aligned with GOALS priorities and non-goals.
 - `PROVIDER.md` owns standalone provider runbook details.
 - `INTEGRATIONS.md` owns copy-paste client setup snippets for MCP and
   OpenAI-compatible clients.

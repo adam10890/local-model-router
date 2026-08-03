@@ -156,12 +156,14 @@
   <header>
     <h1>Imperium - מפת דרך ל-1.0 Beta</h1>
     <p class="subtitle">
-      מסמך חי למוצר עצמאי ופשוט: המשתמש מדליק תוכנה אחת, מקבל מודל חזק מקומי,
-      רשת תתי-סוכנים, דשבורד ויזואלי, ותוצרים בלי לראות קוד.
+      מסמך חי לרצף העבודה עד 1.0 beta. חוזה התוצאות נשאר ב־
+      <a href="../GOALS.md"><code>GOALS.md</code></a>; ראיות השערים ב־
+      <a href="1.0-beta-evidence.md"><code>docs/1.0-beta-evidence.md</code></a>.
+      יעד הבטא: התקנה → השלמה מקומית → חיבור לקוח → התאוששות מודרכת, בלי עריכת YAML.
     </p>
     <div class="meta">
       <span class="pill">סטטוס: חי ומתעדכן</span>
-      <span class="pill">עודכן: 2026-07-14 · Imperium 0.8.0</span>
+      <span class="pill">עודכן: 2026-08-03 · Imperium 0.9.0</span>
       <span class="pill">שם מוצר: Imperium</span>
       <span class="pill">כיוון מאושר: Native Imperium Studio</span>
       <span class="pill">עיקרון: Ponytail - מינימום שעובד</span>
@@ -177,32 +179,33 @@
         להבין Docker, llama.cpp, YAML או קוד.
       </p>
       <p>
-        LangGraph ו-LangFlow נשארים רעיונות להמשך. בגרסת הבטא נבנה flow
-        ויזואלי פשוט משלנו מעל מצב שכבר קיים ב-SQLite ובדשבורד.
+        LangGraph, LangFlow, ו־orchestration מתקדם נשארים אחרי שערי הכניסה מחדש
+        ב־<a href="future-orchestration.md"><code>future-orchestration.md</code></a>.
+        בטא 1.0 לא דורשת runner של רשת סוכנים.
       </p>
     </article>
 
     <article class="card third">
-      <h2>יעד בטא</h2>
+      <h2>יעד בטא (GOALS)</h2>
       <ul>
-        <li>התקנה/הפעלה אחת.</li>
+        <li>התקנה/הפעלה אחת בלי YAML ידני.</li>
         <li>בחירת מודל אוטומטית או מומלצת.</li>
-        <li>משימה אחת נכנסת, רשת סוכנים יוצאת לעבוד.</li>
-        <li>דשבורד מציג התקדמות ותוצרים.</li>
-        <li>אין prompt bodies בטלמטריה.</li>
+        <li>השלמת chat מקומית ראשונה.</li>
+        <li>חיבור לקוח/harness אחד לפחות.</li>
+        <li>התאוששות מודרכת; אין prompt bodies בטלמטריה.</li>
       </ul>
     </article>
   </section>
 
   <section class="card">
-    <h2>חוויית המשתמש הרצויה</h2>
+    <h2>חוויית המשתמש הרצויה (1.0 beta)</h2>
     <div class="flow">
       <div class="node"><strong>Start</strong><span>פותחים את האפליקציה</span></div>
       <div class="node"><strong>Doctor</strong><span>בדיקת חומרה ומודלים</span></div>
-      <div class="node"><strong>Auto Setup</strong><span>בחירת מודל ותפקידים</span></div>
-      <div class="node"><strong>Task</strong><span>המשתמש מתאר מטרה</span></div>
-      <div class="node"><strong>Agents</strong><span>Planner + workers</span></div>
-      <div class="node"><strong>Result</strong><span>תוצרים, דוח, artifacts</span></div>
+      <div class="node"><strong>Auto Setup</strong><span>runtime + מודל בהסכמה</span></div>
+      <div class="node"><strong>Chat</strong><span>השלמה מקומית ראשונה</span></div>
+      <div class="node"><strong>Connect</strong><span>harness / OpenAI client</span></div>
+      <div class="node"><strong>Recover</strong><span>next action ברור</span></div>
     </div>
   </section>
 
@@ -294,10 +297,11 @@
     <article class="card half">
       <h2>מה עדיין חסר לבטא אמיתית</h2>
       <ul>
-        <li>Runner מינימלי שמריץ תתי-סוכנים בפועל.</li>
-        <li>אימות clean-machine רחב על NVIDIA, AMD, Intel ו-CPU בלבד.</li>
-        <li>חתימה, update/rollback release-tested ויציבות חוזה API לקראת 1.0.</li>
-        <li>Browser smoke מלא לדשבורד בשתי השפות ובשתי ערכות הנושא.</li>
+        <li>אימות clean-machine רחב על NVIDIA, AMD, Intel ו-CPU בלבד (ראו evidence).</li>
+        <li>update / repair / rollback / uninstall release-tested על RC.</li>
+        <li>Browser smoke לדשבורד בשתי השפות ובשתי ערכות הנושא.</li>
+        <li>מטריצת גרסאות harness מול installed + current stable.</li>
+        <li class="note">Deferred אחרי beta: runner לרשת סוכנים / orchestration חדש.</li>
       </ul>
     </article>
   </section>
@@ -375,13 +379,13 @@
     </div>
 
     <div class="phase">
-      <div class="phase-id">0.8.0 · current</div>
+      <div class="phase-id">0.8.0 · shipped</div>
       <div>
         <h3>Windows first-run ו-Desktop רגוע</h3>
         <p>משתמש מפעיל קובץ אחד ומגיע לצ'אט מקומי בלי Docker, YAML או Python חיצוני.</p>
         <ul>
           <li>Setup בן שישה שלבים: חומרה, runtime, מודל, אישור, התקנה ובדיקה.</li>
-          <li>Qwen3 1.7B Q8 כברירת מחדל עם התאמה מוסברת לחומרה.</li>
+          <li>Qwen3 1.7B Q8 כברירת מחדל עם התאמה מוסברת לחומרה; הורדה מנוהלת בהסכמה מפורשת.</li>
           <li>Simple Home/Chat/Models/Connections ו-Advanced תפעולי נפרד.</li>
           <li>Agent Library עובד גם מתוך חבילת Windows; orchestration ישן אינו מוצג.</li>
         </ul>
@@ -389,15 +393,15 @@
     </div>
 
     <div class="phase">
-      <div class="phase-id">0.9.0</div>
+      <div class="phase-id">0.9.0 · current</div>
       <div>
-        <h3>Beta freeze</h3>
-        <p>אין פיצ'רים גדולים. רק יציבות, בדיקות, docs, התקנה.</p>
+        <h3>Measured models + beta evidence freeze</h3>
+        <p>אין פיצ'רים גדולים. רק יציבות, בדיקות, docs, התקנה, וראיות לשערי GOALS.</p>
         <ul>
-          <li>Windows-first QA: setup, start, restart, update.</li>
-          <li>בדיקת live smoke מול llama.cpp אמיתי.</li>
-          <li>Docs למשתמש: install, first task, troubleshooting.</li>
-          <li>Release checklist ו-known limitations.</li>
+          <li>Windows-first QA: setup, start, restart, update, repair, rollback, uninstall.</li>
+          <li>בדיקת live smoke מול llama.cpp אמיתי כשזמין.</li>
+          <li>Docs למשתמש: install, first task, troubleshooting; יומן ראיות ב־<code>1.0-beta-evidence.md</code>.</li>
+          <li>Release checklist ו-known limitations מסונכרנים ל־0.9.0.</li>
         </ul>
       </div>
     </div>
@@ -467,13 +471,13 @@
         </tr>
         <tr>
           <td>מודלים</td>
-          <td>המערכת מזהה מודלים קיימים ומציעה בחירה חזקה לפי חומרה.</td>
-          <td>Cookbook + apply recommendation smoke.</td>
+          <td>המערכת מזהה מודלים קיימים ומציעה בחירה חזקה לפי חומרה; bootstrap מנוהל בהסכמה.</td>
+          <td>Cookbook scan + setup recommendation evidence (apply-recommendation deferred).</td>
         </tr>
         <tr>
-          <td>סוכנים</td>
-          <td>ארבעת סוכני הספרייה רצים דרך אותו router; orchestration מתקדם נשאר אופציונלי.</td>
-          <td>Agent Library source + bundled smoke.</td>
+          <td>לקוחות</td>
+          <td>OpenAI API + harness profiles עם setup מגרסאות; Agent Library דרך אותו router.</td>
+          <td>Hermetic harness/API tests + versioned INTEGRATIONS/HARNESSES + live smoke.</td>
         </tr>
         <tr>
           <td>דשבורד</td>
@@ -522,8 +526,8 @@
         </tr>
         <tr>
           <td>1.x</td>
-          <td>Curated model downloader</td>
-          <td>אחרי שיש UX ברור לגודל הורדה, רישיון, שטח דיסק ו-hash verification.</td>
+          <td>Curated model marketplace / multi-model downloader</td>
+          <td>First-run כבר מוריד מודל bootstrap בהסכמה. marketplace רחב נדחה אחרי UX לגודל/רישיון/דיסק/hash.</td>
         </tr>
         <tr>
           <td>2.0</td>
@@ -550,10 +554,10 @@
       <h2>שאלות פתוחות</h2>
       <ul>
         <li><span class="ok">סגור:</span> שם המוצר הוא Imperium.</li>
-        <li><span class="ok">סגור:</span> 1.0 Beta בוחר ממודלים קיימים; הורדת מודלים נדחית.</li>
-        <li><span class="ok">סגור:</span> runner ראשון הוא subprocess מקומי; container הוא opt-in עתידי.</li>
-        <li>איזה agent loop ראשון הכי חשוב: coding, research, docs או planning?</li>
-        <li><span class="ok">סגור:</span> Package V0 המינימלי מתועד במסמך הזה.</li>
+        <li><span class="ok">סגור:</span> 1.0 Beta משתמש במודלים קיימים או bootstrap מנוהל בהסכמה; marketplace מודלים נדחה.</li>
+        <li><span class="ok">סגור:</span> orchestration/runner מתקדם נדחה עד שערי <code>future-orchestration.md</code>.</li>
+        <li><span class="ok">סגור:</span> יעד beta = GOALS north-star (לא רשת סוכנים).</li>
+        <li><span class="ok">סגור:</span> Package V0 מתועד ככיוון עתידי, לא כשער beta.</li>
       </ul>
     </article>
   </section>

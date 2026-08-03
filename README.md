@@ -29,7 +29,12 @@ Agent Zero is client #1, not the owner.
 
 ## Status
 
-**0.9.0 - Measured models and predictable admission.** What works today:
+**0.9.0 - Measured models and predictable admission.** Product outcomes and
+1.0 beta exit gates live in [`GOALS.md`](GOALS.md). Recorded gate evidence
+lives in [`docs/1.0-beta-evidence.md`](docs/1.0-beta-evidence.md). Sequence
+of accepted work: [`docs/1.0-beta-roadmap.html`](docs/1.0-beta-roadmap.html).
+
+What works today:
 
 | Surface | Endpoint | Notes |
 |---|---|---|
@@ -152,8 +157,10 @@ imperium evaluate-models --base-url http://127.0.0.1:9000
 The evaluator runs sequentially, reuses unchanged fingerprints, never executes
 generated code, and stores only aggregate metrics—never prompts or responses.
 
-Roadmap (see `AGENTS.md`): first-run stabilization, per-app API keys, rate
-limits, Prometheus-style `/metrics`, and one-click cookbook recommendations.
+Until P0 gates in `GOALS.md` pass, prioritize stability and recorded evidence
+in `docs/1.0-beta-evidence.md`. Deferred after beta: per-app API keys, rate
+limits, Prometheus-style `/metrics`, orchestration replacement, and one-click
+cookbook apply-recommendation.
 
 ## Windows first run
 

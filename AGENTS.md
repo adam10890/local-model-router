@@ -92,13 +92,16 @@ codebase.
   (11) ✅ router-backed built-in agent library (`GET /agents`,
   `POST /agents/{id}/runs`, `[agents]` extra); agent prompts remain out of
   telemetry and per-agent `local_only` preserves fleet-only handling.
-  (12) Imperium 0.8.0 Windows-first setup: managed llama.cpp, hardware-aware
+  (12) ✅ Imperium 0.8.0 Windows-first setup: managed llama.cpp, hardware-aware
   Qwen3 bootstrap, readiness API, self-contained installer, and task-oriented
   Simple/Advanced dashboard. The legacy `/orchestrator/*` API remains
   authenticated and deprecated but is hidden from the dashboard.
-  Future: orchestration replacement after first-run stability, per-app API
-  keys, rate limits, `/metrics`, `/routing/history`, and one-click "apply
-  recommendation" (cookbook → fleet control).
+  (13) ✅ 0.9.0 measured models / admission; beta readiness tracked against
+  `GOALS.md` with evidence in `docs/1.0-beta-evidence.md`.
+  Future (after P0 beta gates): orchestration replacement per
+  `docs/future-orchestration.md`, per-app API keys, rate limits, `/metrics`,
+  `/routing/history`, and one-click "apply recommendation"
+  (cookbook → fleet control).
 - Renaming modules toward a layered layout (`api/`, `routing/`, `backends/`,
   `telemetry/`) is allowed once tests cover the seam being moved — never as a
   big-bang rewrite.
