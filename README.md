@@ -236,7 +236,8 @@ What "start" does follows `global.backend` in `conf/llama_cpp_servers.yaml`:
   Docker daemon.
 - `subprocess` — spawns local `llama-server` processes.
 - `remote` — registers and health-checks servers you started yourself
-  (no process control).
+  (no process control). The dashboard hides start/stop controls for this
+  backend and directs recovery to the external server manager.
 
 The endpoints honor the API key like everything else, and the dashboard
 shows start/stop buttons per slot only when the flag is on.

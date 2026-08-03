@@ -111,6 +111,8 @@ def test_dashboard_has_global_categorized_system_alerts(tmp_path, monkeypatch):
     assert '["configuration","system"]' in html
     assert 'if(key==="status")state.error=""' in html
     assert ".drawer { position: fixed; z-index: 70;" in html
+    assert "control.enabled&&control.supports_start_stop" in html
+    assert 'control.backend==="remote"' in html
 
 
 # ---------------------------------------------------------------------------

@@ -19,13 +19,16 @@ def _issue(
     href: str,
     en: str,
     he: str,
+    *,
+    action_en: str = "Resolve",
+    action_he: str = "פתרון",
 ) -> dict[str, Any]:
     return {
         "code": code,
         "category": category,
         "severity": severity,
         "message": _text(en, he),
-        "action": _action(f"resolve_{code}", href, "Resolve", "פתרון"),
+        "action": _action(f"resolve_{code}", href, action_en, action_he),
     }
 
 
@@ -51,6 +54,15 @@ def build_ui_status(
         slot for slot in slots_health if str(slot.get("health") or "").lower() in healthy_values
     ]
     server_ready = bool(healthy_slots)
+    fleet_backend = next(
+        (
+            str(slot.get("backend_type") or "").lower()
+            for slot in slots_health
+            if slot.get("enabled")
+        ),
+        "unknown",
+    )
+    externally_managed = fleet_backend == "remote"
 
     recommendation = setup_state.get("recommendation") or {}
     live_ram = compute.get("ram") or hardware.get("ram") or {}
@@ -132,8 +144,19 @@ def build_ui_status(
                 "system",
                 "blocking",
                 "#/advanced/fleet",
-                "The model server is configured but not responding.",
-                "שרת המודל מוגדר אך אינו מגיב.",
+                (
+                    "The external model server is not responding. "
+                    "Start it outside Imperium, then refresh."
+                    if externally_managed
+                    else "The model server is configured but not responding."
+                ),
+                (
+                    "שרת המודל החיצוני אינו מגיב. יש להפעיל אותו מחוץ ל־Imperium ואז לרענן."
+                    if externally_managed
+                    else "שרת המודל מוגדר אך אינו מגיב."
+                ),
+                action_en="View guidance" if externally_managed else "Resolve",
+                action_he="הצגת הנחיות" if externally_managed else "פתרון",
             )
         )
 
@@ -171,7 +194,12 @@ def build_ui_status(
         next_action = _action("finish_setup", "#/setup/plan", "Finish setup", "סיום ההגדרה")
     else:
         overall = "needs_attention"
-        next_action = _action("open_fleet", "#/advanced/fleet", "Open fleet controls", "פתיחת בקרות הצי")
+        next_action = _action(
+            "open_fleet",
+            "#/advanced/fleet",
+            "Open server guidance" if externally_managed else "Open fleet controls",
+            "פתיחת הנחיות השרת" if externally_managed else "פתיחת בקרות הצי",
+        )
 
     active_slot = healthy_slots[0] if healthy_slots else next(
         (slot for slot in slots_health if slot.get("enabled")),
