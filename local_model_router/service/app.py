@@ -527,6 +527,7 @@ def create_app(
     control_enabled = fleet_control_enabled()
     fleet_control = FleetControlHandler(observer.config_path)
     fleet_backend = configured_backend(observer.config_path)
+    supports_start_stop = fleet_backend in {"auto", "docker", "subprocess"}
 
     async def compute_status() -> tuple[dict[str, Any], dict[str, Any]]:
         nonlocal compute_cache
@@ -737,7 +738,7 @@ def create_app(
         store.record_model_snapshot("observer_slots", snapshot)
         agents = store.list_agents()
         vram, compute = await compute_status()
-        managed_slots = await fleet_control.status() if control_enabled else {}
+        managed_slots = await fleet_control.status() if control_enabled and supports_start_stop else {}
         runtime_fields = (
             "running",
             "healthy",
@@ -788,6 +789,7 @@ def create_app(
                 "fleet_control": {
                     "enabled": control_enabled,
                     "backend": fleet_backend,
+                    "supports_start_stop": supports_start_stop,
                 },
             }
         )
@@ -802,6 +804,12 @@ def create_app(
                     "set A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1 and restart to enable slot start/stop",
                     "fleet_control_disabled",
                     403,
+                )
+            if fleet_backend == "remote":
+                return _openai_error(
+                    "fleet backend is externally managed; start or stop its model servers outside Imperium",
+                    "remote_backend_unmanaged",
+                    409,
                 )
             return await handler(request)
 

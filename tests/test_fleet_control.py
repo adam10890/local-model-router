@@ -30,14 +30,14 @@ global:
 """
 
 
-def _make_app(tmp_path, monkeypatch, *, control=False, api_key=None):
+def _make_app(tmp_path, monkeypatch, *, control=False, api_key=None, backend="remote"):
     from local_model_router.helpers.compute_monitor import CPUStats, ComputeSnapshot
     from local_model_router.helpers.llama_cpp_manager import BackendManager
     from local_model_router.service.app import create_app
 
     BackendManager._instance = None
     cfg = tmp_path / "llama_cpp_servers.yaml"
-    cfg.write_text(_ROUTING_CONFIG, encoding="utf-8")
+    cfg.write_text(_ROUTING_CONFIG.replace("backend: remote", f"backend: {backend}"), encoding="utf-8")
 
     async def health_probe(url, timeout):
         return {"ok": True}
@@ -76,20 +76,28 @@ def test_fleet_control_disabled_by_default(tmp_path, monkeypatch):
 def test_fleet_status_reports_control_block(tmp_path, monkeypatch):
     client, manager_cls = _make_app(tmp_path, monkeypatch, control=False)
     body = client.get("/fleet/status").json()
-    assert body["fleet_control"] == {"enabled": False, "backend": "remote"}
+    assert body["fleet_control"] == {
+        "enabled": False,
+        "backend": "remote",
+        "supports_start_stop": False,
+    }
     assert body["docker_socket_enabled"] is False
     manager_cls._instance = None
 
     client, manager_cls = _make_app(tmp_path, monkeypatch, control=True)
     body = client.get("/fleet/status").json()
-    assert body["fleet_control"] == {"enabled": True, "backend": "remote"}
+    assert body["fleet_control"] == {
+        "enabled": True,
+        "backend": "remote",
+        "supports_start_stop": False,
+    }
     # remote backend never touches the docker socket, even with control on
     assert body["docker_socket_enabled"] is False
     manager_cls._instance = None
 
 
 def test_fleet_status_includes_safe_managed_runtime(tmp_path, monkeypatch):
-    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True)
+    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True, backend="subprocess")
 
     async def fake_status(self):
         return {
@@ -122,7 +130,7 @@ def test_fleet_status_includes_safe_managed_runtime(tmp_path, monkeypatch):
 
 
 def test_start_slot_delegates_to_backend_manager(tmp_path, monkeypatch):
-    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True)
+    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True, backend="subprocess")
 
     calls = []
 
@@ -148,13 +156,13 @@ def test_start_slot_delegates_to_backend_manager(tmp_path, monkeypatch):
     assert body["ok"] is True
     assert body["action"] == "start"
     assert body["slot"] == "chat"
-    assert body["backend"] == "remote"
+    assert body["backend"] == "subprocess"
     assert calls == ["chat"]
     manager_cls._instance = None
 
 
 def test_start_unknown_slot_returns_404(tmp_path, monkeypatch):
-    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True)
+    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True, backend="subprocess")
 
     resp = client.post("/fleet/slots/no-such-slot/start")
 
@@ -164,7 +172,7 @@ def test_start_unknown_slot_returns_404(tmp_path, monkeypatch):
 
 
 def test_stop_slot_delegates_and_reports(tmp_path, monkeypatch):
-    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True)
+    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True, backend="subprocess")
 
     async def fake_stop(self, name):
         return True
@@ -185,7 +193,7 @@ def test_stop_slot_delegates_and_reports(tmp_path, monkeypatch):
 
 
 def test_start_all_delegates_to_backend_manager(tmp_path, monkeypatch):
-    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True)
+    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True, backend="subprocess")
 
     async def fake_start_all(self):
         return {
@@ -206,7 +214,13 @@ def test_start_all_delegates_to_backend_manager(tmp_path, monkeypatch):
 
 
 def test_control_requires_bearer_token_when_api_key_configured(tmp_path, monkeypatch):
-    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True, api_key="local-secret")
+    client, manager_cls = _make_app(
+        tmp_path,
+        monkeypatch,
+        control=True,
+        api_key="local-secret",
+        backend="subprocess",
+    )
 
     resp = client.post("/fleet/slots/chat/start")
     assert resp.status_code == 401
@@ -222,3 +236,13 @@ def test_control_requires_bearer_token_when_api_key_configured(tmp_path, monkeyp
     )
     assert resp.status_code == 200
     manager_cls._instance = None
+
+
+def test_remote_backend_rejects_lifecycle_actions_without_startup_probe(tmp_path, monkeypatch):
+    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True)
+
+    for path in ("/fleet/slots/chat/start", "/fleet/slots/chat/stop", "/fleet/start", "/fleet/stop"):
+        resp = client.post(path)
+        assert resp.status_code == 409, path
+        assert resp.json()["error"]["code"] == "remote_backend_unmanaged"
+    assert manager_cls._instance is None

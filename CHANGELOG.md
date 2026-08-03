@@ -32,6 +32,9 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- Remote fleets now fail lifecycle requests immediately instead of waiting for
+  a startup probe, and the dashboard shows external-server recovery guidance
+  instead of non-functional start/stop controls.
 - Agent Zero is now present in the canonical harness configuration, and its
   generated setup uses the supported Agent Zero 2.7 `other` provider with
   separate Docker-reachable Main and Utility Chat Completions URLs.
