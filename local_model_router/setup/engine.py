@@ -5,8 +5,10 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
+import sys
 import tempfile
 import threading
 import time
@@ -16,7 +18,6 @@ import urllib.request
 import zipfile
 from importlib.resources import files
 from pathlib import Path
-import sys
 from typing import Any
 
 import psutil
@@ -24,10 +25,17 @@ import yaml
 
 from .hardware import collect_hardware_profile
 from local_model_router.cookbook.engine import assess_catalog_model
+from local_model_router.cookbook.gguf import (
+    estimate_params,
+    quant_from_filename,
+    read_gguf_meta,
+)
 
 
 # ponytail: setup state is low-throughput; use per-path locks if writes ever contend.
 _JSON_WRITE_LOCK = threading.Lock()
+_EMBED_NAME_HINTS = ("embed", "bge-", "nomic", "minilm", "gte-", "e5-")
+_PARAMS_FROM_NAME = re.compile(r"(?i)(\d+(?:\.\d+)?)\s*b\b")
 
 
 class SetupError(RuntimeError):
@@ -265,6 +273,8 @@ class SetupEngine:
         self,
         model_id: str,
         rows: list[dict[str, Any]] | None = None,
+        hardware: dict[str, Any] | None = None,
+        backend: str | None = None,
     ) -> dict[str, Any] | None:
         available = rows if rows is not None else self.discover().get("local_models", [])
         row = next(
@@ -273,24 +283,80 @@ class SetupEngine:
         )
         if not row:
             return None
+        return self._assess_local_gguf(row, hardware or self.hardware(), backend or "cpu")
+
+    def _assess_local_gguf(
+        self,
+        row: dict[str, Any],
+        hardware: dict[str, Any],
+        backend: str,
+    ) -> dict[str, Any] | None:
         path = Path(str(row["path"])).resolve(strict=False)
         try:
             relative = path.relative_to(self.models_dir).as_posix()
-            size_gb = round(path.stat().st_size / 1024**3, 2)
+            size_bytes = path.stat().st_size
         except (OSError, ValueError):
             return None
+        size_gb = round(size_bytes / 1024**3, 2) or round(size_bytes / 1024**3, 4)
+        quant = quant_from_filename(path.name) or "GGUF"
+        display_name = str(row.get("name") or path.stem)
+        params: int | None = None
+        try:
+            meta = read_gguf_meta(path)
+            if meta.quant:
+                quant = meta.quant
+            if meta.name:
+                display_name = meta.name
+            if meta.parameter_count:
+                params = int(meta.parameter_count)
+        except (OSError, ValueError):
+            pass
+        if params is None:
+            match = _PARAMS_FROM_NAME.search(path.stem)
+            if match:
+                params = int(float(match.group(1)) * 1_000_000_000)
+            else:
+                params = estimate_params(size_bytes, quant if quant != "GGUF" else "Q4_K_M")
+        parameters_b = round(params / 1_000_000_000, 2)
+        # ponytail: kv ≈ 0.05 GiB per B params; upgrade to GGUF geometry when cookbook is wired into setup
+        estimated_kv = max(0.25, parameters_b * 0.05)
+        fit_info = assess_catalog_model(
+            {
+                "size_gb": size_gb,
+                "size_bytes": size_bytes,
+                "min_vram_gb": size_gb + estimated_kv + 0.8,
+                "min_ram_gb": size_gb + estimated_kv + 3.0,
+                "estimated_kv_cache_gb": estimated_kv,
+            },
+            hardware,
+            backend,
+        )
+        reason = str(fit_info["fit_reason"])
         return {
             **row,
+            "name": display_name,
             "filename": relative,
             "size_gb": size_gb,
+            "parameters_b": parameters_b,
+            "quant": quant,
             "installed": True,
             "local": True,
-            "fit": "local",
-            "fit_reason": "Already installed in the selected models folder",
-            "quant": "GGUF",
+            "source": "local_installed",
             "license": "Local file",
-            "capabilities": [],
+            "capabilities": ["chat"],
+            **fit_info,
+            "fit_reason_i18n": {
+                "en": reason,
+                "he": "המודל המותקן החזק ביותר שמתאים לחומרה שזוהתה"
+                if fit_info["fit"] != "incompatible"
+                else "הזיכרון שזוהה נמוך מדרישת המינימום הבטוחה",
+            },
         }
+
+    @staticmethod
+    def _is_embed_local(row: dict[str, Any]) -> bool:
+        haystack = f"{row.get('name') or ''} {row.get('id') or ''}".lower()
+        return any(hint in haystack for hint in _EMBED_NAME_HINTS)
 
     def set_models_dir(self, value: str) -> dict[str, Any]:
         if not isinstance(value, str) or not value.strip():
@@ -466,6 +532,15 @@ class SetupEngine:
         hardware: dict[str, Any] | None = None,
         backend: str | None = None,
     ) -> dict[str, Any] | None:
+        hardware = hardware or self.hardware()
+        backend = backend or next(
+            (row["id"] for row in self.backend_candidates(hardware) if row.get("eligible")),
+            "cpu",
+        )
+        local = self._recommend_local(hardware, backend)
+        if local:
+            return local
+        # Empty models folder: keep the approved first-run bootstrap catalog pick.
         candidates = [row for row in self.models(hardware, backend) if row["fit"] != "incompatible"]
         if not candidates:
             return None
@@ -479,6 +554,35 @@ class SetupEngine:
             reverse=True,
         )
         return candidates[0]
+
+    def _recommend_local(
+        self,
+        hardware: dict[str, Any],
+        backend: str,
+    ) -> dict[str, Any] | None:
+        rows = self.discover().get("local_models") or []
+        if not rows:
+            return None
+        assessed: list[dict[str, Any]] = []
+        for row in rows:
+            if self._is_embed_local(row):
+                continue
+            enriched = self._assess_local_gguf(row, hardware, backend)
+            if not enriched or enriched.get("fit") == "incompatible":
+                continue
+            assessed.append(enriched)
+        if not assessed:
+            return None
+        rank = {"full_gpu": 3, "partial_offload": 2, "cpu": 1}
+        assessed.sort(
+            key=lambda row: (
+                rank.get(str(row.get("fit")), 0),
+                float(row.get("parameters_b") or 0),
+                float(row.get("size_gb") or 0),
+            ),
+            reverse=True,
+        )
+        return assessed[0]
 
     def state(self, *, refresh_hardware: bool = False) -> dict[str, Any]:
         hardware = self.hardware(refresh=refresh_hardware)

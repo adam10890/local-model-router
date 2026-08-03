@@ -96,6 +96,55 @@ def test_recommends_pinned_first_run_model(tmp_path):
     assert recommendation["fit"] == "full_gpu"
 
 
+def test_recommends_strongest_local_model_when_folder_has_ggufs(tmp_path):
+    engine = SetupEngine(home=tmp_path / "home", config_path=tmp_path / "config.yaml")
+    engine._atomic_json(engine.hardware_path, _hardware())
+    engine.hardware = lambda *, refresh=False: engine._read_json(engine.hardware_path)
+    models = tmp_path / "my-models"
+    models.mkdir()
+    (models / "tiny-1.5B-Q4_K_M.gguf").write_bytes(b"small")
+    (models / "coder-14B-Q4_K_M.gguf").write_bytes(b"large")
+    (models / "nomic-embed-text.gguf").write_bytes(b"embed")
+    engine.set_models_dir(str(models))
+
+    recommendation = engine.recommendation()
+
+    assert recommendation is not None
+    assert recommendation["id"] == "coder-14B-Q4_K_M"
+    assert recommendation["local"] is True
+    assert recommendation["parameters_b"] == 14.0
+    assert recommendation["source"] == "local_installed"
+
+
+def test_local_recommendation_skips_models_that_do_not_fit(tmp_path, monkeypatch):
+    engine = SetupEngine(home=tmp_path / "home", config_path=tmp_path / "config.yaml")
+    hardware = _hardware()
+    hardware["gpus"][0]["dedicated_vram_mb"] = 4096
+    hardware["ram"]["total_mb"] = 8192
+    engine._atomic_json(engine.hardware_path, hardware)
+    engine.hardware = lambda *, refresh=False: engine._read_json(engine.hardware_path)
+    models = tmp_path / "my-models"
+    models.mkdir()
+    huge = models / "giant-70B-Q8_0.gguf"
+    huge.write_bytes(b"huge")
+    small = models / "tiny-1.7B-Q4_K_M.gguf"
+    small.write_bytes(b"tiny")
+    engine.set_models_dir(str(models))
+
+    real_stat = Path.stat
+
+    def fake_stat(self, *args, **kwargs):
+        if self.name == "giant-70B-Q8_0.gguf":
+            return type("Stat", (), {"st_size": 80 * 1024**3})()
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", fake_stat)
+    recommendation = engine.recommendation()
+
+    assert recommendation["id"] == "tiny-1.7B-Q4_K_M"
+    assert recommendation["local"] is True
+
+
 def test_plan_is_explicit_and_requires_download_consent(tmp_path):
     engine = _engine(tmp_path)
     plan = engine.plan({"backend": "cuda12", "model_id": "qwen3-1.7b-q8"})
