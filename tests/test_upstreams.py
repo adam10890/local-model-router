@@ -85,6 +85,15 @@ def test_load_upstreams_parses_and_filters(tmp_path):
     assert vllm.serves_inference is False  # disabled
 
 
+def test_env_enables_a_declared_upstream_without_editing_yaml(tmp_path, monkeypatch):
+    monkeypatch.setenv("A0_LMM_ROUTER_ENABLED_UPSTREAMS", " vllm,unknown ")
+
+    upstreams = load_upstreams(_write(tmp_path, "upstreams.yaml", _UPSTREAMS))
+
+    assert upstreams[1].name == "vllm"
+    assert upstreams[1].serves_inference is True
+
+
 
 def test_load_upstreams_missing_file_yields_empty(tmp_path):
     assert load_upstreams(tmp_path / "nope.yaml") == []

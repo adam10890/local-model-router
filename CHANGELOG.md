@@ -6,6 +6,8 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Machine-local opt-in for declared upstream providers through
+  `A0_LMM_ROUTER_ENABLED_UPSTREAMS`, without editing committed defaults.
 - Declared per-upstream usage `limits` (rolling `"5h"`/`"7d"` windows,
   `max_tokens`/`max_requests`) and a `subscription` provider `type` for
   CLI-driven providers with no HTTP surface (Codex, Ollama Cloud's CLI path),

@@ -6,6 +6,8 @@
 #
 # API keys are read from the environment variable named in api_key_env.
 # Never put key material in this file.
+# Disabled entries can be enabled per machine with the comma-separated
+# A0_LMM_ROUTER_ENABLED_UPSTREAMS environment variable.
 #
 # Auto-routing (opt-in): set A0_LMM_ROUTER_AUTO_UPSTREAMS=1 and declare a
 # "models:" list of bare model ids on an upstream to let `model: auto` fall
