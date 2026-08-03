@@ -63,3 +63,18 @@ def test_application_rollback_swaps_only_fixed_per_user_paths():
     assert 'Programs "Imperium.previous"' in rollback
     assert "Move-Item -LiteralPath $Previous -Destination $Target" in rollback
     assert 'Join-Path $Target "STOP.bat"' in rollback
+
+
+def test_application_uninstall_is_path_scoped_and_preserves_settings():
+    uninstall = (ROOT / "installer" / "windows" / "Uninstall-Imperium.ps1").read_text(encoding="utf-8")
+    launcher = (ROOT / "installer" / "windows" / "Uninstall-Imperium.bat").read_text(encoding="utf-8")
+    build = (ROOT / "scripts" / "build_windows_bundle.ps1").read_text(encoding="utf-8")
+
+    assert "Test-StrictChildPath" in uninstall
+    assert 'Programs "Imperium"' in uninstall
+    assert 'Programs "Imperium.previous"' in uninstall
+    assert 'Join-Path $Target "STOP.bat"' in uninstall
+    assert "setup --stop-runtime" in uninstall
+    assert "Models and settings remain under %LOCALAPPDATA%\\Imperium." in uninstall
+    assert "Uninstall-Imperium.ps1" in launcher
+    assert "Uninstall-Imperium.bat" in build

@@ -29,6 +29,8 @@ codebase.
   `upstreams.yaml`, `apps.yaml`, `harnesses.yaml`, and `agents.yaml` are
   committed defaults (no secrets). Packaged installs also carry an immutable
   fallback agent catalog.
+- `GOALS.md` — product outcomes and 1.0 beta exit gates; engineering work
+  must serve these goals without overriding their priorities or non-goals.
 - `docs/` — durable runbooks and development workflow docs.
 - `CONTRIBUTING.md` — public Git and contribution workflow; keep it aligned
   with `docs/development/git-workflow.md`.

@@ -131,6 +131,7 @@ Copy-Item -LiteralPath (Join-Path $Root "installer\windows\Install-Imperium.bat"
 Copy-Item -LiteralPath (Join-Path $Root "installer\windows\Rollback-Imperium.ps1") -Destination $Stage
 Copy-Item -LiteralPath (Join-Path $Root "installer\windows\Rollback-Imperium.bat") -Destination $Stage
 Copy-Item -LiteralPath (Join-Path $Root "installer\windows\Uninstall-Imperium.ps1") -Destination $Stage
+Copy-Item -LiteralPath (Join-Path $Root "installer\windows\Uninstall-Imperium.bat") -Destination $Stage
 
 if ($IncludeOfflineAssets) {
     $Offline = Join-Path $Stage "offline"

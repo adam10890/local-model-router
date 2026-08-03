@@ -6,6 +6,8 @@ Durable documentation for operators, contributors, and coding agents.
 
 ## Ownership
 
+- `../GOALS.md` owns product outcomes and 1.0 beta exit gates; docs must not
+  contradict that contract.
 - `PROVIDER.md` owns standalone provider runbook details.
 - `INTEGRATIONS.md` owns copy-paste client setup snippets for MCP and
   OpenAI-compatible clients.
