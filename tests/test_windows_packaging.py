@@ -53,9 +53,31 @@ def test_cleanroom_verifies_checksum_and_live_installed_surfaces():
     assert 'http://127.0.0.1:9100/agents' in cleanroom
     assert 'agents/code-review/runs' in cleanroom
     assert 'Health.service -ne "lmm-router-observer"' in cleanroom
+    assert 'http://127.0.0.1:9100/health' in cleanroom
+    assert 'http://127.0.0.1:9100/ui/status' in cleanroom
+    assert 'http://127.0.0.1:9100/v1/models' in cleanroom
+    assert "setup --repair" not in cleanroom  # lifecycle RC is operator checklist, not cleanroom
+    assert "Uninstall-Imperium" not in cleanroom
 
 
-def test_application_rollback_swaps_only_fixed_per_user_paths():
+def test_lifecycle_recovery_commands_are_documented_for_operators():
+    evidence = (ROOT / "docs" / "1.0-beta-evidence.md").read_text(encoding="utf-8")
+    cli = (ROOT / "local_model_router" / "cli.py").read_text(encoding="utf-8")
+
+    for needle in (
+        "setup --repair",
+        "imperium doctor",
+        "imperium update",
+        "imperium rollback",
+        "Uninstall-Imperium",
+        "Rollback-Imperium",
+        "test_windows_cleanroom.ps1",
+    ):
+        assert needle in evidence
+    assert 'setup.add_argument("--repair"' in cli
+    assert 'sub.add_parser("rollback"' in cli
+    assert 'sub.add_parser("update"' in cli
+    assert 'sub.add_parser("doctor"' in cli
     rollback = (ROOT / "installer" / "windows" / "Rollback-Imperium.ps1").read_text(encoding="utf-8")
 
     assert "Test-StrictChildPath" in rollback
