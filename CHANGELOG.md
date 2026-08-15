@@ -6,6 +6,10 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Beta 1.0 gate program (repo-side): Windows uninstall path guards, living
+  evidence log (`docs/1.0-beta-evidence.md`), G4 config-preview redaction
+  attestation, first-run/recovery operator checklists, harness version matrix
+  + expanded smoke scripts, and hermetic dashboard EN/HE smoke.
 - Machine-local opt-in for declared upstream providers through
   `A0_LMM_ROUTER_ENABLED_UPSTREAMS`, without editing committed defaults.
 - Declared per-upstream usage `limits` (rolling `"5h"`/`"7d"` windows,
@@ -34,6 +38,9 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- Managed subprocess fleet status now probes live process health, automatically
+  retries crashed slots within the configured limit, and closes the alert
+  drawer before navigating to recovery controls.
 - Remote fleets now fail lifecycle requests immediately instead of waiting for
   a startup probe, and the dashboard shows external-server recovery guidance
   instead of non-functional start/stop controls.

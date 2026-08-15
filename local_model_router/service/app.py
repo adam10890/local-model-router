@@ -328,6 +328,14 @@ def _forward_payload(body: Dict[str, Any], selected_model: Optional[str], *, str
     payload = {k: v for k, v in body.items() if k not in _ROUTING_ONLY_KEYS}
     payload["stream"] = stream
     payload["model"] = selected_model or payload.get("model") or "local"
+    # ponytail: thinking MoEs (Carnice) spend tokens on reasoning before content;
+    # Hermes often sends modest max_tokens → empty content + finish=length. Raise
+    # when missing/low; keep explicit large budgets. Upgrade: per-model budgets in YAML.
+    model_l = str(payload.get("model") or "").lower()
+    if "carnice" in model_l:
+        mt = payload.get("max_tokens")
+        if mt is None or (isinstance(mt, (int, float)) and int(mt) < 2048):
+            payload["max_tokens"] = 4096
     return payload
 
 

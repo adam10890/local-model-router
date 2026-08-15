@@ -35,11 +35,11 @@ exists and is merged, delete it. If it is still active, reclassify it to
 
 ## Current branch inventory
 
-As of 2026-08-03:
+As of 2026-08-15:
 
 | Branch | Status | Action |
 | --- | --- | --- |
-| `main` | active trunk | Branch new work from here. Beta gate evidence: `docs/1.0-beta-evidence.md`. |
+| `main` | active trunk | Branch new work from here. Beta gate Phases 0–5 merged (`3b3b006`…`7708717`). Evidence: `docs/1.0-beta-evidence.md`. |
 
 Add an inventory row only when a parallel or long-lived branch is explicitly
 approved. Remove the row when the branch is merged and deleted; do not retain

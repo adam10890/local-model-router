@@ -163,7 +163,7 @@
     </p>
     <div class="meta">
       <span class="pill">סטטוס: חי ומתעדכן</span>
-      <span class="pill">עודכן: 2026-08-03 · Imperium 0.9.0</span>
+      <span class="pill">עודכן: 2026-08-05 · Imperium 0.9.0</span>
       <span class="pill">שם מוצר: Imperium</span>
       <span class="pill">כיוון מאושר: Native Imperium Studio</span>
       <span class="pill">עיקרון: Ponytail - מינימום שעובד</span>
@@ -530,12 +530,132 @@
           <td>First-run כבר מוריד מודל bootstrap בהסכמה. marketplace רחב נדחה אחרי UX לגודל/רישיון/דיסק/hash.</td>
         </tr>
         <tr>
+          <td>1.x</td>
+          <td><a href="#deep-local-airllm">נתיב deep-local עם AirLLM</a></td>
+          <td>רק אם benchmark מוכיח ש־llama.cpp עם partial offload אינו מספיק ושמודל גדול יותר מוסיף איכות שימושית.</td>
+        </tr>
+        <tr>
           <td>2.0</td>
           <td>Plugin/agent marketplace מקומי</td>
           <td>אחרי שה-core runner יציב ויש פורמט persona/ticket סופי.</td>
         </tr>
       </tbody>
     </table>
+  </section>
+
+  <section class="card" id="deep-local-airllm">
+    <h2>תוכנית עבודה אחרי בטא: llama.cpp workers + AirLLM deep-local</h2>
+    <p>
+      כיוון ניסויי: <strong>llama.cpp</strong> נשאר מנוע העבודה המהיר למודלים קטנים
+      ולמשימות מקביליות; <strong>AirLLM</strong> נבחן כנתיב מקומי קר ואיטי למודל גדול
+      שאינו נכנס לזיכרון הרגיל. AirLLM אינו מחליף את מסלול
+      <a href="hot-cold-policy.md">warm weak → hot strong</a> ואינו נדרש לבטא.
+    </p>
+    <pre>Hermes / OpenAI client
+        |
+        v
+Imperium :9000
+  |-- llama.cpp slots: utility / coder / scribe / embeddings
+  `-- explicit airllm/deep-local
+        `-- loopback AirLLM sidecar :8092 --&gt; pinned HF model</pre>
+
+    <h3>רצף העבודה</h3>
+    <ol>
+      <li>
+        <strong>Baseline קודם:</strong> למדוד מודל גדול ב־llama.cpp עם partial GPU
+        offload. אם הוא נותן איכות וזמן שימושיים לצד slots קטנים, עוצרים כאן ולא
+        מוסיפים runtime נוסף.
+      </li>
+      <li>
+        <strong>מעבדת AirLLM מבודדת:</strong> סביבה נפרדת וגרסה מוצמדת; מודל ו־revision
+        מורשים מראש; הכנת שכבות מפורשת; loopback + bearer auth; ללא הורדת מודל או
+        מחיקת checkpoint מתוך בקשת chat.
+      </li>
+      <li>
+        <strong>Sidecar מינימלי:</strong> לממש ב־<code>scripts/airllm_sidecar.py</code>
+        רק <code>/health</code>, <code>/v1/models</code> ו־non-streaming
+        <code>/v1/chat/completions</code>. בקשה פעילה אחת, פלט התחלתי של 64–128
+        tokens, וללא tools, vision או JSON mode.
+      </li>
+      <li>
+        <strong>חיבור מפורש ל־Imperium:</strong> להוסיף upstream כבוי כברירת מחדל
+        ב־<code>conf/upstreams.yaml</code> ולפנות אליו בשם
+        <code>airllm/deep-local</code>. לא להצהיר בתחילה על <code>models:</code> ולא
+        לאפשר auto-routing אליו. להשתמש ב־<code>openai_compatible</code> הקיים ולא
+        להחזיר את רישום AirLLM הישן שלא שירת בקשות.
+      </li>
+      <li>
+        <strong>Timeout נקודתי:</strong> להוסיף <code>timeout_seconds</code> לכל
+        upstream ב־<code>local_model_router/upstreams/registry.py</code> ולהשתמש בו ב־
+        <code>service/app.py</code>. אין להגדיל את ה־timeout הגלובלי של כל הספקים.
+      </li>
+      <li>
+        <strong>דו-קיום מדוד:</strong> להפעיל slots קטנים בהדרגה, לשמור תקציב VRAM
+        קבוע ל־AirLLM, ולהגדיל local concurrency רק אחרי smoke ללא OOM. מנהל משאבי
+        GPU כללי נוסף רק אם מדידה מוכיחה שהתקציב הקבוע אינו מספיק.
+      </li>
+    </ol>
+
+    <h3>מפת רכיבים</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>נתיב</th>
+          <th>שימוש בתוכנית</th>
+          <th>מצב</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>conf/upstreams.yaml</code></td>
+          <td>רישום AirLLM כ־OpenAI-compatible upstream מפורש.</td>
+          <td>קיים; config חדש רק אחרי benchmark.</td>
+        </tr>
+        <tr>
+          <td><code>local_model_router/upstreams/registry.py</code></td>
+          <td>timeout פר-upstream והגדרות admission קיימות.</td>
+          <td>הרחבה קטנה מתוכננת.</td>
+        </tr>
+        <tr>
+          <td><code>local_model_router/service/app.py</code></td>
+          <td>forwarding, auth, streaming/error contract וטלמטריה ללא prompts.</td>
+          <td>שימוש במנגנון הקיים; timeout נקודתי בלבד.</td>
+        </tr>
+        <tr>
+          <td><code>local_model_router/service/fleet_manager.py</code></td>
+          <td>תור נפרד <code>upstream:airllm</code> עם active/queue מוגבלים.</td>
+          <td>קיים.</td>
+        </tr>
+        <tr>
+          <td><code>local_model_router/routing/catalog.py</code></td>
+          <td>למנוע הנחת resource זול עבור upstream מקומי לפני מודל משאבים מפורש.</td>
+          <td>אין שינוי ב־MVP; AirLLM נשאר מחוץ ל־auto.</td>
+        </tr>
+        <tr>
+          <td><code>scripts/airllm_sidecar.py</code></td>
+          <td>מעטפת OpenAI דקה מעל מודל AirLLM מוצמד.</td>
+          <td>חדש, רק אם שלב המעבדה עובר.</td>
+        </tr>
+        <tr>
+          <td><code>docs/INTEGRATIONS.md</code></td>
+          <td>הפעלה, מגבלות ו־curl smoke לאחר שהחיבור קיים.</td>
+          <td>לא לתעד כהתנהגות זמינה לפני implementation.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>שער Go / No-Go</h3>
+    <ul>
+      <li>למדוד prep time, נפח דיסק, TTFT, seconds/token, VRAM/RAM, ביטול והתאוששות.</li>
+      <li>להשוות את אותה חבילת משימות מול llama.cpp partial offload; AirLLM חייב לפתוח מודל/איכות שלא מתקבלים בדרך הפשוטה.</li>
+      <li>שער ניסוי התחלתי: לפחות 0.1 token/s, ללא OOM, ופגיעה של פחות מ־20% ב־p95 של workers קטנים שנשארו פעילים.</li>
+      <li>אם אין שיפור איכות שימושי או שהזמן אינו נסבל, AirLLM נשאר כלי מעבדה ידני ולא נכנס למוצר.</li>
+      <li>מסלול hot strong האינטראקטיבי עדיין חייב לעמוד בתקציב promote של כ־5 שניות; deep-local הוא בחירה מפורשת בלבד.</li>
+    </ul>
+    <p class="note">
+      Hermes נשאר בעל agent loops ופירוק משימות. Imperium אחראי לניתוב, admission,
+      בריאות והסבר ההחלטה; התוכנית אינה מחזירה orchestration מתקדם ל־router core.
+    </p>
   </section>
 
   <section class="grid">

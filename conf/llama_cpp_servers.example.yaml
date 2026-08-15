@@ -22,6 +22,28 @@ active_slots:
     router_models_preset: "/etc/llama/preset.ini"
     router_models_max: 2
 
+  # High-VRAM single-model chat (subprocess / managed CUDA). Prefer this over
+  # local Ollama for GGUF serving. Pin conf/harnesses.yaml to model_id.
+  # Set global.backend: subprocess and llama_cpp_path to the managed runtime.
+  - id: slot_chat
+    port: 8080
+    role: chat
+    model_id: chat_primary
+    model_path: your-strong-model.gguf
+    context_size: 32768
+    gpu_layers: -1
+    batch_size: 2048
+    threads: 16
+    parallel_slots: 1
+    flash_attention: on
+    fit: true
+    fit_target_mib: 1024
+    jinja: true
+    reasoning_format: deepseek
+    enabled: false
+    router_mode: false
+    extra_args: [--cache-type-k, q8_0, --cache-type-v, q8_0, -ub, "512", --cont-batching]
+
   # Hermes / multimodal chat — Ornith GGUF + matching mmproj under models_dir.
   # Place files under global.models_dir (or absolute paths). Do not declare
   # supports_vision until mmproj is present and an image smoke succeeds.

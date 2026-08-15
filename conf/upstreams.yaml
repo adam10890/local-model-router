@@ -38,13 +38,14 @@ upstreams:
     capabilities: [chat, models, tools]
     max_active: 4
     max_queue: 32
-    notes: "Docker Model Runner. Optional text/tools upstream only — Imperium does not manage DMR lifecycle or mmproj. Hermes Vision uses a local llama.cpp slot."
+    notes: "Docker Model Runner. Optional text/tools upstream only — Imperium does not manage DMR lifecycle or mmproj. Hermes Vision uses a local llama.cpp slot. Not listed under models: so auto prefers Ollama while Ornith returns empty content."
 
   - name: ollama
     type: openai_compatible
     base_url: http://localhost:11434/v1
     enabled: false
-    notes: "Ollama's OpenAI-compatible endpoint. Enable when Ollama runs locally."
+    capabilities: [chat, models, tools]
+    notes: "Local Ollama HTTP — not used for Imperium GGUF serving (llama.cpp owns that). Prefer ollama_cloud for hosted free/cloud models."
 
   - name: vllm
     type: openai_compatible

@@ -18,16 +18,26 @@ harnesses:
     protocol: openai
     location: host
     connections:
-      default:
-        # Prefer a local llama.cpp slot id when that slot is healthy with
-        # mmproj. Until then, DMR Ornith is the working text pin.
-        model: dmr/huggingface.co/deepreinforce-ai/ornith-1.0-9b-gguf:Q8_0
+      chat:
+        # Pin the local llama.cpp slot model_id (or slot id), not ollama/<id>.
+        model: chat_primary
+        role: chat
+      utility:
+        model: chat_primary
+        role: utility
 ```
 
-Prefer a **local** llama.cpp slot (`model: ornith` with `mmproj_path`) for
-Vision once that slot is healthy. DMR may serve text/tools but Imperium does
-not load mmproj into DMR. LiteLLM is only for the optional Claude Code
-Anthropic bridge, not a substitute for the local fleet.
+Prefer a **local** llama.cpp `model_id` / slot id for text. Local Ollama is not
+the primary GGUF path — see `PROVIDER.md` (Local llama.cpp vs upstreams).
+For Vision, pin a local slot that has `mmproj_path` once that slot is healthy.
+DMR may serve optional text/tools but Imperium does not load mmproj into DMR.
+LiteLLM is only for the optional Claude Code Anthropic bridge, not a
+substitute for the local fleet.
+
+When connections are named (`chat` / `utility`), clients must use the
+connection path (`/harnesses/hermes/chat/v1`). The bare
+`/harnesses/hermes/v1` form is only valid when the harness has a single
+`default` connection.
 
 IDs use lowercase ASCII letters, digits, `_`, or `-`. API keys never belong
 in this file.
@@ -49,7 +59,7 @@ claim alone is not sufficient evidence of compatibility.
 | Harness | Official repo | Current stable checked | Installed (operator) | Router path | Setup doc |
 | --- | --- | --- | --- | --- | --- |
 | Agent Zero | [agent0ai/agent-zero](https://github.com/agent0ai/agent-zero) | **v2.7** (`87e1e591…`) verified | fill when validating | `/harnesses/agent_zero/{chat,utility}/v1` | section below |
-| Hermes | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) | **v0.20.0** (`v2026.8.3`) checked against docs | fill when validating | `/harnesses/hermes/v1` | [INTEGRATIONS.md](INTEGRATIONS.md#hermes) |
+| Hermes | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) | **v0.20.0** (`v2026.8.3`) checked against docs + installed copy | fill when validating | `/harnesses/hermes/v1` (`default` connection) | [INTEGRATIONS.md](INTEGRATIONS.md#hermes) |
 | Pi | [earendil-works/pi](https://github.com/earendil-works/pi) (`badlogic/pi-mono`) | **v0.81.1** checked against docs | fill when validating | `/harnesses/pi/v1` | [INTEGRATIONS.md](INTEGRATIONS.md#pi) |
 | Claude Code (local) | Anthropic Claude Code + LiteLLM bridge | cloud Opus default; local via LiteLLM | fill when validating | `/harnesses/claude_code_local/v1` | section below |
 
@@ -68,6 +78,10 @@ http://127.0.0.1:9000/harnesses/pi/v1
 
 Each base URL provides `GET /models` and `POST /chat/completions`. Clients may
 send any compatibility model name; the path's pinned model is authoritative.
+Hermes should use the bare `/harnesses/hermes/v1` form with a single `default`
+connection (see [INTEGRATIONS.md](INTEGRATIONS.md#hermes)). Named connections
+(`chat` / `utility`) require `/harnesses/{id}/{connection}/v1` and are for
+clients like Agent Zero that need separate pins.
 An unavailable pinned target (no connection, timeout, or unloaded slot)
 returns `503 harness_model_unavailable` and does not fail over. Capability
 mismatches such as missing mmproj / unsupported image input return

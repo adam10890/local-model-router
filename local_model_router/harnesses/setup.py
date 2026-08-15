@@ -32,24 +32,29 @@ def _setup(
             ),
         }
     if profile.kind == "hermes":
+        # Shape aligned with Hermes Agent v0.20.0 custom / named OpenAI-compatible
+        # providers (https://hermes-agent.nousresearch.com/docs/integrations/providers).
         return {
-            "target": "Hermes model provider settings (~/.hermes/config.yaml)",
+            "target": "Hermes model provider settings (%LOCALAPPDATA%\\hermes\\config.yaml on Windows)",
             "format": "yaml",
             "content": (
                 "model:\n"
                 "  default: local\n"
-                "  provider: lmm-router\n"
+                "  provider: custom\n"
                 f"  base_url: {base_url}\n"
                 "  api_key: ${ROUTER_API_KEY:-local}\n"
+                "  context_length: 32768\n"
                 f"  supports_vision: {vision_flag}\n"
+                "# Optional named entry (same endpoint). Prefer provider: custom above.\n"
                 "providers:\n"
-                "  lmm-router:\n"
-                "    name: LMM Router\n"
+                "  imperium:\n"
+                "    name: Imperium\n"
                 f"    base_url: {base_url}\n"
                 "    api_key: ${ROUTER_API_KEY:-local}\n"
+                "    transport: chat_completions\n"
                 "    default_model: local\n"
                 "    models: [local]\n"
-                "    discover_models: true"
+                "    discover_models: false"
             ),
         }
     if profile.kind == "agent_zero":

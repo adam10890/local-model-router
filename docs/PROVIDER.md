@@ -207,6 +207,67 @@ stored. Use `--force` to refresh an unchanged model.
 4. Restart the provider process.
 5. Run the smoke script before pointing clients at the provider.
 
+## Local llama.cpp vs upstreams
+
+Local GGUF inference is owned by the llama.cpp fleet
+(`conf/llama_cpp_servers.yaml`), not by a local Ollama process.
+
+| Path | Use for |
+| --- | --- |
+| Managed / subprocess `llama-server` | Local GGUF models (Hermes, Chat, `auto`) |
+| `ollama_cloud` in `conf/upstreams.yaml` | Hosted / free Ollama Cloud models (`OLLAMA_API_KEY`) |
+| Local `ollama` HTTP upstream | Optional only if you deliberately want that server; do not use it as the primary local GGUF path |
+
+Recommended operator shape on Windows + NVIDIA:
+
+1. Install a managed CUDA runtime (`imperium setup` / `SetupEngine.install_runtime("cuda12")`).
+   Binary lands under `%LOCALAPPDATA%\Imperium\runtime\llama.cpp\versions\<tag>-cuda12`.
+2. Set `global.backend: subprocess` and `global.llama_cpp_path` to that version directory.
+3. Enable `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1`, then
+   `POST /fleet/slots/{id}/start` (or the dashboard Start control).
+   With `global.auto_restart: true`, Imperium live-probes subprocesses it
+   started and retries crashes up to `global.max_restart_attempts`; an explicit
+   Stop remains stopped. `global.auto_start: false` still requires the first
+   Start action after Imperium launches.
+4. Keep `A0_LMM_ROUTER_ENABLED_UPSTREAMS` empty for local-only, or set
+   `ollama_cloud` when cloud models are needed. Do not enable local `ollama`
+   just to serve a GGUF that llama.cpp can load.
+
+### High-VRAM single-model slot (pattern)
+
+Pin one strong chat model with an absolute or models-dir-relative `model_path`,
+`model_id` matching `conf/harnesses.yaml` / `conf/apps.yaml`, and flags that
+favor GPU fill without starving KV cache:
+
+```yaml
+- id: slot_chat
+  port: 8080
+  role: chat
+  model_id: chat_primary   # harness pin must match this id or the slot id
+  model_path: your-model.gguf
+  context_size: 32768
+  gpu_layers: -1
+  batch_size: 2048
+  threads: 16
+  parallel_slots: 1
+  flash_attention: true
+  fit: true
+  fit_target_mib: 1024
+  jinja: true
+  reasoning_format: deepseek   # thinking models: final answer in content
+  router_mode: false
+  extra_args: [--cache-type-k, q8_0, --cache-type-v, q8_0, -ub, "512", --cont-batching]
+```
+
+Thinking / MoE models often need a large `max_tokens` budget so reasoning does
+not consume the entire completion window (`finish_reason=length` with empty
+`content`). The dashboard Chat path sends `max_tokens: 1024`; harness clients
+should send enough tokens (commonly ≥2048) or rely on server-side floors when
+present.
+
+Unload any other GPU-resident copy of the same weights (for example a local
+Ollama load) before starting the subprocess slot, or VRAM fit will fail.
+
 ## Client Base URL
 
 Point OpenAI-compatible clients at:

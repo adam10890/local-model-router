@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 import aiohttp
@@ -125,11 +126,23 @@ def test_manager_status_exposes_safe_runtime_fields():
             return {
                 "chat": SlotStatus(
                     name="chat",
+                    running=True,
+                    healthy=True,
                     restart_count=2,
                     uptime_s=4.5,
-                    extra={"failure_code": "process_exited", "exit_code": 9},
                 )
             }
+
+        async def health_check(self, name):
+            assert name == "chat"
+            return SlotStatus(
+                name="chat",
+                running=False,
+                healthy=False,
+                restart_count=2,
+                uptime_s=4.5,
+                extra={"failure_code": "process_exited", "exit_code": 9},
+            )
 
     manager = object.__new__(BackendManager)
     manager._backend = Backend()
@@ -141,3 +154,38 @@ def test_manager_status_exposes_safe_runtime_fields():
     assert status["exit_code"] == 9
     assert status["restart_count"] == 2
     assert status["uptime_s"] == 4.5
+
+
+def test_manager_restarts_crashed_subprocess_up_to_limit():
+    from local_model_router.helpers.llama_cpp_manager import BackendManager
+
+    class Backend:
+        def __init__(self):
+            self.starts = 0
+
+        async def list_slots(self):
+            return {"chat": SlotStatus(name="chat", running=False, healthy=False)}
+
+        async def health_check(self, _name):
+            return SlotStatus(name="chat", running=False, healthy=False)
+
+        async def start_slot(self, name, config):
+            assert name == "chat"
+            assert config == {"model_path": "model.gguf"}
+            self.starts += 1
+            return SlotStatus(name=name, running=True, healthy=True)
+
+    backend = Backend()
+    manager = object.__new__(BackendManager)
+    manager._backend = backend
+    manager._slot_configs = {"chat": {"model_path": "model.gguf"}}
+    manager.global_config = {"max_restart_attempts": 2}
+    manager._restart_attempts = {}
+    manager.logger = logging.getLogger("test.restart")
+
+    asyncio.run(manager._restart_unhealthy_slots())
+    asyncio.run(manager._restart_unhealthy_slots())
+    asyncio.run(manager._restart_unhealthy_slots())
+
+    assert backend.starts == 2
+    assert manager._restart_attempts == {"chat": 2}

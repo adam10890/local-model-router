@@ -22,10 +22,21 @@ tools. A router inverts that: tools talk to one stable endpoint, the router
 decides which local model serves each request, explains the decision, and
 fails over when slots get unhealthy.
 
+Imperium should maximize useful local compute automatically: a cheap model
+can stay ready while idle, a strong model serves interactive chat, and
+bounded sub-tasks can use smaller models in parallel when that is faster
+and good enough. Hermes is the primary client; other runtimes are clients
+of the same router, not owners of Imperium. Default path is simple Start;
+advanced llama.cpp control comes second and must not break that path.
+Wrong answers matter more than slow ones. Product changes need the
+founder’s explicit approval.
+
 This project was extracted from
 [`a0_lmm_router`](https://github.com/adam10890/a0_lmm_router), an Agent Zero
 plugin that grew a standalone provider. Here the router is the product;
-Agent Zero is client #1, not the owner.
+Agent Zero is one client, not the owner.
+
+Decision records: [`docs/adr/`](docs/adr/).
 
 ## Status
 
@@ -74,8 +85,10 @@ backend configured in `conf/upstreams.yaml` — one `openai_compatible`
 adapter covers Ollama, vLLM, LocalAI, and LM Studio.
 
 Keep optional providers disabled in the committed defaults and enable them per
-machine with `A0_LMM_ROUTER_ENABLED_UPSTREAMS=ollama` (comma-separated). This
-changes only declared providers; unknown names are ignored.
+machine with `A0_LMM_ROUTER_ENABLED_UPSTREAMS` (comma-separated). Prefer
+`ollama_cloud` for hosted / free Ollama Cloud models. Local GGUF serving uses
+the llama.cpp fleet (`subprocess` / managed CUDA runtime), not a local Ollama
+process — see `docs/PROVIDER.md`. Unknown names are ignored.
 
 An upstream may declare `max_active` and `max_queue`. Bounded upstreams use an
 independent `upstream:<name>` admission lane; upstreams without those fields
@@ -285,7 +298,7 @@ Hermes and Pi each receive one host URL. Agent Zero is the only current
 exception and receives separate Docker-reachable chat and utility URLs:
 
 ```text
-Hermes:             http://127.0.0.1:9000/harnesses/hermes/v1
+Hermes:             http://127.0.0.1:9000/harnesses/hermes/chat/v1
 Pi:                 http://127.0.0.1:9000/harnesses/pi/v1
 Agent Zero chat:    http://host.docker.internal:9000/harnesses/agent_zero/chat/v1
 Agent Zero utility: http://host.docker.internal:9000/harnesses/agent_zero/utility/v1
@@ -293,7 +306,8 @@ Claude Code local:  http://127.0.0.1:9000/harnesses/claude_code_local/v1 (throug
 ```
 
 Use model ID `local` in the consumers. The router ignores that compatibility
-label and forwards the model pinned in `conf/harnesses.yaml`. For Agent Zero
+label and forwards the model pinned in `conf/harnesses.yaml` (prefer a local
+llama.cpp `model_id`, not `ollama/<id>`). For Agent Zero
 2.7, select provider `other` (`Other OpenAI compatible`) for both Main and
 Utility Model Preset slots and use the two URLs above. See
 `docs/HARNESSES.md` for the versioned setup and runtime compatibility policy.

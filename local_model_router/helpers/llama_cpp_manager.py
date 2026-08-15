@@ -177,6 +177,9 @@ class BackendManager:
             return {"error": f"Slot '{name}' not found in config"}
         
         status = await self._backend.start_slot(name, config)
+        if status.healthy:
+            self._restart_attempts.pop(name, None)
+        self._start_restart_monitor()
         return {
             "name": status.name,
             "running": status.running,
@@ -225,6 +228,7 @@ class BackendManager:
                     "failure_code": result.extra.get("failure_code"),
                     "exit_code": result.extra.get("exit_code"),
                 }
+        self._start_restart_monitor()
         return output
     
     async def stop_slot(self, name: str) -> bool:
@@ -233,6 +237,7 @@ class BackendManager:
         return await self._backend.stop_slot(name)
     
     async def stop_all(self) -> None:
+        self._stop_restart_monitor()
         if self._backend:
             await self._backend.cleanup()
     
@@ -241,6 +246,19 @@ class BackendManager:
         if not self._backend:
             return {}
         slots = await self._backend.list_slots()
+        names = list(slots)
+        checks = await asyncio.gather(
+            *(self._backend.health_check(name) for name in names),
+            return_exceptions=True,
+        )
+        for name, check in zip(names, checks):
+            if isinstance(check, BaseException):
+                slots[name].running = False
+                slots[name].healthy = False
+                slots[name].error = "Health check failed"
+                slots[name].extra["failure_code"] = "health_probe_failed"
+            else:
+                slots[name] = check
         result = {}
         for name, s in slots.items():
             cfg = self._slot_configs.get(name, {})
@@ -302,6 +320,8 @@ class BackendManager:
         self._cooldown_tracker = CooldownTracker()
         self._failover_states: Dict[str, Any] = {}  # slot_id -> SlotFailoverState
         self._cooldown_task: Optional[asyncio.Task] = None
+        self._restart_task: Optional[asyncio.Task] = None
+        self._restart_attempts: Dict[str, int] = {}
 
         from local_model_router.helpers.smart_router.health import SlotHealthChecker
         self._health_checker = SlotHealthChecker(
@@ -312,6 +332,54 @@ class BackendManager:
         # Cooldown probes are started lazily in start_all() to avoid
         # calling asyncio.create_task() during synchronous __init__.
         # During agent_init there may be no running event loop yet.
+
+    def _start_restart_monitor(self) -> None:
+        """Watch subprocesses started by this manager and restart crashes."""
+        if not self.global_config.get("auto_restart") or self.backend_type != "subprocess":
+            return
+        if self._restart_task is not None and not self._restart_task.done():
+            return
+        try:
+            self._restart_task = asyncio.create_task(self._restart_loop())
+            self.logger.info("Subprocess restart monitor started")
+        except RuntimeError:
+            self.logger.debug("Restart monitor deferred (no event loop)")
+
+    def _stop_restart_monitor(self) -> None:
+        if self._restart_task and not self._restart_task.done():
+            self._restart_task.cancel()
+            self.logger.info("Subprocess restart monitor stopped")
+
+    async def _restart_unhealthy_slots(self) -> None:
+        max_attempts = max(0, int(self.global_config.get("max_restart_attempts", 3)))
+        for name, current in (await self.status()).items():
+            if current["healthy"]:
+                self._restart_attempts.pop(name, None)
+                continue
+            if current["running"] or name not in self._slot_configs:
+                continue
+            attempts = self._restart_attempts.get(name, 0)
+            if attempts >= max_attempts:
+                continue
+            self._restart_attempts[name] = attempts + 1
+            self.logger.warning(
+                "Restarting crashed slot '%s' (%d/%d)",
+                name,
+                attempts + 1,
+                max_attempts,
+            )
+            await self._backend.start_slot(name, self._slot_configs[name])
+
+    async def _restart_loop(self) -> None:
+        interval = max(1.0, float(self.global_config.get("health_check_interval", 30)))
+        while True:
+            try:
+                await asyncio.sleep(interval)
+                await self._restart_unhealthy_slots()
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                self.logger.error("Subprocess restart monitor error: %s", exc)
 
     def _start_cooldown_probes(self) -> None:
         """Start background cooldown probe task (requires running event loop)."""

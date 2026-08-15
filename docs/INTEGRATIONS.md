@@ -34,29 +34,51 @@ local-first `A0_LMM_ROUTER_AUTO_UPSTREAMS=1` policy.
 
 ## Hermes
 
-Verified setup shape against Hermes Agent **v0.20.0**
-([`v2026.8.3`](https://github.com/NousResearch/hermes-agent/releases/tag/v2026.8.3)).
-Record your installed Hermes version in
-[`1.0-beta-evidence.md`](1.0-beta-evidence.md) when you smoke.
+Checked against Hermes Agent **v0.20.0**
+([`v2026.8.3`](https://github.com/NousResearch/hermes-agent/releases/tag/v2026.8.3),
+current latest as of 2026-08-03) and the official
+[AI Providers](https://hermes-agent.nousresearch.com/docs/integrations/providers)
+guide. Hermes is a **client** of Imperium (same class as Agent Zero / Pi): it
+owns tools, memory, and the agent loop; Imperium only serves the pinned local
+llama.cpp model over OpenAI-compatible `/v1`.
 
-In `%LOCALAPPDATA%\hermes\config.yaml`, keep provider `lmm-router` and change
-both `model.base_url` and `providers.lmm-router.base_url` to the dedicated URL.
-Set `model.default`, `providers.lmm-router.default_model`, and its `models`
-entry to `local`:
+Official Hermes rule: any server with `/v1/chat/completions` works via
+`provider: custom` (or a named entry under `providers:`). `config.yaml` is the
+source of truth; legacy `LLM_MODEL` in `.env` is removed upstream.
+
+On Windows the install lives under `%LOCALAPPDATA%\hermes` (config:
+`%LOCALAPPDATA%\hermes\config.yaml`). Pin Imperium with a single harness
+`default` connection so this URL works:
+
+```text
+http://127.0.0.1:9000/harnesses/hermes/v1
+```
+
+Recommended `config.yaml` shape (matches upstream custom-endpoint docs):
 
 ```yaml
 model:
   default: local
-  provider: lmm-router
+  provider: custom
   base_url: http://127.0.0.1:9000/harnesses/hermes/v1
-providers:
-  lmm-router:
-    base_url: http://127.0.0.1:9000/harnesses/hermes/v1
-    default_model: local
-    models: [local]
+  api_key: local   # or Imperium's A0_LMM_ROUTER_API_KEY when auth is on
+  context_length: 32768   # match the llama.cpp slot context
+  supports_vision: false
 ```
 
-Keep the existing API-key value; use `local` only when router auth is off.
+Notes:
+
+- Imperium ignores the client model label and forwards the pin from
+  `conf/harnesses.yaml` (local `model_id`, not `ollama/...`).
+- Set `context_length` to the slot's context (Hermes uses it for compression /
+  request validation). Auto-detect can be wrong for custom endpoints.
+- Prefer `discover_models: false` on a dedicated pin; discovery noise has been
+  observed against paths like `/harnesses/hermes/api/v1` (404) while
+  `/harnesses/hermes/v1` succeeds.
+- Thinking models need enough completion budget (`max_tokens` / server floor)
+  so reasoning does not truncate before the final answer.
+- Record your installed Hermes version in
+  [`1.0-beta-evidence.md`](1.0-beta-evidence.md) when you smoke.
 
 ## Pi
 

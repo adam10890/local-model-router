@@ -1,8 +1,9 @@
 # Dedicated client-runtime connections. Each connection is pinned to one model.
 # API keys stay in the environment and never belong in this file.
 #
-# Hermes and Agent Zero use DMR Ornith while local llama.cpp slots are down.
-# When healthy local chat/utility slots exist, repin each connection explicitly.
+# Prefer a local llama.cpp fleet model_id when that slot is healthy.
+# DMR Ornith remains a text/tools fallback for clients without a local pin.
+
 harnesses:
   hermes:
     display_name: Hermes
@@ -11,7 +12,8 @@ harnesses:
     location: host
     connections:
       default:
-        model: dmr/huggingface.co/deepreinforce-ai/ornith-1.0-9b-gguf:Q8_0
+        # Local llama.cpp slot model_id (see conf/llama_cpp_servers.yaml).
+        model: carnice
 
   agent_zero:
     display_name: Agent Zero

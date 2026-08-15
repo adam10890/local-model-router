@@ -39,6 +39,7 @@ def test_dashboard_ships_en_he_and_light_dark_theme_hooks(tmp_path, monkeypatch)
     assert "readyTitle:" in html and "attentionTitle:" in html
     assert "noInstalled:" in html
     assert "statusUnavailable:" in html or "statusUnavailable" in html
+    assert 'if(route){closeDrawer();routeTo(route);return;}' in html
 
 
 def test_ui_status_exposes_actionable_readiness_fields(tmp_path, monkeypatch):
