@@ -101,7 +101,9 @@ python .\scripts\smoke_harnesses.py
 Pass `--api-key <key>` when router authentication is enabled. By default the
 command checks `/models`, one short completion, and one streaming completion
 per connection. Add `--tools` to include a no-op tools array; add `--no-stream`
-to skip streaming.
+to skip streaming. Use `--harness <id>` (repeatable) to limit the run to
+healthy pins (for example `--harness hermes`). Raise `--max-tokens` for
+thinking models.
 
 ## Agent Zero 2.7
 
