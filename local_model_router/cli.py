@@ -51,7 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     setup = sub.add_parser("setup", help="open first-run setup or inspect managed runtime state")
     setup.add_argument("--status", action="store_true", help="print current setup state as JSON")
-    setup.add_argument("--repair", action="store_true", help="print repair guidance for incomplete setup")
+    setup.add_argument("--repair", action="store_true", help="inspect setup and repair it when combined with --yes")
     setup.add_argument("--plan", help="apply a reviewed setup plan from a JSON file")
     setup.add_argument("--yes", action="store_true", help="confirm downloads and configuration writes")
     setup.add_argument("--start-runtime", action="store_true", help="start the configured managed llama.cpp server")
@@ -311,16 +311,9 @@ def cmd_setup(args: argparse.Namespace) -> int:
             print(json.dumps(engine.state(), indent=2))
             return 0
         if args.repair:
-            state = engine.state(refresh_hardware=True)
-            missing = []
-            if not state["discovery"]["runtime_installed"]:
-                missing.append("runtime")
-            if not state["discovery"]["gguf_models"]:
-                missing.append("model")
-            if not state["discovery"]["config_exists"]:
-                missing.append("configuration")
-            print(json.dumps({"ok": not missing, "missing": missing, "next": "imperium setup"}, indent=2))
-            return 0 if not missing else 1
+            result = engine.repair(confirm=bool(args.yes))
+            print(json.dumps(result, indent=2))
+            return 0 if result.get("ok") else 1
         if args.start_runtime:
             print(json.dumps(engine.start_managed(visible_terminal=args.terminal), indent=2))
             return 0

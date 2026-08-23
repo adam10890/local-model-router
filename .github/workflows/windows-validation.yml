@@ -1,0 +1,137 @@
+name: Windows validation
+
+on:
+  pull_request:
+    paths:
+      - "installer/windows/**"
+      - "local_model_router/setup/**"
+      - "local_model_router/helpers/backends/**"
+      - "local_model_router/dashboard/**"
+      - "local_model_router/service/**"
+      - "scripts/build_windows_bundle.ps1"
+      - "scripts/test_windows_cleanroom.ps1"
+      - "scripts/smoke_provider.*"
+      - "scripts/smoke_harnesses.py"
+      - "tests/test_windows_packaging.py"
+      - "tests/test_smoke_harnesses.py"
+      - "pyproject.toml"
+      - ".github/workflows/windows-*.yml"
+  schedule:
+    - cron: "41 1 * * *"
+  workflow_dispatch:
+    inputs:
+      full_offline:
+        description: "Run the CPU full-offline lifecycle gate"
+        type: boolean
+        default: true
+      run_nvidia:
+        description: "Also run packaged CUDA12 evidence on the self-hosted NVIDIA runner"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  pr-cleanroom:
+    name: PR Windows cleanroom
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.full_offline != true)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e ".[dev,agents]"
+      - name: Core suite and coverage gates
+        shell: pwsh
+        run: |
+          coverage run --source=local_model_router -m pytest tests/ -q
+          coverage report --fail-under=75
+          coverage report --include="local_model_router/helpers/backends/*" --fail-under=70
+          coverage report --include="local_model_router/mcp/*" --fail-under=70
+          coverage report --include="local_model_router/cli.py,local_model_router/setup/*" --fail-under=70
+          python -m compileall -q local_model_router tests
+          git diff --check
+      - name: Build normal bundle
+        shell: pwsh
+        run: ./scripts/build_windows_bundle.ps1
+      - name: Install, probe, doctor, and uninstall
+        shell: pwsh
+        run: ./scripts/test_windows_cleanroom.ps1
+      - name: Upload sanitized cleanroom evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-pr-evidence-${{ github.run_id }}
+          path: |
+            build/cleanroom/cleanroom-result.json
+            build/cleanroom/provider-smoke.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  nightly-cpu:
+    name: CPU offline lifecycle
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full_offline == true)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e ".[dev,agents]"
+      - name: Core suite and coverage gates
+        shell: pwsh
+        run: |
+          coverage run --source=local_model_router -m pytest tests/ -q
+          coverage report --fail-under=75
+          coverage report --include="local_model_router/helpers/backends/*" --fail-under=70
+          coverage report --include="local_model_router/mcp/*" --fail-under=70
+          coverage report --include="local_model_router/cli.py,local_model_router/setup/*" --fail-under=70
+          python -m compileall -q local_model_router tests
+          git diff --check
+      - name: Build CPU offline bundle
+        shell: pwsh
+        run: ./scripts/build_windows_bundle.ps1 -IncludeOfflineAssets -OfflineBackends cpu
+      - name: Run full CPU cleanroom lifecycle
+        shell: pwsh
+        run: ./scripts/test_windows_cleanroom.ps1 -FullOfflineSetup -Backend cpu -Lifecycle
+      - name: Upload sanitized CPU evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-cpu-evidence-${{ github.run_id }}
+          path: |
+            build/cleanroom/cleanroom-result.json
+            build/cleanroom/provider-smoke.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  packaged-nvidia:
+    name: Packaged NVIDIA CUDA12 evidence
+    if: github.event_name == 'workflow_dispatch' && inputs.run_nvidia
+    runs-on: [self-hosted, windows, x64, nvidia]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev,agents]"
+      - name: Build CUDA12 offline bundle
+        shell: pwsh
+        run: ./scripts/build_windows_bundle.ps1 -IncludeOfflineAssets -OfflineBackends cuda12
+      - name: Run packaged NVIDIA cleanroom
+        shell: pwsh
+        run: ./scripts/test_windows_cleanroom.ps1 -FullOfflineSetup -Backend cuda12
+      - name: Upload sanitized NVIDIA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-nvidia-evidence-${{ github.run_id }}
+          path: |
+            build/cleanroom/cleanroom-result.json
+            build/cleanroom/provider-smoke.json
+          if-no-files-found: warn
+          retention-days: 30

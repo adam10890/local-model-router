@@ -154,6 +154,16 @@ class _SetupEngine:
         self.calls.append(("stop",))
         return {"running": False}
 
+    def repair(self, *, confirm=False):
+        self.calls.append(("repair", confirm))
+        if confirm:
+            return {"ok": True, "missing": ["configuration"], "repaired": True}
+        return {
+            "ok": False,
+            "missing": ["runtime", "model", "configuration"],
+            "confirmation_required": True,
+        }
+
     def update_status(self):
         return self.update
 
@@ -175,11 +185,13 @@ def test_setup_status_repair_start_and_stop(monkeypatch, capsys):
 
     assert cli.main(["setup", "--status"]) == 0
     assert cli.main(["setup", "--repair"]) == 1
+    assert cli.main(["setup", "--repair", "--yes"]) == 0
     assert cli.main(["setup", "--start-runtime", "--terminal"]) == 0
     assert cli.main(["setup", "--stop-runtime"]) == 0
 
     assert ("state", False) in engine.calls
-    assert ("state", True) in engine.calls
+    assert ("repair", False) in engine.calls
+    assert ("repair", True) in engine.calls
     assert ("start", True) in engine.calls
     assert ("stop",) in engine.calls
     assert '"missing": [' in capsys.readouterr().out

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "kind": "windows_cleanroom",
+  "ok": true,
+  "bundle_name": "Imperium-0.9.0-windows-x64.zip",
+  "package_version": "0.9.0",
+  "checksum": "fbdb42eeee77d62037e08e283125abec3e1b26922045f10969aaaac888ec0ad9",
+  "backend": "cpu",
+  "full_offline_setup": false,
+  "lifecycle": false,
+  "checks": {
+    "private_python": true,
+    "dependency_capabilities": true,
+    "doctor": true,
+    "doctor_ready": false,
+    "health": true,
+    "ui_status": true,
+    "models": true,
+    "provider": true,
+    "provider_live": false,
+    "repair": null,
+    "update_check": null,
+    "runtime_rollback": null,
+    "application_rollback": null,
+    "uninstall": true,
+    "preserved_data": true
+  }
+}

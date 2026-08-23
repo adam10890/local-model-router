@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+import yaml
 
 from local_model_router.service.readiness import build_ui_status
 from local_model_router.setup import SetupEngine, SetupError
@@ -502,9 +503,76 @@ def test_non_windows_platform_is_planned_and_never_offers_cuda(tmp_path):
 
 def test_recommended_runtime_plan_uses_pinned_assets_without_release_lookup(tmp_path, monkeypatch):
     engine = _engine(tmp_path)
-    monkeypatch.setattr(engine, "_github_release", lambda _url: pytest.fail("network lookup was used"))
+    monkeypatch.setattr(engine, "_github_releases", lambda _url: pytest.fail("network lookup was used"))
     plan = engine.plan({"backend": "cpu", "model_id": "qwen3-1.7b-q8"})
     assert plan["runtime_channel"] == "recommended"
+
+
+def test_latest_runtime_skips_incompatible_semver_release(tmp_path, monkeypatch):
+    engine = _engine(tmp_path)
+    digest = "a" * 64
+    monkeypatch.setattr(
+        engine,
+        "_github_releases",
+        lambda _url: [
+            {"tag_name": "v0.2.0", "assets": [], "html_url": "https://example.invalid/v0.2.0"},
+            {
+                "tag_name": "b10000",
+                "assets": [{
+                    "name": "llama-b10000-bin-win-cpu-x64.zip",
+                    "digest": "sha256:invalid",
+                    "browser_download_url": "https://example.invalid/unverified.zip",
+                }],
+            },
+            {
+                "tag_name": "b9999",
+                "assets": [{
+                    "name": "llama-b9999-bin-win-cpu-x64.zip",
+                    "digest": f"sha256:{digest}",
+                    "browser_download_url": "https://example.invalid/runtime.zip",
+                    "size": 42,
+                }],
+                "html_url": "https://example.invalid/b9999",
+            },
+        ],
+    )
+
+    release, assets = engine._latest_runtime_release("cpu")
+
+    assert release["tag_name"] == "b9999"
+    assert assets == [{
+        "name": "llama-b9999-bin-win-cpu-x64.zip",
+        "url": "https://example.invalid/runtime.zip",
+        "sha256": digest,
+        "size_bytes": 42,
+    }]
+
+
+def test_runtime_selection_updates_config_and_rollback_restores_it(tmp_path):
+    engine = _engine(tmp_path)
+    old_binary = tmp_path / "old" / "llama-server.exe"
+    new_binary = tmp_path / "new" / "llama-server.exe"
+    old_binary.parent.mkdir()
+    new_binary.parent.mkdir()
+    old_binary.touch()
+    new_binary.touch()
+    engine.config_path.write_text(
+        f"global:\n  llama_cpp_path: '{new_binary.parent.as_posix()}'\nactive_slots: []\n",
+        encoding="utf-8",
+    )
+    engine._atomic_json(
+        engine.manifest_path,
+        {
+            "runtime": {"tag": "b9999", "backend": "cpu", "binary": str(new_binary)},
+            "previous_runtime": {"tag": "b9987", "backend": "cpu", "binary": str(old_binary)},
+        },
+    )
+
+    restored = engine.rollback()
+
+    config = yaml.safe_load(engine.config_path.read_text(encoding="utf-8"))
+    assert restored["tag"] == "b9987"
+    assert config["global"]["llama_cpp_path"] == str(old_binary.parent)
 
 
 def test_runtime_zip_rejects_path_traversal(tmp_path):
@@ -783,3 +851,46 @@ def test_start_managed_stops_a_process_that_misses_health(tmp_path, monkeypatch)
 
     assert caught.value.code == "runtime_start_failed"
     assert stopped == ["local_default"]
+
+
+def test_repair_requires_confirmation_then_reapplies_verified_inventory(tmp_path, monkeypatch):
+    engine = SetupEngine(home=tmp_path / "home", config_path=tmp_path / "fleet.yaml")
+    model = engine.models_dir / "verified.gguf"
+    model.parent.mkdir(parents=True)
+    model.write_bytes(b"GGUF")
+    engine._atomic_json(
+        engine.inventory_path,
+        {"models": [{"id": "verified-model", "path": str(model)}]},
+    )
+    state = {
+        "discovery": {
+            "runtime_installed": False,
+            "gguf_models": [str(model)],
+            "config_exists": False,
+        },
+        "recommended_backend": "cpu",
+        "recommendation": {"id": "fallback-model"},
+    }
+    monkeypatch.setattr(engine, "state", lambda refresh_hardware=False: state)
+    monkeypatch.setattr(engine, "_managed_runtime", lambda: None)
+    applied = {}
+
+    def apply(payload):
+        applied.update(payload)
+        return {"ok": True}
+
+    monkeypatch.setattr(engine, "apply", apply)
+
+    assert engine.repair() == {
+        "ok": False,
+        "missing": ["runtime", "configuration"],
+        "confirmation_required": True,
+        "next": "imperium setup --repair --yes",
+    }
+
+    result = engine.repair(confirm=True)
+    assert result["ok"] is True and result["repaired"] is True
+    assert applied["backend"] == "cpu"
+    assert applied["model_id"] == "verified-model"
+    assert applied["confirm_download"] is True
+    assert applied["confirm_write"] is True
