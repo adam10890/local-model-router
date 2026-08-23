@@ -230,6 +230,11 @@ def test_wsl_start_tracks_foreground_process_without_shell_backgrounding(tmp_pat
         0,
         raising=False,
     )
+    monkeypatch.setattr(
+        backend,
+        "_convert_wsl_path",
+        lambda _path: "/mnt/c/models/model with space.gguf",
+    )
     monkeypatch.setattr(backend, "_wait_healthy", lambda *_args: _async_value(True))
     monkeypatch.setattr(backend, "_process_create_time", lambda _pid: 1.0)
 
@@ -248,6 +253,12 @@ def test_wsl_start_tracks_foreground_process_without_shell_backgrounding(tmp_pat
     assert "nohup" not in captured["cmd"][3]
     assert "&" not in captured["cmd"][3]
     assert "'/mnt/" in captured["cmd"][3]
+
+
+def test_wsl_path_conversion_is_platform_independent():
+    backend = SubprocessBackend({"use_wsl": True})
+
+    assert backend._convert_wsl_path(r"C:\models\model.gguf") == "/mnt/c/models/model.gguf"
 
 
 async def _async_value(value):
