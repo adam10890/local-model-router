@@ -353,6 +353,8 @@ Vercel AI SDK style setup snippets.
 .venv\Scripts\coverage report --include="local_model_router/helpers/backends/*" --fail-under=70
 .venv\Scripts\coverage report --include="local_model_router/mcp/*" --fail-under=70
 .venv\Scripts\coverage report --include="local_model_router/cli.py,local_model_router/setup/*" --fail-under=70
+.venv\Scripts\python -m playwright install chromium
+.venv\Scripts\python -m pytest tests_e2e/dashboard -q
 ```
 
 Pull requests and pushes to `main` run the same hermetic suite in GitHub

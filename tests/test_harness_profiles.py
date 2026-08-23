@@ -131,6 +131,45 @@ def test_atomic_upsert_creates_backup(tmp_path):
     assert not list(tmp_path.glob("*.tmp"))
 
 
+def test_set_connection_model_is_atomic_and_preserves_other_connections(tmp_path):
+    path = _write(tmp_path / "harnesses.yaml", """
+        harnesses:
+          agent_zero:
+            display_name: Agent Zero
+            kind: agent_zero
+            protocol: openai
+            location: docker
+            connections:
+              chat: {model: old-chat}
+              utility: {model: utility-model}
+    """)
+    profiles = HarnessProfiles.load(path)
+
+    updated, backup = profiles.set_connection_model("agent_zero", "chat", "new-chat")
+
+    assert backup is not None and backup.exists()
+    assert updated.resolve("agent_zero", "chat").model == "new-chat"
+    assert updated.resolve("agent_zero", "utility").model == "utility-model"
+    on_disk = HarnessProfiles.load(path)
+    assert on_disk.resolve("agent_zero", "chat").model == "new-chat"
+    assert on_disk.resolve("agent_zero", "utility").model == "utility-model"
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_set_connection_model_rejects_empty_or_unknown_connection(tmp_path):
+    profiles = HarnessProfiles.load(_write(tmp_path / "harnesses.yaml", """
+        harnesses:
+          hermes:
+            connections:
+              default: {model: old-model}
+    """))
+
+    with pytest.raises(HarnessConfigError, match="requires a model"):
+        profiles.set_connection_model("hermes", "default", "  ")
+    with pytest.raises(KeyError):
+        profiles.set_connection_model("hermes", "missing", "new-model")
+
+
 def test_committed_profiles_cover_current_harnesses_and_claude_adapter():
     path = Path(__file__).resolve().parents[1] / "conf" / "harnesses.yaml"
     profiles = HarnessProfiles.load(path)
