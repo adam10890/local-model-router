@@ -38,6 +38,10 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- Backend lifecycle control now refuses unknown configurations and recycled
+  processes, keeps Docker access lazy and opt-in, sanitizes remote/MCP
+  failures, and omits raw task text from routing bridge metadata. The main CI
+  gate now enforces 75% total coverage and 70% for backends, MCP, and CLI/setup.
 - `imperium doctor` now verifies the callable dependency capabilities used by
   the router, reports sanitized recovery guidance for broken namespace
   packages, and preserves its existing machine-readable dependency codes.

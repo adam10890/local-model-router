@@ -54,8 +54,10 @@ def create_backend(
         elif backend_type == "subprocess":
             backend_type = BackendType.SUBPROCESS
         else:
-            logger.warning(f"Unknown backend '{backend_type}', falling back to auto")
-            backend_type = detect_backend(global_config)
+            raise ValueError(f"Unknown backend '{backend_type}'")
+
+    if not isinstance(backend_type, BackendType):
+        raise ValueError(f"Unknown backend '{backend_type}'")
 
     # Create backend
     if backend_type == BackendType.REMOTE:
