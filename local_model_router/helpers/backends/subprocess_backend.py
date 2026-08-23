@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -35,6 +36,7 @@ class SubprocessBackend(InferenceBackend):
         self._processes: Dict[str, subprocess.Popen] = {}
         self._slots: Dict[str, SlotStatus] = {}
         self._started_at: Dict[str, float] = {}
+        self._process_identities: Dict[str, float] = {}
 
     @property
     def backend_type(self) -> BackendType:
@@ -53,6 +55,7 @@ class SubprocessBackend(InferenceBackend):
             restart_count = self._slots.get(name, SlotStatus(name=name)).restart_count + 1
             del self._processes[name]
             self._started_at.pop(name, None)
+            self._process_identities.pop(name, None)
 
         port = int(config.get("port", 8080))
         status = SlotStatus(
@@ -63,10 +66,16 @@ class SubprocessBackend(InferenceBackend):
             restart_count=restart_count,
         )
 
+        if not self._valid_slot_name(name):
+            status.error = "Invalid slot name"
+            status.extra["failure_code"] = "invalid_slot_name"
+            self._slots[name] = status
+            return status
+
         # Check model file
         model_path = config.get("model_path", "")
         if not model_path or not os.path.exists(model_path):
-            status.error = f"Model file not found: {model_path}"
+            status.error = "Model file not found"
             status.extra["failure_code"] = "model_missing"
             self.logger.error(status.error)
             self._slots[name] = status
@@ -75,7 +84,7 @@ class SubprocessBackend(InferenceBackend):
         proc = None
         try:
             cmd = self._build_command(config)
-            self.logger.info(f"Starting slot '{name}': {' '.join(cmd[:6])}...")
+            self.logger.info("Starting slot '%s' on port %s", name, port)
 
             env = os.environ.copy()
             cuda_devices = self.global_config.get("cuda_visible_devices")
@@ -84,39 +93,44 @@ class SubprocessBackend(InferenceBackend):
 
             log_dir = self.global_config.get("log_dir", "logs/llama_cpp")
             os.makedirs(log_dir, exist_ok=True)
-            log_file = open(os.path.join(log_dir, f"{name}.log"), "a")
+            log_file = open(os.path.join(log_dir, f"{name}.log"), "a", encoding="utf-8")
 
             use_wsl = self.global_config.get("use_wsl", False)
 
-            if use_wsl and sys.platform == "win32":
-                wsl_cmd = " ".join(cmd)
-                full_cmd = ["wsl", "bash", "-c", f"nohup {wsl_cmd} > /dev/null 2>&1 &"]
-                proc = subprocess.Popen(
-                    full_cmd,
-                    stdout=log_file,
-                    stderr=subprocess.STDOUT,
-                    env=env,
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-                )
-            else:
-                visible = bool(config.get("visible_terminal"))
-                creation = (
-                    subprocess.CREATE_NEW_CONSOLE
-                    if visible and sys.platform == "win32"
-                    else subprocess.CREATE_NEW_PROCESS_GROUP
-                    if sys.platform == "win32"
-                    else 0
-                )
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=None if visible else log_file,
-                    stderr=None if visible else subprocess.STDOUT,
-                    env=env,
-                    creationflags=creation,
-                )
+            try:
+                if use_wsl and sys.platform == "win32":
+                    full_cmd = ["wsl", "bash", "-lc", shlex.join(cmd)]
+                    proc = subprocess.Popen(
+                        full_cmd,
+                        stdout=log_file,
+                        stderr=subprocess.STDOUT,
+                        env=env,
+                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                    )
+                else:
+                    visible = bool(config.get("visible_terminal"))
+                    creation = (
+                        subprocess.CREATE_NEW_CONSOLE
+                        if visible and sys.platform == "win32"
+                        else subprocess.CREATE_NEW_PROCESS_GROUP
+                        if sys.platform == "win32"
+                        else 0
+                    )
+                    proc = subprocess.Popen(
+                        cmd,
+                        stdout=None if visible else log_file,
+                        stderr=None if visible else subprocess.STDOUT,
+                        env=env,
+                        creationflags=creation,
+                    )
+            finally:
+                log_file.close()
 
             self._processes[name] = proc
             self._started_at[name] = time.monotonic()
+            identity = self._process_create_time(proc.pid)
+            if identity is not None:
+                self._process_identities[name] = identity
             status.pid = proc.pid
 
             timeout = self._get_startup_timeout()
@@ -137,39 +151,39 @@ class SubprocessBackend(InferenceBackend):
                 self.logger.error(f"Slot '{name}' failed health check")
 
         except Exception as e:
-            status.error = str(e)
+            status.error = "Could not start local model process"
             status.extra["failure_code"] = "start_failed"
+            status.extra["exception_type"] = type(e).__name__
             if proc is not None:
                 exit_code = proc.poll()
                 status.running = exit_code is None
                 if exit_code is not None:
                     status.extra["exit_code"] = exit_code
-            self.logger.error(f"Failed to start slot '{name}': {e}")
+            self.logger.error("Failed to start slot '%s' (%s)", name, type(e).__name__)
 
         self._slots[name] = status
         return status
 
     async def stop_slot(self, name: str) -> bool:
-        # Capture port before popping so WSL kill path still works
-        slot_status = self._slots.get(name)
-        wsl_port = slot_status.port if slot_status else None
-
-        proc = self._processes.pop(name, None)
-        self._slots.pop(name, None)
-        self._started_at.pop(name, None)
-
+        proc = self._processes.get(name)
         if not proc:
             return False
 
-        use_wsl = self.global_config.get("use_wsl", False)
+        expected_identity = self._process_identities.get(name)
+        current_identity = self._process_create_time(proc.pid)
+        if (
+            expected_identity is not None
+            and current_identity is not None
+            and current_identity != expected_identity
+        ):
+            status = self._slots.get(name)
+            if status:
+                status.error = "Process identity changed; refusing to stop"
+                status.extra["failure_code"] = "process_identity_changed"
+            return False
 
         try:
-            if use_wsl and sys.platform == "win32":
-                # Find and kill process by port in WSL
-                if wsl_port:
-                    kill_cmd = f"kill $(lsof -t -i:{wsl_port}) 2>/dev/null || true"
-                    subprocess.run(["wsl", "bash", "-c", kill_cmd], timeout=10)
-            elif proc.poll() is None:
+            if proc.poll() is None:
                 if sys.platform == "win32":
                     proc.send_signal(signal.CTRL_BREAK_EVENT)
                 else:
@@ -179,7 +193,12 @@ class SubprocessBackend(InferenceBackend):
                     proc.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     proc.kill()
+                    proc.wait(timeout=10)
 
+            self._processes.pop(name, None)
+            self._slots.pop(name, None)
+            self._started_at.pop(name, None)
+            self._process_identities.pop(name, None)
             self.logger.info(f"Stopped slot '{name}'")
             return True
         except Exception as e:
@@ -258,6 +277,19 @@ class SubprocessBackend(InferenceBackend):
                 return full + ".exe"
 
         return binary  # fallback to PATH
+
+    @staticmethod
+    def _valid_slot_name(name: str) -> bool:
+        return bool(name and name not in {".", ".."} and os.path.basename(name) == name and "/" not in name and "\\" not in name)
+
+    @staticmethod
+    def _process_create_time(pid: int) -> Optional[float]:
+        try:
+            import psutil
+
+            return float(psutil.Process(pid).create_time())
+        except (psutil.Error, OSError, ValueError):
+            return None
 
     def _convert_wsl_path(self, win_path: str) -> str:
         if not win_path:

@@ -348,6 +348,11 @@ Vercel AI SDK style setup snippets.
 
 ```powershell
 .venv\Scripts\python -m pytest tests/ -q     # full suite
+.venv\Scripts\coverage run --source=local_model_router -m pytest tests/ -q
+.venv\Scripts\coverage report --fail-under=75
+.venv\Scripts\coverage report --include="local_model_router/helpers/backends/*" --fail-under=70
+.venv\Scripts\coverage report --include="local_model_router/mcp/*" --fail-under=70
+.venv\Scripts\coverage report --include="local_model_router/cli.py,local_model_router/setup/*" --fail-under=70
 ```
 
 Pull requests and pushes to `main` run the same hermetic suite in GitHub

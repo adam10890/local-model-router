@@ -8,6 +8,13 @@ from urllib.parse import quote
 import aiohttp
 
 
+_HTTP_ERRORS = {
+    401: ("router_unauthorized", "Router authentication failed"),
+    429: ("router_rate_limited", "Router admission limit reached"),
+    503: ("router_unavailable", "Router service unavailable"),
+}
+
+
 def _router_base_url() -> str:
     return os.environ.get("A0_LMM_ROUTER_BASE_URL", "http://127.0.0.1:9000").strip().rstrip("/")
 
@@ -26,6 +33,14 @@ def _router_headers() -> dict[str, str]:
     return headers
 
 
+def _router_error(status: int) -> dict[str, Any]:
+    code, detail = _HTTP_ERRORS.get(
+        status,
+        ("router_http_error", f"Router returned HTTP {status}"),
+    )
+    return {"error": code, "detail": detail, "status": status}
+
+
 async def _router_request(
     method: str,
     path: str,
@@ -41,14 +56,31 @@ async def _router_request(
                 headers=_router_headers(),
                 timeout=aiohttp.ClientTimeout(total=timeout),
             ) as response:
-                data = await response.json(content_type=None)
+                if response.status >= 400:
+                    return _router_error(response.status)
+                try:
+                    data = await response.json(content_type=None)
+                except (aiohttp.ContentTypeError, ValueError):
+                    return {
+                        "error": "router_invalid_response",
+                        "detail": "Router returned invalid JSON",
+                        "status": 502,
+                    }
                 if isinstance(data, dict):
-                    if response.status >= 400:
-                        data.setdefault("status", response.status)
                     return data
-                return {"data": data, "status": response.status}
-    except (aiohttp.ClientError, TimeoutError) as exc:
-        return {"error": "router_unreachable", "detail": str(exc)}
+                return {"data": data}
+    except TimeoutError:
+        return {
+            "error": "router_timeout",
+            "detail": "Router request timed out",
+            "status": 504,
+        }
+    except aiohttp.ClientError:
+        return {
+            "error": "router_unreachable",
+            "detail": "Router could not be reached",
+            "status": 503,
+        }
 
 
 async def chat_complete(
@@ -143,6 +175,7 @@ async def route_task(
     quality: str = "best_available",
     routing_strategy: str = "balanced_local",
 ) -> dict[str, Any]:
+    del task  # Task text is intentionally excluded from routing telemetry.
     return await _router_request(
         "POST",
         "/routing/request",
@@ -155,7 +188,6 @@ async def route_task(
             "est_output_tokens": est_output_tokens,
             "quality": quality,
             "routing_strategy": routing_strategy,
-            "metadata": {"task": task} if task else {},
         },
     )
 
