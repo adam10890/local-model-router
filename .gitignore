@@ -41,3 +41,4 @@ Thumbs.db
 codex-clipboard-*.png
 Screenshot*.png
 screenshots/
+output/playwright/

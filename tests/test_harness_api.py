@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import textwrap
 
+import pytest
 from starlette.testclient import TestClient
 
 from local_model_router.service.app import create_app
@@ -318,6 +319,79 @@ def test_harness_create_is_disabled_by_default(tmp_path, monkeypatch):
     )
     assert response.status_code == 403
     assert response.json()["error"] == "config_writes_disabled"
+
+
+def test_harness_pin_is_hidden_and_disabled_without_full_write_gate(tmp_path, monkeypatch):
+    monkeypatch.delenv("A0_LMM_ROUTER_ENABLE_CONFIG_WRITES", raising=False)
+    disabled = _client(tmp_path / "disabled", monkeypatch, api_key="secret")
+    headers = {"Authorization": "Bearer secret"}
+    listing = disabled.get("/harnesses", headers=headers)
+    assert listing.json()["config_writes_enabled"] is False
+    denied = disabled.patch(
+        "/harnesses/hermes/connections/default",
+        headers=headers,
+        json={"model": "utility_cpu"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"] == "config_writes_disabled"
+
+    monkeypatch.setenv("A0_LMM_ROUTER_ENABLE_CONFIG_WRITES", "1")
+    no_key = _client(tmp_path / "no-key", monkeypatch)
+    assert no_key.get("/harnesses").json()["config_writes_enabled"] is False
+    denied = no_key.patch(
+        "/harnesses/hermes/connections/default",
+        json={"model": "utility_cpu"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["error"] == "config_write_requires_api_key"
+
+
+@pytest.mark.parametrize("model", ["utility_cpu", "dmr/ornith", "coder"])
+def test_harness_pin_accepts_configured_slot_upstream_and_live_alias(
+    tmp_path, monkeypatch, model
+):
+    monkeypatch.setenv("A0_LMM_ROUTER_ENABLE_CONFIG_WRITES", "1")
+    client = _client(tmp_path, monkeypatch, api_key="secret")
+    path = "/harnesses/hermes/connections/default"
+
+    assert client.patch(path, json={"model": model}).status_code == 401
+    response = client.patch(
+        path,
+        headers={"Authorization": "Bearer secret"},
+        json={"model": model},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["connections"][0]["model"] == model
+    listing = client.get(
+        "/harnesses", headers={"Authorization": "Bearer secret"}
+    ).json()
+    assert listing["config_writes_enabled"] is True
+    assert next(
+        item for item in listing["harnesses"] if item["harness_id"] == "hermes"
+    )["connections"][0]["model"] == model
+    assert list(tmp_path.glob("harnesses.yaml.*.bak"))
+
+
+@pytest.mark.parametrize("model", ["not-configured-anywhere", "embedding"])
+def test_harness_pin_rejects_unknown_target_without_writing(
+    tmp_path, monkeypatch, model
+):
+    monkeypatch.setenv("A0_LMM_ROUTER_ENABLE_CONFIG_WRITES", "1")
+    client = _client(tmp_path, monkeypatch, api_key="secret")
+    response = client.patch(
+        "/harnesses/hermes/connections/default",
+        headers={"Authorization": "Bearer secret"},
+        json={"model": model},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "unknown_pin_target"
+    detail = client.get(
+        "/harnesses/hermes", headers={"Authorization": "Bearer secret"}
+    ).json()
+    assert detail["connections"][0]["model"] == "ornith"
+    assert not list(tmp_path.glob("harnesses.yaml.*.bak"))
 
 
 def test_harness_create_requires_configured_auth_and_writes_atomically(tmp_path, monkeypatch):

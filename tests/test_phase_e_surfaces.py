@@ -58,6 +58,10 @@ def test_dashboard_page_loads(tmp_path, monkeypatch):
     assert "Verify connection" in html
     assert "Connections" in html
     assert "Advanced" in html
+    assert 'x.config_writes_enabled===true' in html
+    assert 'if(!state.configWritesEnabled||!hermesHarness()||!hermesConnection())return ""' in html
+    assert '/connections/${encodeURIComponent(connection.name)}' in html
+    assert 'method:"PATCH",body:JSON.stringify({model})' in html
     assert 'localStorage.getItem("imperium.chat")' in html
     assert 'localStorage.setItem("imperium.chat"' in html
     assert "if(state.setupRunning)return" in html

@@ -6,6 +6,10 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- A separate `browser` development extra and real-Chromium dashboard gate for
+  navigation, localization, persistence, degraded states, responsive layout,
+  keyboard behavior, and guarded Hermes model pinning. Failure screenshots and
+  traces are retained only by the dedicated browser workflow.
 - Beta 1.0 gate program (repo-side): Windows uninstall path guards, living
   evidence log (`docs/1.0-beta-evidence.md`), G4 config-preview redaction
   attestation, first-run/recovery operator checklists, harness version matrix
@@ -38,6 +42,9 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- Dashboard dialogs now manage focus, mobile navigation exposes its expanded
+  state, and Hermes pin writes require both API authentication and the explicit
+  config-write opt-in.
 - Backend lifecycle control now refuses unknown configurations and recycled
   processes, keeps Docker access lazy and opt-in, sanitizes remote/MCP
   failures, and omits raw task text from routing bridge metadata. The main CI

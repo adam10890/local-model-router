@@ -30,6 +30,7 @@ def test_dashboard_ships_en_he_and_light_dark_theme_hooks(tmp_path, monkeypatch)
     assert 'id="theme-control"' in html
     assert 'id="mode-control"' not in html
     assert 'id="advanced-toggle"' in html
+    assert 'aria-controls="sidebar" aria-expanded="false"' in html
     assert '[dir="rtl"]' in html
 
     assert 'home:"Home"' in html and 'home:"בית"' in html
@@ -42,6 +43,7 @@ def test_dashboard_ships_en_he_and_light_dark_theme_hooks(tmp_path, monkeypatch)
     assert "noInstalled:" in html
     assert "statusUnavailable:" in html or "statusUnavailable" in html
     assert 'if(route){closeDrawer();routeTo(route);return;}' in html
+    assert "drawerReturnFocus" in html
     assert "127.0.0.1:7440" not in html
 
 
