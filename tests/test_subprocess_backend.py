@@ -225,6 +225,11 @@ def test_wsl_start_tracks_foreground_process_without_shell_backgrounding(tmp_pat
     monkeypatch.setattr(
         "local_model_router.helpers.backends.subprocess_backend.sys.platform", "win32"
     )
+    monkeypatch.setattr(
+        "local_model_router.helpers.backends.subprocess_backend.subprocess.CREATE_NEW_PROCESS_GROUP",
+        0,
+        raising=False,
+    )
     monkeypatch.setattr(backend, "_wait_healthy", lambda *_args: _async_value(True))
     monkeypatch.setattr(backend, "_process_create_time", lambda _pid: 1.0)
 
