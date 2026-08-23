@@ -1,5 +1,8 @@
 from importlib.util import module_from_spec, spec_from_file_location
+import json
 from pathlib import Path
+
+import pytest
 
 
 def test_harness_smoke_checks_models_completion_and_stream(monkeypatch):
@@ -19,7 +22,7 @@ def test_harness_smoke_checks_models_completion_and_stream(monkeypatch):
                     "connections": [{"name": "default"}],
                 }]
             }
-        return {}
+        return {"choices": [{"message": {"content": "OK"}}]}
 
     monkeypatch.setattr(module, "_request", request)
     module.smoke("http://router:9000", "secret")
@@ -51,14 +54,23 @@ def test_harness_smoke_can_skip_stream_and_add_tools(monkeypatch):
                     "connections": [{"name": "default"}],
                 }]
             }
-        return {}
+        if payload and payload.get("tools"):
+            return {
+                "choices": [{"message": {"tool_calls": [{
+                    "function": {"name": "imperium_ping", "arguments": "{}"}
+                }]}}]
+            }
+        return {"choices": [{"message": {"content": "OK"}}]}
 
     monkeypatch.setattr(module, "_request", request)
     module.smoke("http://router:9000", check_stream=False, check_tools=True)
 
-    assert len(calls) == 3
+    assert len(calls) == 4
     assert calls[1][1] == "http://router:9000/harnesses/pi/v1/models"
-    assert calls[2][2]["tools"][0]["function"]["name"] == "noop"
+    assert calls[3][2]["tools"][0]["function"]["name"] == "imperium_ping"
+    assert calls[3][2]["tool_choice"] == "required"
+    assert calls[3][2]["chat_template_kwargs"] == {"enable_thinking": False}
+    assert calls[3][2]["temperature"] == 0
 
 
 def test_harness_smoke_filter_and_named_connection(monkeypatch):
@@ -80,7 +92,7 @@ def test_harness_smoke_filter_and_named_connection(monkeypatch):
                     },
                 ]
             }
-        return {}
+        return {"choices": [{"message": {"content": "OK"}}]}
 
     monkeypatch.setattr(module, "_request", request)
     module.smoke(
@@ -95,3 +107,34 @@ def test_harness_smoke_filter_and_named_connection(monkeypatch):
         "http://router:9000/harnesses/agent_zero/utility/v1/models",
         "http://router:9000/harnesses/agent_zero/utility/v1/chat/completions",
     ]
+
+
+def test_harness_smoke_required_missing_writes_sanitized_json(tmp_path, monkeypatch):
+    script = Path(__file__).resolve().parents[1] / "scripts" / "smoke_harnesses.py"
+    spec = spec_from_file_location("smoke_harnesses", script)
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(
+        module,
+        "_request",
+        lambda *_args, **_kwargs: {
+            "harnesses": [{"harness_id": "hermes", "connections": [{"name": "default"}]}]
+        },
+    )
+    output = tmp_path / "harness.json"
+
+    with pytest.raises(RuntimeError, match="required_harness_missing"):
+        module.smoke(
+            "http://router:9000",
+            api_key="do-not-write",
+            harness_ids={"pi"},
+            json_output=output,
+        )
+
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["missing_harnesses"] == ["pi"]
+    assert report["error_code"] == "required_harness_missing"
+    serialized = json.dumps(report)
+    assert "do-not-write" not in serialized
+    assert "router:9000" not in serialized

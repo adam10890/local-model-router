@@ -226,7 +226,9 @@ python -m venv .venv
 Or use the wrapper scripts: `scripts\run_provider.ps1` (Windows),
 `scripts/run_provider.sh` (WSL/Linux), plus `smoke_provider.*` for a
 post-start check and `scripts/smoke_harnesses.py` to verify every configured
-dedicated harness connection.
+dedicated harness connection. Release validation adds `--require-live` (or
+`-RequireLive`) and a JSON output path; harness RC runs require explicit
+`--harness` filters and fail on a missing stream or tool call.
 
 ## Calling it from the OpenAI SDK
 

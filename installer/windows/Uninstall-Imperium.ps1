@@ -1,3 +1,5 @@
+param([switch]$NoShortcut)
+
 $ErrorActionPreference = "Stop"
 
 function Test-StrictChildPath([string]$Parent, [string]$Child) {
@@ -28,6 +30,8 @@ if (Test-Path -LiteralPath $Stop) {
 if (Test-Path -LiteralPath $Target) { Remove-Item -LiteralPath $Target -Recurse -Force }
 if (Test-Path -LiteralPath $Previous) { Remove-Item -LiteralPath $Previous -Recurse -Force }
 
-$Shortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "Imperium.lnk"
-if (Test-Path -LiteralPath $Shortcut) { Remove-Item -LiteralPath $Shortcut -Force }
+if (-not $NoShortcut) {
+    $Shortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "Imperium.lnk"
+    if (Test-Path -LiteralPath $Shortcut) { Remove-Item -LiteralPath $Shortcut -Force }
+}
 Write-Output "Imperium was removed. Models and settings remain under %LOCALAPPDATA%\Imperium."
