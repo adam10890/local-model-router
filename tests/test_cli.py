@@ -1,8 +1,11 @@
 """Tests for the CLI: parser dispatch, config-check, doctor (hermetic)."""
 from __future__ import annotations
 
+import importlib
+import json
 import sys
 import textwrap
+import types
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -124,6 +127,51 @@ def test_doctor_passes_with_reachable_fleet(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert "all checks passed" in out
+
+
+def test_doctor_fails_when_aiohttp_lacks_client_session(tmp_path, monkeypatch, capsys):
+    _write_config(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli, "_probe", lambda url: True)
+    real_import = importlib.import_module
+
+    def import_module(name):
+        return types.ModuleType("aiohttp") if name == "aiohttp" else real_import(name)
+
+    monkeypatch.setattr(cli.importlib, "import_module", import_module)
+    rc = cli.main(["doctor", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    check = next(row for row in payload["checks"] if row["code"] == "dependency_aiohttp")
+
+    assert rc == 1
+    assert check == {
+        "code": "dependency_aiohttp",
+        "status": "fail",
+        "severity": "blocking",
+        "label": "dependency: aiohttp",
+        "detail": "required capability unavailable: aiohttp.ClientSession",
+        "remediation": "Reinstall aiohttp in the Imperium Python environment",
+    }
+
+
+def test_doctor_sanitizes_dependency_import_errors(tmp_path, monkeypatch, capsys):
+    _write_config(tmp_path, monkeypatch)
+    monkeypatch.setattr(cli, "_probe", lambda url: True)
+    real_import = importlib.import_module
+
+    def import_module(name):
+        if name == "aiohttp":
+            raise ImportError("C:\\secret\\broken-site-packages")
+        return real_import(name)
+
+    monkeypatch.setattr(cli.importlib, "import_module", import_module)
+    rc = cli.main(["doctor", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+    check = next(row for row in payload["checks"] if row["code"] == "dependency_aiohttp")
+
+    assert rc == 1
+    assert check["detail"] == "required capability unavailable: aiohttp.ClientSession"
+    assert "secret" not in json.dumps(check).lower()
+    assert check["remediation"] == "Reinstall aiohttp in the Imperium Python environment"
 
 
 def test_test_route_resolves_alias(tmp_path, monkeypatch, capsys):
