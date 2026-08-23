@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib
 import json
 import os
 import sys
@@ -238,12 +239,27 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         f"running {sys.version_info.major}.{sys.version_info.minor}",
     )
 
-    for module in ("aiohttp", "pydantic", "starlette", "uvicorn", "yaml"):
+    dependencies = {
+        "aiohttp": ("aiohttp", "ClientSession"),
+        "pydantic": ("pydantic", "BaseModel"),
+        "starlette": ("starlette.applications", "Starlette"),
+        "uvicorn": ("uvicorn", "run"),
+        "yaml": ("yaml", "safe_load"),
+    }
+    for name, (module_name, symbol) in dependencies.items():
+        capability = f"{module_name}.{symbol}"
         try:
-            __import__(module)
-            check(f"dependency: {module}", True)
-        except ImportError as exc:
-            check(f"dependency: {module}", False, str(exc))
+            module = importlib.import_module(module_name)
+            if not callable(getattr(module, symbol, None)):
+                raise AttributeError(symbol)
+            check(f"dependency: {name}", True, capability)
+        except (ImportError, AttributeError):
+            check(
+                f"dependency: {name}",
+                False,
+                f"required capability unavailable: {capability}",
+                f"Reinstall {name} in the Imperium Python environment",
+            )
 
     config_path = _resolve_config()
     config_ok = os.path.exists(config_path)

@@ -38,6 +38,14 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- `imperium doctor` now verifies the callable dependency capabilities used by
+  the router, reports sanitized recovery guidance for broken namespace
+  packages, and preserves its existing machine-readable dependency codes.
+- The Windows bundle workflow now tests Python 3.12 and validates tag builds
+  against package metadata instead of a stale hard-coded release version.
+- Advanced dashboard navigation is always available, simple model choices stay
+  filtered, pinned tool-path labels replace the older custom-harness wording,
+  and leftover local debug telemetry has been removed.
 - Managed subprocess fleet status now probes live process health, automatically
   retries crashed slots within the configured limit, and closes the alert
   drawer before navigating to recovery controls.
