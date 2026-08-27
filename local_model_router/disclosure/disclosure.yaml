@@ -1,0 +1,124 @@
+# Task disclosure rules — packaged immutable default.
+#
+# Imperium brokers tasks between agents and harnesses. Every handoff is a
+# disclosure decision: this content, to that executor. These rules define
+# both axes of that decision.
+#
+# Override by placing conf/disclosure.yaml next to apps.yaml / agents.yaml.
+# This file must never contain secrets, real identifiers, or prompt bodies.
+
+schema_version: 1
+
+# Axis A — executor trust ladder, most trusted first.
+# An ordering, not a routing chain: content need not pass through every tier.
+trust_tiers:
+  - id: local_uncensored
+    rank: 1
+    label: Local model, no alignment filtering
+  - id: local_aligned
+    rank: 2
+    label: Local model with vendor alignment
+  - id: private_cloud
+    rank: 3
+    label: Cloud provider under a privacy/zero-retention guarantee
+  - id: other_provider
+    rank: 4
+    label: Any other provider
+
+# Executors that do not declare a tier resolve here. Fail closed.
+default_executor_tier: other_provider
+
+# Disclosure forms, most open to most closed.
+forms:
+  - id: skeleton_only
+    label: Abstract spec only; names, data, and wiring are added locally
+  - id: requirements_only
+    label: Requirements and acceptance criteria only; no rationale or intent
+  - id: redacted_context
+    label: Minimal internal context with identifiers replaced by placeholders
+  - id: full
+    label: Unrestricted content
+
+# Axis B — content class caps the least-trusted executor allowed, and fixes
+# the form the content must take when it is sent.
+content_classes:
+  - id: generic_scaffold
+    label: Boilerplate module, parser, or adapter shell
+    max_executor_tier: other_provider
+    form: skeleton_only
+    keywords: [boilerplate, scaffold, skeleton, adapter, parser, serializer, stub, template]
+  - id: algorithm_generic
+    label: Self-contained logic over synthetic input
+    max_executor_tier: other_provider
+    form: skeleton_only
+    keywords: [algorithm, sorting, parsing, caching, dedupe, checksum, benchmark, data structure]
+  - id: product_feature
+    label: A behavior in a product surface
+    max_executor_tier: private_cloud
+    form: requirements_only
+    keywords: [feature, endpoint, dashboard, ui, workflow, user, acceptance criteria]
+  - id: integration_glue
+    label: Wiring to a named third party
+    max_executor_tier: private_cloud
+    form: requirements_only
+    keywords: [integration, webhook, sdk, client library, third party, connector, oauth]
+  - id: routing_policy
+    label: Ranking, admission, or failover logic
+    max_executor_tier: local_aligned
+    form: redacted_context
+    keywords: [routing, ranking, failover, admission, scoring, slot, upstream, fleet, quota]
+  - id: operator_data
+    label: Real fleet config, model ids, hardware, or telemetry
+    max_executor_tier: local_uncensored
+    form: full
+    keywords: [telemetry, hardware, vram, gpu, model id, fleet config, inventory, operator]
+  - id: security_surface
+    label: Auth, keys, bind posture, or installer trust
+    max_executor_tier: local_uncensored
+    form: full
+    keywords: [auth, api key, token, secret, credential, bind, installer, signature, privilege]
+
+# Class assigned when nothing matches. Conservative on purpose.
+default_content_class: product_feature
+
+# Sections a brief must carry, per form.
+brief_required_sections:
+  skeleton_only: [requirements, interface, acceptance, added_locally]
+  requirements_only: [requirements, acceptance, added_locally]
+  redacted_context: [requirements, context, acceptance, added_locally]
+  full: [requirements]
+
+# Content that must never reach an executor below its class cap.
+# Patterns are matched case-insensitively. Findings report the pattern id and
+# location only — matched text is never emitted, logged, or persisted.
+forbidden_patterns:
+  - id: bearer_token
+    pattern: '(?i)\b(?:bearer\s+|sk-|ghp_|gho_|github_pat_)[A-Za-z0-9_\-]{16,}'
+    severity: critical
+  - id: assigned_secret
+    pattern: '(?i)\b(api[_-]?key|secret|password|passwd|token|credential)\b\s*[:=]\s*\S+'
+    severity: critical
+  - id: private_key_block
+    pattern: '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+    severity: critical
+  - id: windows_user_path
+    pattern: '(?i)[A-Z]:\\Users\\[^\\\s]+'
+    severity: high
+  - id: posix_home_path
+    pattern: '(?i)/(?:home|Users)/[A-Za-z0-9._-]+/'
+    severity: high
+  - id: routable_host
+    pattern: '(?i)\bhttps?://(?!localhost|127\.0\.0\.1|\[::1\])[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+    severity: medium
+  - id: host_port
+    pattern: '(?i)(?<![\w.-])(?!localhost)[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}:\d{2,5}\b'
+    severity: medium
+  - id: gguf_model_file
+    pattern: '(?i)\b[\w.-]+\.gguf\b'
+    severity: medium
+  - id: hardware_identity
+    pattern: '(?i)\b(rtx|geforce|radeon|quadro|tesla)\s*[a-z]?\d{3,4}\b'
+    severity: low
+  - id: purpose_leak
+    pattern: '(?i)\b(so that we can|our goal is|the business reason|competitive|our strategy|roadmap says|monetiz\w*)\b'
+    severity: high

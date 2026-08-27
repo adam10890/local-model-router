@@ -27,6 +27,9 @@ Durable documentation for operators, contributors, and coding agents.
   current.
 - `future-orchestration.md` owns the legacy-orchestration deprecation and the
   gates for any replacement execution surface.
+- `task-disclosure.md` owns the executor trust ladder, the content-class map,
+  and the rules for writing task briefs. Keep it aligned with
+  `local_model_router/disclosure/disclosure.yaml`; the two are one contract.
 - `future-improvements.md` owns the deferred improvement-ideas backlog
   (candidate directions only; labeled deferred until selected).
 - `adr/` owns accepted product/engineering decisions from operator judgment

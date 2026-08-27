@@ -1,3 +1,9 @@
+# Slots may declare `trust_tier` for the task-disclosure policy
+# (docs/task-disclosure.md): local_uncensored for a model with no alignment
+# filtering, local_aligned for one with it. A slot that declares nothing is
+# treated as the least-trusted rung, so declare it deliberately — which model
+# is uncensored is machine-local knowledge that stays out of git.
+#
 active_slots:
 
   # ──────────────────────────────────────────────────────────────
@@ -8,6 +14,7 @@ active_slots:
   - id: slot_router
     port: 8080
     role: chat           # default role; clients override via "model" param
+    trust_tier: local_aligned   # or local_uncensored — see the header note
     model_id: router
     context_size: 65536
     gpu_layers: -1

@@ -1,4 +1,9 @@
 # Built-in prompt-backed agents. Prompt text is never returned by /agents or telemetry.
+#
+# Agents route through the router, so each one inherits the trust tier of the
+# slot or upstream that actually serves it (docs/task-disclosure.md). An agent
+# may declare `trust_tier:` to cap itself further, but never to claim more
+# trust than its executor has.
 agents:
   - id: code-review
     name: Code Review

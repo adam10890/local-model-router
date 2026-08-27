@@ -37,6 +37,13 @@ from local_model_router.routing.catalog import (
     required_capabilities_from_chat_body,
     role_from_chat_body,
 )
+from local_model_router.disclosure import (
+    CONFIG_FILENAME as DISCLOSURE_CONFIG_FILENAME,
+    DisclosureConfigError,
+    evaluate as evaluate_disclosure,
+    find_upstream_executor,
+    load_policy as load_disclosure_policy,
+)
 from local_model_router.setup import SetupEngine, SetupError
 from local_model_router.upstreams.registry import (
     UpstreamConfig,
@@ -257,6 +264,42 @@ def _record_upstream_usage(upstream_name: Optional[str], usage: Optional[Dict[st
         usage_ledger.record_usage(upstream_name, tokens_in=pt, tokens_out=ct, model=model or "", source="proxy")
     except Exception:
         return
+
+
+DISCLOSURE_ENFORCE_ENV = "A0_LMM_ROUTER_DISCLOSURE_ENFORCE"
+
+
+def _disclosure_enforced() -> bool:
+    """Whether a disclosure denial blocks the forward or only annotates it.
+
+    Read per request so the posture can be flipped without a restart. Default
+    is observe-only: the router reports what the policy would say and forwards
+    unchanged, so enabling enforcement is an explicit, reversible decision.
+    """
+    return os.environ.get(DISCLOSURE_ENFORCE_ENV, "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _disclosure_text(body: Dict[str, Any]) -> str:
+    """Flatten a chat body's message text for classification and scanning.
+
+    The result is used in-memory only: it is classified, scanned, and dropped.
+    Nothing derived from it beyond pattern ids and class names is ever logged,
+    returned, or persisted.
+    """
+    parts: list[str] = []
+    messages = body.get("messages")
+    if isinstance(messages, list):
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            if isinstance(content, str):
+                parts.append(content)
+            elif isinstance(content, list):
+                for chunk in content:
+                    if isinstance(chunk, dict) and isinstance(chunk.get("text"), str):
+                        parts.append(chunk["text"])
+    return "\n".join(parts)
 
 
 def _pick_routing_value(
@@ -487,6 +530,13 @@ def create_app(
 
     conf_dir = Path(observer.config_path).resolve().parent
     upstreams = load_upstreams(upstreams_path or conf_dir / "upstreams.yaml")
+    try:
+        disclosure_policy = load_disclosure_policy(conf_dir / DISCLOSURE_CONFIG_FILENAME)
+    except DisclosureConfigError as exc:
+        # A broken override must not take the router down, and must not be
+        # replaced by silence: fall back to the packaged rules and say so.
+        logger.warning("Disclosure rules override rejected, using packaged rules: %s", exc)
+        disclosure_policy = load_disclosure_policy(None)
     def _upstream_budget_status() -> Dict[str, str]:
         # ponytail: a broken provider_budget degrades to "no budget data" for
         # this request, not a routing outage — handle() also guards this call.
@@ -1338,6 +1388,22 @@ def create_app(
         except OrchestratorError as exc:
             return _orchestrator_error(exc)
 
+    def _evaluate_upstream_disclosure(upstream: UpstreamConfig, body: Dict[str, Any]):
+        """Classify this forward against the disclosure policy.
+
+        Best-effort: a policy failure must never break a forward that would
+        otherwise succeed, so it degrades to "no verdict" rather than raising.
+        Returns None when no verdict could be formed.
+        """
+        try:
+            executor = find_upstream_executor(disclosure_policy, upstreams, upstream.name)
+            return evaluate_disclosure(
+                disclosure_policy, executor=executor, text=_disclosure_text(body)
+            )
+        except Exception:
+            logger.debug("Disclosure evaluation skipped for upstream %s", upstream.name)
+            return None
+
     async def forward_to_upstream(
         upstream: UpstreamConfig,
         bare_model: str,
@@ -1360,6 +1426,30 @@ def create_app(
             "x-a0-router-strategy": strategy_label,
             "x-a0-router-cache": "BYPASS",
         }
+
+        # Task disclosure: this is the single choke point for every declared
+        # upstream forward, so it is where content meets executor trust. The
+        # verdict is always reported; it only blocks when enforcement is on,
+        # so the default posture is observe-and-explain, never silent change.
+        disclosure = _evaluate_upstream_disclosure(upstream, body)
+        if disclosure is not None:
+            out_headers["x-a0-router-trust-tier"] = disclosure.executor_tier
+            out_headers["x-a0-router-disclosure"] = disclosure.outcome
+            out_headers["x-a0-router-disclosure-class"] = disclosure.content_class
+            if not disclosure.allowed and _disclosure_enforced():
+                if finalize is not None:
+                    await finalize("failed", error_code="disclosure_policy_violation")
+                return _openai_error(
+                    (
+                        f"task disclosure policy denies sending "
+                        f"{disclosure.content_class} content to upstream "
+                        f"'{upstream.name}' at trust tier {disclosure.executor_tier}"
+                    ),
+                    "disclosure_policy_violation",
+                    403,
+                    extra={"disclosure": disclosure.describe()},
+                    headers=out_headers,
+                )
         try:
             if wants_stream:
                 session = aiohttp.ClientSession(

@@ -5,6 +5,7 @@
     python -m local_model_router list-models    # aliases + live slot models
     python -m local_model_router test-route     # dry-run a routing decision
     python -m local_model_router config-check   # validate the fleet YAML
+    python -m local_model_router disclosure     # task-brief rules and checks
 """
 from __future__ import annotations
 
@@ -38,6 +39,18 @@ def build_parser() -> argparse.ArgumentParser:
     route.add_argument("--role", default=None, help="explicit fleet role (chat|utility|embed|scribe)")
     route.add_argument("--task-type", default="chat", help="task type for auto-routing")
     route.add_argument("--model", default=None, help="model alias to resolve (auto, fast, coder, ...)")
+
+    disclosure = sub.add_parser(
+        "disclosure", help="task-disclosure rules: brief templates, classification, and checks"
+    )
+    disclosure.add_argument("--template", metavar="CONTENT_CLASS", help="print an empty brief skeleton")
+    disclosure.add_argument("--classify", metavar="FILE", help="report the content class of a brief")
+    disclosure.add_argument("--check", metavar="FILE", help="validate a brief and scan it")
+    disclosure.add_argument(
+        "--target", default=None, help="executor id to check the brief against (e.g. an upstream name)"
+    )
+    disclosure.add_argument("--list", action="store_true", help="print the trust ladder and content classes")
+    disclosure.add_argument("--json", action="store_true", help="print structured output as JSON")
 
     evaluate = sub.add_parser("evaluate-models", help="benchmark reachable local models and save ranking hints")
     evaluate.add_argument(
@@ -189,6 +202,145 @@ def cmd_test_route(args: argparse.Namespace) -> int:
     decision = asyncio.run(handler.handle(intent))
     print(json.dumps(decision.model_dump(), indent=2))
     return 0 if not decision.no_slot_available else 2
+
+
+def _disclosure_policy():
+    """Load disclosure rules, preferring conf/disclosure.yaml beside the fleet config."""
+    from pathlib import Path
+
+    from local_model_router.disclosure import CONFIG_FILENAME, load_policy
+
+    override = Path(_resolve_config()).resolve().parent / CONFIG_FILENAME
+    return load_policy(override)
+
+
+def _disclosure_executor(policy, target: Optional[str]):
+    """Resolve --target against configured upstreams; unknown targets fail closed."""
+    from pathlib import Path
+
+    from local_model_router.disclosure import find_upstream_executor, resolve_executor
+    from local_model_router.upstreams.registry import load_upstreams
+
+    if not target:
+        return None
+    upstreams = load_upstreams(Path(_resolve_config()).resolve().parent / "upstreams.yaml")
+    executor = find_upstream_executor(policy, upstreams, target)
+    if executor.declared:
+        return executor
+    return resolve_executor(policy, executor_id=target, kind=executor.kind, config=None)
+
+
+def _read_brief(path: str) -> str:
+    # Windows editors commonly leave a UTF-8 BOM; utf-8-sig strips it.
+    with open(path, encoding="utf-8-sig") as handle:
+        return handle.read()
+
+
+def cmd_disclosure(args: argparse.Namespace) -> int:
+    """Task-disclosure helper: templates, classification, and brief checks.
+
+    Output never quotes matched text — findings carry pattern ids and line
+    numbers only, so the output of a leak check is itself safe to paste.
+    """
+    from local_model_router.disclosure import (
+        DisclosureConfigError,
+        evaluate,
+        template_for,
+        validate,
+    )
+    from local_model_router.disclosure.brief import declared_class_of
+    from local_model_router.disclosure.classifier import classify
+
+    try:
+        policy = _disclosure_policy()
+    except DisclosureConfigError as exc:
+        print(f"FAIL: disclosure rules are invalid: {exc}")
+        return 1
+
+    if args.list or not (args.template or args.classify or args.check):
+        described = policy.describe()
+        if args.json:
+            print(json.dumps(described, indent=2))
+            return 0
+        print(f"rules: {described['source']}")
+        print("trust ladder (most trusted first):")
+        for tier in described["trust_tiers"]:
+            print(f"  {tier['rank']}. {tier['id']:<18} {tier['label']}")
+        print(f"undeclared executors resolve to: {described['default_executor_tier']}")
+        print("content classes:")
+        for item in described["content_classes"]:
+            print(
+                f"  {item['id']:<18} -> max {item['max_executor_tier']:<16} form {item['form']}"
+            )
+        return 0
+
+    if args.template:
+        try:
+            print(template_for(policy, args.template), end="")
+        except ValueError as exc:
+            print(f"FAIL: {exc}")
+            return 1
+        return 0
+
+    path = args.classify or args.check
+    try:
+        text = _read_brief(path)
+    except OSError as exc:
+        print(f"FAIL: could not read {path}: {exc}")
+        return 1
+
+    if args.classify:
+        result = classify(policy, text, declared_class=declared_class_of(text))
+        if args.json:
+            print(json.dumps(result.describe(), indent=2))
+            return 0
+        print(f"content class : {result.content_class}")
+        print(f"required form : {result.form}")
+        print(f"max executor  : {result.max_executor_tier}")
+        print(f"reasons       : {', '.join(result.reason_codes)}")
+        return 0
+
+    validation = validate(policy, text)
+    payload = {"brief": validation.describe()}
+    executor = _disclosure_executor(policy, args.target)
+    if executor is not None:
+        decision = evaluate(
+            policy,
+            executor=executor,
+            text=text,
+            declared_class=validation.content_class,
+            scan=validation.scan,
+        )
+        payload["decision"] = decision.describe()
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"content class : {validation.content_class}")
+        print(f"required form : {validation.required_form}")
+        for section in validation.missing_sections:
+            print(f"MISSING       : section '{section}'")
+        for finding in validation.scan.findings:
+            lines = ", ".join(str(line) for line in finding.lines)
+            print(
+                f"FORBIDDEN     : {finding.pattern_id} ({finding.severity}) "
+                f"x{finding.count} on line(s) {lines}"
+            )
+        if executor is not None:
+            decision = payload["decision"]
+            tier = decision["executor"]["trust_tier"]
+            declared = "declared" if decision["executor"]["declared"] else "undeclared"
+            print(f"target        : {executor.id} [{tier}, {declared}]")
+            print(f"decision      : {decision['outcome']}")
+            print(f"reasons       : {', '.join(decision['reason_codes'])}")
+        if validation.valid and (executor is None or payload["decision"]["outcome"] == "allow"):
+            print("OK: brief satisfies the disclosure policy")
+
+    if not validation.valid:
+        return 1
+    if executor is not None and payload["decision"]["outcome"] != "allow":
+        return 1
+    return 0
 
 
 def cmd_evaluate_models(args: argparse.Namespace) -> int:
@@ -397,6 +549,7 @@ _COMMANDS = {
     "doctor": cmd_doctor,
     "list-models": cmd_list_models,
     "test-route": cmd_test_route,
+    "disclosure": cmd_disclosure,
     "evaluate-models": cmd_evaluate_models,
     "config-check": cmd_config_check,
     "setup": cmd_setup,

@@ -176,10 +176,13 @@ def test_model_catalog_and_card_endpoints_expose_safe_discovery(tmp_path, monkey
 
 
 def test_dashboard_exposes_compare_routing_and_integration_snippets():
+    from local_model_router import __version__
     from local_model_router.dashboard import dashboard_html
 
     html = dashboard_html()
-    assert "v0.9.0" in html
+    # Track the package version rather than pinning it, so a release bump
+    # doesn't fail a test that is really about template substitution.
+    assert f"v{__version__}" in html
     assert "__IMPERIUM_VERSION__" not in html
     assert "Routing" in html
     assert "Claude Code MCP" in html
