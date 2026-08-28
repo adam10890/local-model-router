@@ -6,6 +6,12 @@
 #
 # API keys are read from the environment variable named in api_key_env.
 # Never put key material in this file.
+#
+# trust_tier declares how far an upstream is trusted with task content, for the
+# disclosure policy (docs/task-disclosure.md). Ladder, most trusted first:
+# local_uncensored, local_aligned, private_cloud, other_provider. An entry that
+# declares nothing is treated as other_provider — the least trusted rung.
+# Do not declare private_cloud without recorded evidence of the guarantee.
 # Disabled entries can be enabled per machine with the comma-separated
 # A0_LMM_ROUTER_ENABLED_UPSTREAMS environment variable.
 #
@@ -35,6 +41,7 @@ upstreams:
     type: openai_compatible
     base_url: http://localhost:12434/engines/v1
     enabled: true
+    trust_tier: other_provider
     capabilities: [chat, models, tools]
     max_active: 4
     max_queue: 32
@@ -44,6 +51,7 @@ upstreams:
     type: openai_compatible
     base_url: http://localhost:11434/v1
     enabled: false
+    trust_tier: other_provider
     capabilities: [chat, models, tools]
     notes: "Local Ollama HTTP — not used for Imperium GGUF serving (llama.cpp owns that). Prefer ollama_cloud for hosted free/cloud models."
 
@@ -51,12 +59,14 @@ upstreams:
     type: openai_compatible
     base_url: http://localhost:8000/v1
     enabled: false
+    trust_tier: other_provider
     notes: "vLLM OpenAI server. High-throughput serving for one pinned model."
 
   - name: lmstudio
     type: openai_compatible
     base_url: http://localhost:1234/v1
     enabled: false
+    trust_tier: other_provider
     notes: "LM Studio local server."
 
   - name: codex
@@ -64,6 +74,7 @@ upstreams:
     invoke: codex_cli
     default_model: gpt-5-codex
     enabled: false
+    trust_tier: other_provider
     limits:
       - window: "5h"
         max_tokens: 1000000
@@ -76,6 +87,7 @@ upstreams:
     base_url: https://ollama.com/v1
     api_key_env: OLLAMA_API_KEY
     enabled: false
+    trust_tier: other_provider
     limits:
       - window: "1h"
         max_requests: 200

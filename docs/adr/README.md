@@ -16,8 +16,11 @@ Short product and engineering decisions for Imperium.
 | [0010](0010-model-decision-system.md) | Need an explicit model decision system | Accepted (direction) |
 | [0011](0011-docs-hot-cold-then-loops.md) | Docs order: hot/cold policy, then loop catalog | Accepted |
 | [0012](0012-hot-cold-policy-doc.md) | Hot/cold policy doc started | Accepted |
+| [0013](0013-executor-trust-ladder.md) | Executor trust ladder | Accepted |
+| [0014](0014-cloud-task-disclosure.md) | Cloud models get requirements, not purpose | Accepted |
 
 Product outcomes stay in [`GOALS.md`](../../GOALS.md). Sequencing stays in
 [`1.0-beta-roadmap.html`](../1.0-beta-roadmap.html).
 
 Design draft: [`../hot-cold-policy.md`](../hot-cold-policy.md).
+Disclosure policy: [`../task-disclosure.md`](../task-disclosure.md).

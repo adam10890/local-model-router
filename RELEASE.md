@@ -4,12 +4,18 @@ Apply this checklist to every code change before merge.
 
 ## Required Checks
 
-1. Classify the SemVer impact and update `local_model_router/__init__.py` when
-   the change is being released. Additive API features are minor; compatible
-   fixes are patch; breaking API changes are major.
+1. Classify the SemVer impact and bump `local_model_router/__init__.py` on
+   every merge, so `main` always describes itself. Additive API features are
+   minor; compatible fixes are patch; breaking API changes are major.
+   Docs-only and test-only changes do not bump. The version moves on merge;
+   tagging is separate (see Cutting a release).
 2. Record user-visible behavior in `CHANGELOG.md`.
-3. Add one Markdown fragment under `changes/` named `<pr>-<slug>.md` with
-   `Added`, `Changed`, `Fixed`, or `Security` headings as applicable.
+3. Add one Markdown fragment under `changes/` named `<n>-<slug>.md` with
+   `Added`, `Changed`, `Fixed`, or `Security` headings as applicable. `<n>` is
+   one past the highest number already in `changes/`, not a PR number — the
+   two diverged long ago, and reusing a PR number collides with an existing
+   fragment. Check with:
+   `ls changes/ | sed -E 's/^([0-9]+)-.*/\1/' | sort -n | tail -1`.
 4. Update operator, API, setup, and contributor documentation affected by the
    change. Do not document speculative behavior.
 5. Run `python -m py_compile` on every touched Python file.
@@ -27,3 +33,18 @@ Apply this checklist to every code change before merge.
 Do not merge while any applicable check fails. Keep release fragments for the
 repository audit trail; a release commit may consolidate them into the
 changelog but must not silently drop their content.
+
+## Cutting a release
+
+Merging bumps the version; it does not cut a release. A release is an operator
+step, taken deliberately:
+
+1. Confirm `local_model_router/__init__.py` carries the version being released.
+2. Rename `## [Unreleased]` in `CHANGELOG.md` to `## [X.Y.Z] - <date>`, matching
+   that version exactly, and open a fresh `## [Unreleased]` above it.
+3. Tag the release commit `vX.Y.Z` and push the tag.
+
+**Agents do not create or push tags.** Without this step a version exists only
+as a heading in `CHANGELOG.md` and nothing in git records which commit it was —
+which is how `0.6.0` came to be documented as a release the package never
+reported.

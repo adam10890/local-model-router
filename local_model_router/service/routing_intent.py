@@ -62,6 +62,20 @@ AUTO_UPSTREAMS_ENV = "A0_LMM_ROUTER_AUTO_UPSTREAMS"
 def _auto_upstreams_enabled() -> bool:
     return os.environ.get(AUTO_UPSTREAMS_ENV, "0").strip().lower() in {"1", "true", "yes", "on"}
 
+def _slot_trust_tier(slot_cfg: Dict[str, Any]) -> str:
+    """Trust tier declared on a fleet slot, for explainability only.
+
+    An undeclared slot resolves through the disclosure policy's default, which
+    is the least-trusted rung — the same fail-closed rule the gate applies.
+    """
+    try:
+        from local_model_router.disclosure import load_policy, resolve_slot  # noqa: PLC0415
+
+        return resolve_slot(load_policy(None), slot_cfg).tier
+    except Exception:
+        return "unknown"
+
+
 def _router_alias_from_role(role: str) -> str:
     role_key = (role or "chat").lower()
     if role_key in {"embed", "embedding"}:
@@ -476,6 +490,12 @@ class RoutingIntentHandler:
         reason_codes.append("slot_selected")
         if fallback_used:
             reason_codes.append("primary_slot_unavailable_failover_used")
+
+        # Explainable disclosure: name the trust tier of the executor that was
+        # picked, so a caller can see how far its content just travelled. The
+        # intent handler never receives message bodies, so nothing is
+        # classified or scanned here — only the executor is named.
+        reason_codes.append(f"executor_tier:{_slot_trust_tier(slot_cfg)}")
 
         # Explainable context fit: surface (never silently change) the request's
         # utilization zone against the selected slot's window, and flag when the

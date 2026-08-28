@@ -14,6 +14,19 @@ All notable changes to this project are documented here.
   navigation, localization, persistence, degraded states, responsive layout,
   keyboard behavior, and guarded Hermes model pinning. Failure screenshots and
   traces are retained only by the dedicated browser workflow.
+- Task disclosure (`local_model_router/disclosure/`, ADR 0013/0014): an
+  executor trust ladder (`local_uncensored` → `local_aligned` →
+  `private_cloud` → `other_provider`) declared per slot, upstream, or agent,
+  and a content-class map that caps which executors may receive what and in
+  which form. Undeclared executors resolve to the least-trusted rung.
+- `local-model-router disclosure` — brief templates, classification, and
+  `--check` validation with an optional `--target` executor, for writing task
+  briefs that carry product requirements without the purpose behind them.
+- An observe-only runtime gate on declared-upstream forwards, reporting
+  `x-a0-router-trust-tier` / `x-a0-router-disclosure` headers and an
+  `executor_tier:<tier>` routing reason code. Enforcement is opt-in via
+  `A0_LMM_ROUTER_DISCLOSURE_ENFORCE=1`; disclosure findings never quote the
+  text they matched.
 - Beta 1.0 gate program (repo-side): Windows uninstall path guards, living
   evidence log (`docs/1.0-beta-evidence.md`), G4 config-preview redaction
   attestation, first-run/recovery operator checklists, harness version matrix
@@ -181,6 +194,10 @@ All notable changes to this project are documented here.
   loopback self-call URL, and honor a configured router port when stopping.
 
 ## [0.6.0] - 2026-07-11
+
+`__version__` never carried `0.6.0`: the bump in commit `54fbd99` went
+`0.5.0` straight to `0.7.0`. This section records the work, not a version
+the package ever reported.
 
 ### Added
 

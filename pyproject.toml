@@ -50,6 +50,7 @@ local_model_router = [
     "dashboard/icons/LICENSE",
     "service/agents.yaml",
     "setup/*.json",
+    "disclosure/*.yaml",
 ]
 
 [tool.pytest.ini_options]

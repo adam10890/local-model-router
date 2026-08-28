@@ -86,6 +86,10 @@ class UpstreamConfig:
     # model id to assume when none is given.
     invoke: str = ""
     default_model: str = ""
+    # Executor trust tier for task disclosure. Empty means undeclared, which
+    # the disclosure policy resolves to its least-trusted tier — never assume
+    # a provider is trustworthy because nobody said otherwise.
+    trust_tier: str = ""
 
     def effective_capabilities(self, bare_model: str = "") -> tuple[str, ...]:
         key = str(bare_model or "").strip()
@@ -146,6 +150,7 @@ class UpstreamConfig:
             "has_declared_limits": self.has_declared_limits,
             "invoke": self.invoke,
             "default_model": self.default_model,
+            "trust_tier": self.trust_tier,
         }
 
 
@@ -239,6 +244,7 @@ def _parse_entry(raw: Any) -> Optional[UpstreamConfig]:
         limits=tuple(limits),
         invoke=str(raw.get("invoke") or "").strip(),
         default_model=str(raw.get("default_model") or "").strip(),
+        trust_tier=str(raw.get("trust_tier") or "").strip().lower(),
     )
 
 

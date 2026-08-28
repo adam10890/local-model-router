@@ -20,6 +20,10 @@ codebase.
 - `local_model_router/routing/` — model aliases and routing policy.
 - `local_model_router/upstreams/` — OpenAI-compatible upstream adapters for
   Ollama/vLLM/LocalAI/LM Studio. Keys via env only.
+- `local_model_router/disclosure/` — task-disclosure policy: the executor
+  trust ladder, the content-class map, brief validation, and the matrix
+  between them. Packaged `disclosure.yaml` is the default; `conf/disclosure.yaml`
+  overrides it.
 - `local_model_router/apps/` — app/client profiles (`conf/apps.yaml`):
   default model, allowed models, auto-route policy per `X-App-Id`.
 - `local_model_router/harnesses/` — dedicated harness identities, pinned model
@@ -54,6 +58,9 @@ codebase.
   with Agent Zero's named chat/utility connections as the explicit exception.
 - Config previews and telemetry must redact secrets and never include prompt
   bodies.
+- Task handoffs are disclosure decisions: content class caps the least-trusted
+  executor allowed (`docs/task-disclosure.md`). Undeclared executors resolve to
+  the least-trusted tier, and disclosure findings never quote matched text.
 
 ## Work Guidance
 
@@ -98,6 +105,10 @@ codebase.
   authenticated and deprecated but is hidden from the dashboard.
   (13) ✅ 0.9.0 measured models / admission; beta readiness tracked against
   `GOALS.md` with evidence in `docs/1.0-beta-evidence.md`.
+  (14) ✅ task disclosure (`local_model_router/disclosure/`, ADR 0013/0014):
+  executor trust ladder, content-class map, `disclosure` CLI, and an
+  observe-only runtime gate at the upstream choke point (enforcement opt-in via
+  `A0_LMM_ROUTER_DISCLOSURE_ENFORCE=1`).
   Future (after P0 beta gates): orchestration replacement per
   `docs/future-orchestration.md`, per-app API keys, rate limits, `/metrics`,
   `/routing/history`, and one-click "apply recommendation"
@@ -117,6 +128,7 @@ codebase.
 
 - `local_model_router/service/AGENTS.md` — HTTP surface, auth, forwarding.
 - `local_model_router/helpers/AGENTS.md` — orchestration and routing helpers.
+- `local_model_router/disclosure/AGENTS.md` — task-disclosure policy and matrix.
 - `docs/AGENTS.md` — project documentation and development workflow docs.
 - `tests/AGENTS.md` — test conventions (hermetic, no live fleet).
 
