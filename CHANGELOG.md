@@ -6,6 +6,11 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- A protected `GET /diagnostics/report` support surface and dashboard export
+  now collect the same capability, configuration, readiness, slot, runtime,
+  and hardware checks as `imperium doctor` while emitting only allowlisted,
+  sanitized operational fields. Partial collection failures remain HTTP 200
+  with stable failure codes.
 - A path-filtered Windows validation workflow now separates PR clean-install
   checks, nightly CPU offline lifecycle evidence, and opt-in packaged NVIDIA
   evidence. Provider and harness smoke commands can emit sanitized JSON, and

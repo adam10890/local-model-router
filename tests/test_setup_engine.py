@@ -688,6 +688,33 @@ def test_readiness_explains_external_server_recovery():
     assert payload["next_action"]["label"]["en"] == "Open server guidance"
 
 
+def test_readiness_opens_managed_fleet_controls_without_starting_servers():
+    payload = build_ui_status(
+        setup_state={
+            "hardware": _hardware(),
+            "platform_support": {"status": "supported"},
+            "discovery": {
+                "runtime_installed": True,
+                "gguf_models": ["model.gguf"],
+                "config_exists": True,
+                "enabled_slots": 1,
+            },
+        },
+        slots_health=[
+            {"id": "chat", "enabled": True, "health": "unhealthy", "backend_type": "subprocess"}
+        ],
+        compute={},
+        base_url="http://127.0.0.1:9000",
+    )
+
+    issue = next(issue for issue in payload["blocking_issues"] if issue["code"] == "server_stopped")
+    assert issue["action"] == {
+        "code": "resolve_server_stopped",
+        "href": "#/advanced/fleet",
+        "label": {"en": "Open fleet controls", "he": "פתיחת בקרות Fleet"},
+    }
+
+
 def test_manifest_json_is_versioned(tmp_path):
     engine = _engine(tmp_path)
     engine._atomic_json(engine.manifest_path, {"schema_version": 2, "runtime": {}})

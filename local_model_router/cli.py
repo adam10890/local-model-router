@@ -19,7 +19,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Optional
 
-PROBE_TIMEOUT_SECONDS = 3.0
+from local_model_router.diagnostics import collect_doctor_checks, probe_url
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -85,12 +85,7 @@ def _resolve_config() -> str:
     return resolve_conf_path(__file__)
 
 
-def _probe(url: str) -> bool:
-    try:
-        with urllib.request.urlopen(url, timeout=PROBE_TIMEOUT_SECONDS) as resp:  # noqa: S310
-            return 200 <= resp.status < 500
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
-        return False
+_probe = probe_url
 
 
 def cmd_serve(_args: argparse.Namespace) -> int:
@@ -362,88 +357,25 @@ def cmd_evaluate_models(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
-    failures = 0
-    checks: list[dict[str, Any]] = []
-
-    def check(label: str, ok: bool, detail: str = "", remediation: str = "") -> None:
-        nonlocal failures
-        status = "PASS" if ok else "FAIL"
-        if not ok:
-            failures += 1
-        checks.append(
-            {
-                "code": label.lower().replace(" ", "_").replace(":", ""),
-                "status": "pass" if ok else "fail",
-                "severity": "info" if ok else "blocking",
-                "label": label,
-                "detail": detail,
-                "remediation": remediation or None,
-            }
-        )
-        if args.json:
-            return
-        suffix = f" — {detail}" if detail else ""
-        print(f"[{status}] {label}{suffix}")
-
-    check(
-        "python >= 3.10",
-        sys.version_info >= (3, 10),
-        f"running {sys.version_info.major}.{sys.version_info.minor}",
+    result = collect_doctor_checks(
+        _resolve_config(),
+        probe=_probe,
+        import_module=importlib.import_module,
+        include_locations=True,
     )
-
-    dependencies = {
-        "aiohttp": ("aiohttp", "ClientSession"),
-        "pydantic": ("pydantic", "BaseModel"),
-        "starlette": ("starlette.applications", "Starlette"),
-        "uvicorn": ("uvicorn", "run"),
-        "yaml": ("yaml", "safe_load"),
-    }
-    for name, (module_name, symbol) in dependencies.items():
-        capability = f"{module_name}.{symbol}"
-        try:
-            module = importlib.import_module(module_name)
-            if not callable(getattr(module, symbol, None)):
-                raise AttributeError(symbol)
-            check(f"dependency: {name}", True, capability)
-        except (ImportError, AttributeError):
-            check(
-                f"dependency: {name}",
-                False,
-                f"required capability unavailable: {capability}",
-                f"Reinstall {name} in the Imperium Python environment",
-            )
-
-    config_path = _resolve_config()
-    config_ok = os.path.exists(config_path)
-    check("config file exists", config_ok, config_path)
-
-    slots: list[dict[str, Any]] = []
-    if config_ok:
-        try:
-            from local_model_router.service.observer import ObserverBackend
-
-            slots = ObserverBackend(config_path).get_slots()
-            check("config parses", True, f"{len(slots)} slot(s)")
-        except Exception as exc:
-            check("config parses", False, f"{type(exc).__name__}: {exc}")
-
-    reachable = 0
-    for slot in slots:
-        if not slot.get("enabled") or not slot.get("base_url"):
-            continue
-        url = str(slot["base_url"]).rstrip("/") + "/models"
-        ok = _probe(url)
-        reachable += 1 if ok else 0
-        check(f"slot reachable: {slot.get('id')}", ok, url, "Start the configured model server")
-    if slots and reachable == 0:
-        if not args.json:
-            print("       hint: is the llama.cpp fleet running? The router routes to it; it does not start it.")
-
     if args.json:
-        print(json.dumps({"ok": failures == 0, "checks": checks}, indent=2))
+        print(json.dumps({"ok": result["ok"], "checks": result["checks"]}, indent=2))
     else:
-        print(f"\n{'all checks passed' if failures == 0 else f'{failures} check(s) failed'}")
-    return 0 if failures == 0 else 1
+        for check in result["checks"]:
+            status = "PASS" if check["status"] == "pass" else "FAIL"
+            suffix = f" — {check['detail']}" if check["detail"] else ""
+            print(f"[{status}] {check['label']}{suffix}")
+        summary = result["summary"]
+        if summary["enabled_slots"] and summary["reachable_slots"] == 0:
+            print("       hint: is the llama.cpp fleet running? The router routes to it; it does not start it.")
+        failures = sum(check["status"] == "fail" for check in result["checks"])
+        print(f"\n{'all checks passed' if not failures else f'{failures} check(s) failed'}")
+    return 0 if result["ok"] else 1
 
 
 def _setup_engine():

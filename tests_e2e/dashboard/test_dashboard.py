@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 
@@ -139,6 +141,31 @@ def test_alert_drawer_and_advanced_navigation_are_keyboard_operable(dashboard):
     assert page.locator("#drawer").get_attribute("aria-modal") == "true"
     page.keyboard.press("Escape")
     assert "open" not in page.locator("#drawer").get_attribute("class").split()
+    dashboard.assert_guards_clean()
+
+
+def test_diagnostics_checks_failure_and_sanitized_download_in_english_and_hebrew(dashboard):
+    dashboard.set_degraded()
+    dashboard.goto("#/advanced/diagnostics")
+    page = dashboard.page
+
+    page.locator('[data-action="run-diagnostics"]').click()
+    page.locator("table", has_text="slot reachable: chat").wait_for(state="visible")
+    assert "slot did not respond" in page.locator("#main").inner_text()
+    assert [call for call in dashboard.calls if call["path"] == "/diagnostics/report"]
+
+    page.locator("#language-control").click()
+    assert page.locator('[data-action="run-diagnostics"]').inner_text().strip().endswith("הרצת בדיקות")
+    assert "ייצוא אבחון מסונן" in page.locator('[data-action="export-diagnostics"]').inner_text()
+
+    with page.expect_download() as download_info:
+        page.locator('[data-action="export-diagnostics"]').click()
+    download = download_info.value
+    assert download.suggested_filename == "imperium-diagnostics-20260828T123456Z.json"
+    exported = download.path().read_text(encoding="utf-8")
+    assert json.loads(exported)["schema_version"] == 1
+    assert "api_key" not in exported.lower()
+    assert "prompt" not in exported.lower()
     dashboard.assert_guards_clean()
 
 

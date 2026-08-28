@@ -28,12 +28,37 @@ fleet control is explicitly enabled.
 - `GET /routing/evaluations` returns the latest safe model-evaluation snapshot.
 - `GET /backends` reports each upstream's capacity mode, limits, and any
   configuration error.
+- `GET /diagnostics/report` returns an authenticated, read-only, versioned
+  support report. It shares doctor checks and stable check codes with
+  `imperium doctor --json`, and adds readiness, safe slot/runtime failure
+  codes, CPU/RAM/GPU telemetry, backend, active-slot count, fleet-control
+  state, and auth-enabled state.
 
 When `A0_LMM_ROUTER_API_KEY` is set, every endpoint except `/health` requires:
 
 ```text
 Authorization: Bearer <key>
 ```
+
+## Sanitized Diagnostics
+
+Use Advanced → Diagnostics to run current checks and download
+`imperium-diagnostics-<UTC>.json`, or request the report directly:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:9000/diagnostics/report `
+  -Headers @{ Authorization = "Bearer $env:A0_LMM_ROUTER_API_KEY" }
+```
+
+The endpoint always returns HTTP 200 for complete and partial diagnostic
+collection. Inspect `ok`, `doctor.checks`, and `collection_errors`; each
+partial failure has a stable sanitized code. Missing or invalid Bearer auth is
+the only diagnostic condition that returns HTTP 401.
+
+The report is built from an allowlist. It excludes configuration and model
+paths, API keys, request headers, environment values, URL credentials,
+prompts, responses, logs, and raw exception text. Export is evidence only: it
+does not enable fleet control or start, stop, repair, or reconfigure a server.
 
 ## Hardware Telemetry
 

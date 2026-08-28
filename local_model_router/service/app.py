@@ -29,6 +29,7 @@ from starlette.routing import Route
 
 from local_model_router.a2a.card import agent_card, skill_ids
 from local_model_router.apps.profiles import AppProfiles
+from local_model_router.diagnostics import build_diagnostics_report, collect_doctor_checks
 from local_model_router.harnesses import HarnessConfigError, HarnessProfiles, setup_manifest
 from local_model_router.routing.aliases import public_aliases, resolve_alias
 from local_model_router.routing.catalog import (
@@ -710,7 +711,10 @@ def create_app(
         results = await observer.get_slots_health()
         return JSONResponse(results)
 
-    async def ui_status(request: Request) -> JSONResponse:
+    async def _collect_readiness(
+        base_url: str,
+    ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], dict[str, Any], list[str]]:
+        collection_errors: list[str] = []
         setup_result, slots_result, compute_result = await asyncio.gather(
             asyncio.to_thread(setup_engine.state),
             observer.get_slots_health(),
@@ -719,6 +723,7 @@ def create_app(
         )
         if isinstance(setup_result, BaseException):
             logger.warning("Setup state failed: %s", setup_result)
+            collection_errors.append("setup_state_unavailable")
             setup_state_payload: dict[str, Any] = {
                 "hardware": {},
                 "discovery": {
@@ -732,23 +737,100 @@ def create_app(
             setup_state_payload = setup_result
         if isinstance(slots_result, BaseException):
             logger.warning("Slot readiness failed: %s", slots_result)
-            slot_rows = observer.get_slots()
+            collection_errors.append("slots_health_unavailable")
+            slot_rows = [{**slot, "health": "unknown"} for slot in observer.get_slots()]
         else:
             slot_rows = slots_result
         if isinstance(compute_result, BaseException):  # compute_status is defensive; keep a safe fallback.
             logger.warning("Compute status failed: %s", compute_result)
+            collection_errors.append("hardware_unavailable")
             compute = {"available": False, "gpus": [], "cpu": None, "ram": None}
         else:
             _vram, compute = compute_result
+            if compute.get("available") is not True:
+                collection_errors.append("hardware_unavailable")
         payload = build_ui_status(
             setup_state=setup_state_payload,
             slots_health=slot_rows,
             compute=compute,
-            base_url=str(request.base_url).rstrip("/"),
+            base_url=base_url,
+        )
+        return payload, setup_state_payload, slot_rows, compute, collection_errors
+
+    async def ui_status(request: Request) -> JSONResponse:
+        payload, setup_state_payload, _slot_rows, _compute, _errors = await _collect_readiness(
+            str(request.base_url).rstrip("/")
         )
         payload["setup"] = setup_state_payload
         payload["setup_api_active"] = setup_api_active["value"]
         return JSONResponse(payload)
+
+    async def diagnostics_report(request: Request) -> JSONResponse:
+        doctor_result, readiness_result = await asyncio.gather(
+            asyncio.to_thread(
+                collect_doctor_checks,
+                observer.config_path,
+                include_locations=False,
+            ),
+            _collect_readiness(str(request.base_url).rstrip("/")),
+            return_exceptions=True,
+        )
+        collection_errors: list[str] = []
+        if isinstance(doctor_result, BaseException):
+            collection_errors.append("doctor_collection_failed")
+            doctor: dict[str, Any] = {
+                "ok": False,
+                "checks": [
+                    {
+                        "code": "doctor_collection_failed",
+                        "status": "fail",
+                        "severity": "blocking",
+                        "label": "doctor collection",
+                        "detail": "diagnostic checks could not be collected",
+                        "remediation": "Restart Imperium and run the checks again",
+                    }
+                ],
+            }
+        else:
+            doctor = doctor_result
+
+        if isinstance(readiness_result, BaseException):
+            collection_errors.append("readiness_collection_failed")
+            readiness: dict[str, Any] = {
+                "overall": "unknown",
+                "blocking_issues": [],
+                "optional_issues": [],
+                "next_action": None,
+            }
+            slot_rows: list[dict[str, Any]] = []
+            compute: dict[str, Any] = {"available": False, "gpus": [], "cpu": None, "ram": None}
+        else:
+            readiness, _setup, slot_rows, compute, readiness_errors = readiness_result
+            collection_errors.extend(readiness_errors)
+
+        managed_slots: dict[str, dict[str, Any]] = {}
+        if control_enabled and supports_start_stop:
+            try:
+                managed_slots = await fleet_control.status()
+            except Exception:
+                collection_errors.append("runtime_status_unavailable")
+
+        return JSONResponse(
+            build_diagnostics_report(
+                generated_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                imperium_version=_VERSION,
+                doctor=doctor,
+                readiness=readiness,
+                slots=slot_rows,
+                hardware=compute,
+                backend=fleet_backend,
+                fleet_control_enabled=control_enabled,
+                fleet_control_supported=supports_start_stop,
+                auth_enabled=bool(api_key),
+                managed_slots=managed_slots,
+                collection_errors=collection_errors,
+            )
+        )
 
     async def setup_state(request: Request) -> JSONResponse:
         return JSONResponse(await asyncio.to_thread(setup_engine.state))
@@ -2512,6 +2594,7 @@ def create_app(
         Route("/routing/preview", protected(routing_preview)),
         Route("/health/slots", protected(health_slots)),
         Route("/ui/status", protected(ui_status)),
+        Route("/diagnostics/report", protected(diagnostics_report)),
         Route("/models/directory", protected(models_directory), methods=["POST"]),
         Route("/setup/state", setup_protected(setup_state)),
         Route("/setup/scan", setup_protected(setup_scan), methods=["POST"]),

@@ -114,6 +114,7 @@ class Dashboard:
         "/routing/evaluations",
         "/routing/request",
         "/v1/chat/completions",
+        "/diagnostics/report",
     )
 
     def __init__(self, page, base_url: str):
@@ -269,6 +270,44 @@ class Dashboard:
             "/routing/evaluations": ApiResponse(200, {"payload": {"models": []}}),
             "/routing/request": ApiResponse(200, {"selected_model": "model-chat", "reason_codes": ["local_healthy"]}),
             "/v1/chat/completions": ApiResponse(200, {"choices": [{"message": {"content": "OK"}}]}),
+            "/diagnostics/report": ApiResponse(
+                200,
+                {
+                    "schema_version": 1,
+                    "generated_at": "2026-08-28T12:34:56Z",
+                    "imperium_version": "0.11.0",
+                    "ok": True,
+                    "readiness": {
+                        "overall": "ready",
+                        "blocking_issues": [],
+                        "optional_issues": [],
+                        "next_action": None,
+                    },
+                    "doctor": {
+                        "ok": True,
+                        "checks": [
+                            {
+                                "code": "dependency_aiohttp",
+                                "status": "pass",
+                                "severity": "info",
+                                "label": "dependency: aiohttp",
+                                "detail": "aiohttp.ClientSession",
+                                "remediation": None,
+                            }
+                        ],
+                    },
+                    "slots": [],
+                    "hardware": {"available": True, "cpu": {}, "ram": {}, "gpus": []},
+                    "runtime": {
+                        "backend": "remote",
+                        "active_slots": 0,
+                        "fleet_control_enabled": False,
+                        "fleet_control_supported": False,
+                        "auth_enabled": False,
+                    },
+                    "collection_errors": [],
+                },
+            ),
         }
 
     def set_ready(self) -> None:
@@ -315,6 +354,32 @@ class Dashboard:
             }
         )
         self.responses["/ui/status"] = ApiResponse(200, status)
+        self.responses["/diagnostics/report"] = ApiResponse(
+            200,
+            {
+                **self.responses["/diagnostics/report"].body,
+                "ok": False,
+                "readiness": {
+                    "overall": "needs_attention",
+                    "blocking_issues": [issue],
+                    "optional_issues": [],
+                    "next_action": issue["action"],
+                },
+                "doctor": {
+                    "ok": False,
+                    "checks": [
+                        {
+                            "code": "slot_reachable_chat",
+                            "status": "fail",
+                            "severity": "blocking",
+                            "label": "slot reachable: chat",
+                            "detail": "slot did not respond",
+                            "remediation": "Start the configured model server",
+                        }
+                    ],
+                },
+            },
+        )
 
     def set_error(self) -> None:
         self.set_ready()

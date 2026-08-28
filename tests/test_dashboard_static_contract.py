@@ -44,6 +44,10 @@ def test_dashboard_ships_en_he_and_light_dark_theme_hooks(tmp_path, monkeypatch)
     assert "statusUnavailable:" in html or "statusUnavailable" in html
     assert 'if(route){closeDrawer();routeTo(route);return;}' in html
     assert "drawerReturnFocus" in html
+    assert 'request("/diagnostics/report")' in html
+    assert 'data-action="export-diagnostics"' in html
+    assert 'exportDiagnostics:"Export sanitized diagnostics"' in html
+    assert 'exportDiagnostics:"ייצוא אבחון מסונן"' in html
     assert "127.0.0.1:7440" not in html
 
 
