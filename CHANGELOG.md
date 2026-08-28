@@ -163,6 +163,10 @@ All notable changes to this project are documented here.
 
 ## [0.6.0] - 2026-07-11
 
+`__version__` never carried `0.6.0`: the bump in commit `54fbd99` went
+`0.5.0` straight to `0.7.0`. This section records the work, not a version
+the package ever reported.
+
 ### Added
 
 - Ranked local candidate chains for deterministic failover when the preferred
