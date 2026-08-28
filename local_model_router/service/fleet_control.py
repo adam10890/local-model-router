@@ -70,6 +70,17 @@ class FleetControlHandler:
 
         return BackendManager.get_instance(self._config_path)
 
+    def _manager_or_dependency_error(self):
+        try:
+            return self._manager()
+        except ImportError as exc:
+            raise FleetControlError(
+                f"backend dependency missing: {exc}. "
+                'Install it with: pip install "local-model-router[docker]"',
+                "backend_dependency_missing",
+                503,
+            ) from exc
+
     @staticmethod
     def _raise_for_error(result: Any, slot_id: str) -> None:
         error = result.get("error") if isinstance(result, dict) else None
@@ -82,16 +93,8 @@ class FleetControlHandler:
             raise FleetControlError(text, "backend_unavailable", 503)
 
     async def start_slot(self, slot_id: str) -> Dict[str, Any]:
-        manager = self._manager()
-        try:
-            result = await manager.start_slot(slot_id)
-        except ImportError as exc:
-            raise FleetControlError(
-                f"backend dependency missing: {exc}. "
-                'Install it with: pip install "local-model-router[docker]"',
-                "backend_dependency_missing",
-                503,
-            )
+        manager = self._manager_or_dependency_error()
+        result = await manager.start_slot(slot_id)
         self._raise_for_error(result, slot_id)
         return {
             "ok": bool(isinstance(result, dict) and result.get("running") and not result.get("error")),
@@ -102,7 +105,7 @@ class FleetControlHandler:
         }
 
     async def stop_slot(self, slot_id: str) -> Dict[str, Any]:
-        manager = self._manager()
+        manager = self._manager_or_dependency_error()
         if slot_id not in manager._slot_configs:
             raise FleetControlError(f"Slot '{slot_id}' not found in config", "unknown_slot", 404)
         stopped = await manager.stop_slot(slot_id)
@@ -119,16 +122,8 @@ class FleetControlHandler:
         return await BackendManager._instance.status() if BackendManager._instance else {}
 
     async def start_all(self) -> Dict[str, Any]:
-        manager = self._manager()
-        try:
-            results = await manager.start_all()
-        except ImportError as exc:
-            raise FleetControlError(
-                f"backend dependency missing: {exc}. "
-                'Install it with: pip install "local-model-router[docker]"',
-                "backend_dependency_missing",
-                503,
-            )
+        manager = self._manager_or_dependency_error()
+        results = await manager.start_all()
         return {
             "ok": all(not (r or {}).get("error") for r in results.values()) if results else False,
             "action": "start_all",
@@ -137,6 +132,6 @@ class FleetControlHandler:
         }
 
     async def stop_all(self) -> Dict[str, Any]:
-        manager = self._manager()
+        manager = self._manager_or_dependency_error()
         await manager.stop_all()
         return {"ok": True, "action": "stop_all", "backend": manager.backend_type}

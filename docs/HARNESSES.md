@@ -54,14 +54,18 @@ stream/tool behavior, then rerun the harness tests. Repeat the check whenever
 the runtime or its setup manifest changes. A generic "OpenAI-compatible"
 claim alone is not sufficient evidence of compatibility.
 
-### Version matrix (2026-08-03)
+### Version and live-smoke matrix (2026-08-24)
 
-| Harness | Official repo | Current stable checked | Installed (operator) | Router path | Setup doc |
+`Unknown` is intentional until the installed client and current upstream
+release are checked again. Historical checks are dated and are not promoted to
+RC evidence automatically.
+
+| Harness | Official repo | Stable version last checked | Installed version | Live smoke | Router path |
 | --- | --- | --- | --- | --- | --- |
-| Agent Zero | [agent0ai/agent-zero](https://github.com/agent0ai/agent-zero) | **v2.7** (`87e1e591…`) verified | fill when validating | `/harnesses/agent_zero/{chat,utility}/v1` | section below |
-| Hermes | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) | **v0.20.0** (`v2026.8.3`) checked against docs + installed copy | fill when validating | `/harnesses/hermes/v1` (`default` connection) | [INTEGRATIONS.md](INTEGRATIONS.md#hermes) |
-| Pi | [earendil-works/pi](https://github.com/earendil-works/pi) (`badlogic/pi-mono`) | **v0.81.1** checked against docs | fill when validating | `/harnesses/pi/v1` | [INTEGRATIONS.md](INTEGRATIONS.md#pi) |
-| Claude Code (local) | Anthropic Claude Code + LiteLLM bridge | cloud Opus default; local via LiteLLM | fill when validating | `/harnesses/claude_code_local/v1` | section below |
+| Agent Zero | [agent0ai/agent-zero](https://github.com/agent0ai/agent-zero) | v2.7 (`87e1e591…`), 2026-08-03; current stable **Unknown** | Unknown | Unknown | `/harnesses/agent_zero/{chat,utility}/v1` |
+| Hermes | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) | v0.20.0 (`v2026.8.3`), 2026-08-03; current stable **Unknown** | v0.20.0, observed 2026-08-15 | Needs RC rerun: historical chat/stream passed, actual tool call was not asserted | `/harnesses/hermes/v1` |
+| Pi | [earendil-works/pi](https://github.com/earendil-works/pi) (`badlogic/pi-mono`) | v0.81.1, 2026-08-03; current stable **Unknown** | Unknown | Unknown | `/harnesses/pi/v1` |
+| Claude Code (local) | Anthropic Claude Code + LiteLLM bridge | Current stable **Unknown** | Unknown | Unknown | `/harnesses/claude_code_local/v1` |
 
 "Checked against docs" means the Imperium setup snippet was reviewed against
 that release's OpenAI-compatible / provider settings. It is not a substitute
@@ -100,10 +104,12 @@ python .\scripts\smoke_harnesses.py
 
 Pass `--api-key <key>` when router authentication is enabled. By default the
 command checks `/models`, one short completion, and one streaming completion
-per connection. Add `--tools` to include a no-op tools array; add `--no-stream`
-to skip streaming. Use `--harness <id>` (repeatable) to limit the run to
-healthy pins (for example `--harness hermes`). Raise `--max-tokens` for
-thinking models.
+per connection. Add `--tools` to require an actual `imperium_ping` tool call;
+add `--no-stream` to skip streaming outside release validation. Use
+`--harness <id>` (repeatable) to limit the run to healthy pins (for example
+`--harness hermes`). Raise `--max-tokens` for thinking models. RC evidence
+must use `--rc`, explicit required harness IDs, and `--json-output <path>`; a
+missing required harness or tool call is a Fail.
 
 ## Agent Zero 2.7
 

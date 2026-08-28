@@ -306,7 +306,7 @@
   </style>
 </head>
 <body>
-  <button class="mobile-menu" id="mobile-menu" aria-label="Open navigation"><img src="/ui/icons/sidebar-simple.svg" alt=""></button>
+  <button class="mobile-menu" id="mobile-menu" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false"><img src="/ui/icons/sidebar-simple.svg" alt=""></button>
   <button class="alerts-button" id="alerts-button" data-action="show-alerts" aria-controls="drawer" aria-haspopup="dialog" aria-label="System alerts"><img src="/ui/icons/warning-circle.svg" alt=""><span class="alerts-count" id="alerts-count" aria-hidden="true" hidden>0</span></button>
   <div class="shell">
     <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
@@ -324,7 +324,6 @@
       <div class="sidebar-footer">
         <button class="side-control" id="theme-control"><img src="/ui/icons/sun.svg" alt=""><span data-i18n="theme">Theme</span><span class="side-value" id="theme-value">Light</span></button>
         <button class="side-control" id="language-control"><img src="/ui/icons/translate.svg" alt=""><span data-i18n="language">Language</span><span class="side-value" id="language-value">English</span></button>
-        <button class="side-control" id="mode-control"><img src="/ui/icons/sliders-horizontal.svg" alt=""><span data-i18n="mode">Mode</span><span class="side-value" id="mode-value">Simple</span></button>
         <div class="system-time"><span class="status-dot"></span><div><span class="muted" data-i18n="systemTime">System time</span><strong id="clock" style="display:block"></strong></div></div>
       </div>
     </aside>
@@ -338,11 +337,6 @@
     "use strict";
     const SETUP_TOKEN = "__IMPERIUM_SETUP_TOKEN__";
     const ICON = name => `/ui/icons/${name}.svg`;
-    // #region agent log
-    function dbgLog(hypothesisId, location, message, data={}) {
-      fetch('http://127.0.0.1:7440/ingest/6ad14df5-db4e-41cd-8d66-f07dbf4933fa',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'5598d0'},body:JSON.stringify({sessionId:'5598d0',runId:'audit1',hypothesisId,location,message,data,timestamp:Date.now()})}).catch(()=>{});
-    }
-    // #endregion
     const I = (name, cls="") => `<img class="${cls}" src="${ICON(name)}" alt="">`;
     const esc = value => String(value ?? "").replace(/[&<>'"]/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[ch]));
     const textValue = value => typeof value === "object" && value ? (value[state.lang] || value.en || "") : (value || "");
@@ -353,7 +347,7 @@
         recommended:"Recommended for your system", recommendedCopy:"A balanced model selected from the approved catalog for your detected hardware.", recommendedCopyLocal:"The strongest installed model in your models folder that fits this hardware.", reviewModel:"Review model", whyModel:"Why this model?", whyCopy:"Good quality, fast responses, and a safe fit for the detected memory.", whyCopyLocal:"Chosen from your installed GGUF files by parameter size and fit for the detected memory.", installed:"Installed", available:"Available", incompatible:"Incompatible", download:"Download", activate:"Activate", stop:"Stop", details:"Details",manageModels:"Manage models",startChat:"Start chatting",connectApp:"Connect an app",additional:"Additional improvements",
         modelPage:"Models", modelPageCopy:"Install, activate, and understand the models available on this computer.", installedTab:"Installed", recommendedTab:"Recommended", downloadsTab:"Downloads", noInstalled:"No local GGUF models were found yet.", noDownloads:"Downloads and verification progress will appear here.", modelsFolder:"Models folder", changeFolder:"Set folder", saveFolder:"Save and scan", modelsFolderCopy:"Imperium scans this folder and downloads recommended models into it.",
         chatPage:"Chat", chatPageCopy:"Talk directly to your local model and confirm the full route is working.", chooseModel:"Choose a model", clear:"Clear", send:"Send", stopGeneration:"Stop generation", retry:"Retry", emptyChat:"Your local conversation starts here.", emptyChatCopy:"Choose a prompt or write your own. Messages stay on this computer.", prompt1:"Explain how local inference works", prompt2:"Write a small Python utility", prompt3:"Summarize a technical idea", startServer:"Start model server", chatFailed:"The model could not answer.",
-        connectionsPage:"Connections", connectionsCopy:"Connect tools to one stable OpenAI-compatible address.", activeConnections:"Active connections", verify:"Verify connection", copy:"Copy", copied:"Copied", endpoint:"API address", name:"Name", modelName:"Model name", pinnedModel:"Pinned model", apiKey:"API key", notRequired:"Not required", connectionOk:"Connection verified", connectionFailed:"Could not verify the connection", addHarness:"Add custom harness", customHarnesses:"Custom harnesses",
+        connectionsPage:"Connections", connectionsCopy:"Connect tools to one stable OpenAI-compatible address.", activeConnections:"Active connections", verify:"Verify connection", copy:"Copy", copied:"Copied", endpoint:"API address", name:"Name", modelName:"Model name", pinnedModel:"Pinned model", apiKey:"API key", notRequired:"Not required", connectionOk:"Connection verified", connectionFailed:"Could not verify the connection", pinHermes:"Pin Hermes to a configured model", pinHermesSave:"Update Hermes pin", pinHermesSaved:"Hermes pin updated", pinHermesUnavailable:"No configured model target is available.", addHarness:"Add a pinned tool path", customHarnesses:"Pinned tool paths",
         fleetPage:"Fleet", fleetCopy:"Servers, slots, processes, GPU state, and operational controls.", startAll:"Start all", stopAll:"Stop all", externalFleet:"Externally managed fleet", externalFleetCopy:"Start these model servers outside Imperium, then refresh this page.", slot:"Slot", role:"Role", backend:"Backend", health:"Health", context:"Context", noRows:"No items to show.",
         routingPage:"Routing", routingCopy:"Aliases, strategy, decisions, and failover visibility.", alias:"Alias", mapsTo:"Maps to", liveModel:"Live model", testRoute:"Test route",
         configurationPage:"Configuration", configurationCopy:"Authentication, environment, and a safe redacted preview.", saveLocal:"Save on this device", rawPreview:"Raw preview", diagnosticsPage:"Diagnostics", diagnosticsCopy:"Readiness checks, versions, and support information.", runDoctor:"Run checks", refresh:"Refresh", system:"System",gpu:"GPU",memory:"Memory",runtime:"Runtime",unknown:"Unknown",router:"Router",model:"Model",ready:"Ready",needsAttention:"Needs attention",setupRequired:"Setup required",
@@ -366,7 +360,7 @@
         recommended:"מומלץ למערכת שלך", recommendedCopy:"מודל מאוזן שנבחר מהקטלוג המאושר לפי החומרה שזוהתה.", recommendedCopyLocal:"המודל המותקן החזק ביותר בתיקיית המודלים שמתאים לחומרה הזו.", reviewModel:"בדיקת המודל", whyModel:"למה המודל הזה?", whyCopy:"איכות טובה, תשובות מהירות והתאמה בטוחה לזיכרון שזוהה.", whyCopyLocal:"נבחר מתוך קבצי ה־GGUF המותקנים לפי גודל פרמטרים והתאמה לזיכרון שזוהה.", installed:"מותקן", available:"זמין", incompatible:"לא תואם", download:"הורדה", activate:"הפעלה", stop:"עצירה", details:"פרטים",manageModels:"ניהול מודלים",startChat:"התחלת שיחה",connectApp:"חיבור אפליקציה",additional:"שיפורים נוספים",
         modelPage:"מודלים", modelPageCopy:"התקנה, הפעלה והיכרות עם המודלים שזמינים במחשב הזה.", installedTab:"מותקנים", recommendedTab:"מומלצים", downloadsTab:"הורדות", noInstalled:"עדיין לא נמצאו מודלי GGUF מקומיים.", noDownloads:"הורדות פעילות והתקדמות האימות יופיעו כאן.", modelsFolder:"תיקיית מודלים", changeFolder:"הגדרת תיקייה", saveFolder:"שמירה וסריקה", modelsFolderCopy:"Imperium סורק תיקייה זו ומוריד אליה את המודלים המומלצים.",
         chatPage:"צ׳אט", chatPageCopy:"שיחה ישירה עם המודל המקומי ובדיקה של מסלול הניתוב המלא.", chooseModel:"בחירת מודל", clear:"ניקוי", send:"שליחה", stopGeneration:"עצירת יצירה", retry:"ניסיון חוזר", emptyChat:"השיחה המקומית שלך מתחילה כאן.", emptyChatCopy:"אפשר לבחור הצעה או לכתוב שאלה. ההודעות נשארות במחשב הזה.", prompt1:"הסבר איך עובדת הרצה מקומית", prompt2:"כתוב כלי Python קטן", prompt3:"סכם רעיון טכני", startServer:"הפעלת שרת המודל", chatFailed:"המודל לא הצליח להשיב.",
-        connectionsPage:"חיבורים", connectionsCopy:"חיבור כלים לכתובת אחת, יציבה ותואמת OpenAI.", activeConnections:"חיבורים פעילים", verify:"בדיקת החיבור", copy:"העתקה", copied:"הועתק", endpoint:"כתובת API", name:"שם", modelName:"שם המודל", pinnedModel:"מודל מוצמד", apiKey:"מפתח API", notRequired:"לא נדרש", connectionOk:"החיבור אומת", connectionFailed:"לא הצלחנו לאמת את החיבור", addHarness:"הוספת harness מותאם", customHarnesses:"Harnesses מותאמים",
+        connectionsPage:"חיבורים", connectionsCopy:"חיבור כלים לכתובת אחת, יציבה ותואמת OpenAI.", activeConnections:"חיבורים פעילים", verify:"בדיקת החיבור", copy:"העתקה", copied:"הועתק", endpoint:"כתובת API", name:"שם", modelName:"שם המודל", pinnedModel:"מודל מוצמד", apiKey:"מפתח API", notRequired:"לא נדרש", connectionOk:"החיבור אומת", connectionFailed:"לא הצלחנו לאמת את החיבור", pinHermes:"הצמדת Hermes למודל מוגדר", pinHermesSave:"עדכון ההצמדה של Hermes", pinHermesSaved:"ההצמדה של Hermes עודכנה", pinHermesUnavailable:"אין יעד מודל מוגדר וזמין.", addHarness:"הוספת נתיב כלי מוצמד", customHarnesses:"נתיבי כלים מוצמדים",
         fleetPage:"צי שרתים", fleetCopy:"שרתים, slots, תהליכים, GPU ובקרות תפעול.", startAll:"הפעלת הכול", stopAll:"עצירת הכול", externalFleet:"צי בניהול חיצוני", externalFleetCopy:"יש להפעיל את שרתי המודל מחוץ ל־Imperium ואז לרענן את הדף.", slot:"Slot", role:"תפקיד", backend:"Backend", health:"מצב", context:"Context", noRows:"אין פריטים להצגה.",
         routingPage:"ניתוב", routingCopy:"כינויים, אסטרטגיה, החלטות ו־failover.", alias:"כינוי", mapsTo:"ממופה אל", liveModel:"מודל פעיל", testRoute:"בדיקת ניתוב",
         configurationPage:"הגדרות", configurationCopy:"אימות, environment ותצוגה בטוחה ללא סודות.", saveLocal:"שמירה במכשיר", rawPreview:"תצוגה גולמית", diagnosticsPage:"אבחון", diagnosticsCopy:"בדיקות מוכנות, גרסאות ומידע לתמיכה.", runDoctor:"הרצת בדיקות", refresh:"רענון", system:"מערכת",gpu:"GPU",memory:"זיכרון",runtime:"Runtime",unknown:"לא ידוע",router:"נתב",model:"מודל",ready:"מוכן",needsAttention:"דורש טיפול",setupRequired:"נדרשת הגדרה",
@@ -434,6 +428,7 @@
       } catch (_) { return {step:1,wizard:{},plan:null}; }
     }
     const savedSetup=loadSetup();
+    let drawerReturnFocus=null;
     const setupRoutes=["setup","setup/system","setup/runtime","setup/model","setup/plan","setup/install"];
     const setupStepByRoute={"setup":1,"setup/system":2,"setup/hardware":2,"setup/runtime":3,"setup/launch":3,"setup/backend":3,"setup/model":4,"setup/plan":5,"setup/install":6};
     const simpleModelAliases=["auto","chat","fast","coder"];
@@ -441,7 +436,7 @@
       lang: localStorage.getItem("imperium.lang") || "en",
       theme: localStorage.getItem("imperium.theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
       mode: localStorage.getItem("imperium.mode") || "simple",
-      route: "home", status: null, setup: null, fleet: null, modelsList: [], harnesses: [], cookbook: null, evaluations: null, config: null, budget: null,
+      route: "home", status: null, setup: null, fleet: null, modelsList: [], harnesses: [], configWritesEnabled: false, cookbook: null, evaluations: null, config: null, budget: null,
       modelTab: "recommended", messages: loadChat(), chatModel: localStorage.getItem("imperium.chatModel") || "auto", busy: false, aborter: null,
       wizardStep: savedSetup.step, wizard: {runtime:"native", launch:"background", backend:"", channel:"recommended", modelId:"", existingUrl:"", confirmDownloads:false, confirmConfig:false, preferLocal:false, scanned:false,...savedSetup.wizard}, setupPlan: savedSetup.plan, setupFailure: null, setupRunning: false, events: [], progress: 0,
       apiKey: localStorage.getItem("imperium.apiKey") || "", fleetQuery: "", routingRole: "chat", routingStrategy: "balanced_local", routingDecision: null, error: ""
@@ -460,7 +455,6 @@
       document.documentElement.dir = state.lang === "he" ? "rtl" : "ltr";
       document.getElementById("theme-value").textContent = t(state.theme);
       document.getElementById("language-value").textContent = state.lang === "he" ? "עברית" : "English";
-      document.getElementById("mode-value").textContent = t(state.mode);
       document.querySelectorAll("[data-i18n]").forEach(node => node.textContent = t(node.dataset.i18n));
     }
     function request(path, options={}) {
@@ -471,27 +465,22 @@
       return fetch(path, {...options, headers}).then(async response => {
         const type = response.headers.get("content-type") || "";
         const payload = type.includes("json") ? await response.json() : await response.text();
-        // #region agent log
-        dbgLog("D","dashboard:request", "api_response", {path, method:options.method||"GET", status:response.status, ok:response.ok, error:payload?.error||null});
-        // #endregion
         if (!response.ok) { const message=payload?.error?.message||payload?.detail||(typeof payload?.error==="string"?payload.error:"")||(typeof payload==="string"?payload:"")||response.statusText; throw Object.assign(new Error(message),{status:response.status,payload}); }
         return payload;
       });
     }
     async function loadData() {
+      state.configWritesEnabled=false;
       const jobs = [
         ["status",()=>request("/ui/status")],
         ["modelsList",()=>request("/v1/models").then(x=>x.data||[])],
-        ["harnesses",()=>request("/harnesses").then(x=>x.harnesses||x.items||[])], ["fleet",()=>request("/fleet/status")],
+        ["harnesses",()=>request("/harnesses").then(x=>{state.configWritesEnabled=x.config_writes_enabled===true;return x.harnesses||x.items||[];})], ["fleet",()=>request("/fleet/status")],
         ["config",()=>request("/config/preview")], ["cookbook",()=>request("/cookbook")],
         ["budget",()=>request("/compute/budget").catch(()=>null)],
         ["evaluations",()=>request("/routing/evaluations")]
       ];
       const loadMeta={};
       await Promise.all(jobs.map(async ([key,job]) => { try { state[key] = await job(); loadMeta[key]="ok"; if(key==="status")state.error=""; } catch (error) { loadMeta[key]=`fail:${error.status||""}:${error.message}`; if(key==="status")state.error=error.message; } }));
-      // #region agent log
-      dbgLog("D","dashboard:loadData","load_summary",{...loadMeta, cookbookModels:(state.cookbook?.models||[]).length, cookbookRecs:Object.keys(state.cookbook?.recommendations||{}).length, fleetControl:state.fleet?.fleet_control||state.status?.fleet_control||null, hasCookbookPage:false, hasAgentsPage:false, hasAnalyticsPage:false});
-      // #endregion
       state.setup=state.status?.setup||state.setup;
       if (!state.wizard.backend && state.setup?.recommended_backend) state.wizard.backend = state.setup.recommended_backend;
       if (state.setup?.platform_support?.status !== "supported" && state.wizard.runtime === "native") state.wizard.runtime = "existing";
@@ -521,7 +510,7 @@
     function renderNav() {
       document.getElementById("simple-nav").innerHTML = navSimple.map(navButton).join("");
       document.getElementById("advanced-nav").innerHTML = navAdvanced.map(navButton).join("");
-      const isAdvanced = state.route.startsWith("advanced/") || state.mode === "advanced";
+      const isAdvanced = state.route.startsWith("advanced/");
       document.getElementById("advanced-nav").classList.toggle("open", isAdvanced);
       document.getElementById("advanced-toggle").setAttribute("aria-expanded", String(isAdvanced));
     }
@@ -587,7 +576,7 @@
     function downloadsView() { return state.events.length?`<div class="table-wrap"><table><thead><tr><th>${t("status")||"Status"}</th><th>${t("details")}</th></tr></thead><tbody>${state.events.map(event=>`<tr><td><span class="badge">${esc(event.status)}</span></td><td>${esc(event.detail)}</td></tr>`).join("")}</tbody></table></div>`:`<div class="empty">${I("download-simple")}<div><h3>${t("noDownloads")}</h3></div></div>`; }
     function chatModelOptions() {
       const all=state.modelsList.length?state.modelsList:[{id:"auto"}];
-      const visible=state.mode==="advanced"?all:all.filter(row=>simpleModelAliases.includes(row.id));
+      const visible=all.filter(row=>simpleModelAliases.includes(row.id));
       for(const row of state.setup?.discovery?.local_models||[]) if(!visible.some(item=>item.id===row.id)) visible.push(row);
       return visible;
     }
@@ -608,7 +597,21 @@
     ];
     function laneCards() { const lanes=Object.entries(state.fleet?.queues||{});return lanes.length?`<div class="cards">${lanes.map(([name,lane])=>`<article class="card"><h3 class="mono">${esc(name)}</h3><div class="meta-line"><span>${esc(lane.mode)}</span><span>${lane.active??"—"} active</span><span>${lane.queued??"—"} queued</span></div><p class="muted">limit ${lane.max_active??"delegated"} / queue ${lane.max_queue??"delegated"}</p></article>`).join("")}</div>`:""; }
     function harnessRows() { return state.harnesses.flatMap(item=>(item.connections||[]).map(connection=>{const lane=connection.model?.includes("/")?`upstream:${connection.model.split("/")[0]}`:"local";const capacity=state.fleet?.queues?.[lane];return [`${item.display_name||item.harness_id} · ${connection.name}`,connection.model,lane,capacity?.mode||"unknown",connection.verification?.state||item.verification?.state||"not_seen"];})); }
-    function connectionsPage() { const rows=harnessRows();return `<div class="page">${pageHeader(t("connectionsPage"),t("connectionsCopy"))}<div class="cards">${integrations.map(app=>`<article class="card"><div class="card-icon">${I(app.icon)}</div><h3>${esc(app.name)}</h3><p class="muted">${localized(app.copy)}</p><div class="card-footer"><span class="badge">${esc(app.model)}</span><button class="button small" data-action="integration-details" data-integration="${app.id}">${t("connectApp")}</button></div></article>`).join("")}</div><section style="margin-top:38px"><h2>${t("activeConnections")}</h2>${table([t("connections"),t("model"),"Lane","Capacity",t("health")],rows)}</section></div>`; }
+    function hermesHarness() { return state.harnesses.find(item=>(item.kind||item.harness_id)==="hermes"); }
+    function hermesConnection() { const rows=hermesHarness()?.connections||[];return rows.find(item=>item.name==="default")||rows[0]; }
+    function hermesPinTargets() {
+      const targets=new Set();const current=hermesConnection()?.model;if(current)targets.add(current);
+      for(const slot of state.fleet?.slots||[])if(slot.enabled!==false){const model=slot.model_id||slot.id;if(model)targets.add(model);}
+      for(const row of state.modelsList||[])if(row.meta?.kind==="slot_model")targets.add(row.id);
+      return [...targets];
+    }
+    function hermesPinPanel() {
+      if(!state.configWritesEnabled||!hermesHarness()||!hermesConnection())return "";
+      const current=hermesConnection().model;const targets=hermesPinTargets();
+      if(!targets.length)return `<section style="margin-top:38px"><h2>${t("pinHermes")}</h2><p class="muted">${t("pinHermesUnavailable")}</p></section>`;
+      return `<section style="margin-top:38px"><h2>${t("pinHermes")}</h2><div class="field"><label for="hermes-pin-model">${t("pinnedModel")}</label><select class="select" id="hermes-pin-model">${targets.map(model=>`<option value="${esc(model)}" ${model===current?"selected":""}>${esc(model)}</option>`).join("")}</select></div><button class="button primary" data-action="pin-hermes">${t("pinHermesSave")}</button></section>`;
+    }
+    function connectionsPage() { const rows=harnessRows();const pin=hermesConnection()?.model;return `<div class="page">${pageHeader(t("connectionsPage"),t("connectionsCopy"))}<div class="cards">${integrations.map(app=>`<article class="card"><div class="card-icon">${I(app.icon)}</div><h3>${esc(app.name)}</h3><p class="muted">${localized(app.copy)}</p><div class="card-footer"><span class="badge">${esc(app.id==="hermes"&&pin?pin:app.model)}</span><button class="button small" data-action="integration-details" data-integration="${app.id}">${t("connectApp")}</button></div></article>`).join("")}</div>${hermesPinPanel()}<section style="margin-top:38px"><h2>${t("activeConnections")}</h2>${table([t("connections"),t("model"),"Lane","Capacity",t("health")],rows)}</section></div>`; }
     function fleetPage() { const query=state.fleetQuery.toLowerCase();const rows=(state.fleet?.slots||[]).filter(row=>!query||Object.values(row).some(value=>String(value??"").toLowerCase().includes(query)));const control=state.fleet?.fleet_control||{};const controls=control.enabled&&control.supports_start_stop?`<div style="display:flex;gap:8px"><button class="button" data-action="fleet-start">${I("play")} ${t("startAll")}</button><button class="button danger" data-action="fleet-stop">${I("stop")} ${t("stopAll")}</button></div>`:"";const guidance=control.backend==="remote"?`<div class="status-banner warning">${I("info")}<div><strong>${t("externalFleet")}</strong><div class="muted">${t("externalFleetCopy")}</div></div></div>`:"";return `<div class="page">${pageHeader(t("fleetPage"),t("fleetCopy"),controls)}${guidance}${laneCards()}<div class="toolbar"><input class="input search" id="fleet-search" value="${esc(state.fleetQuery)}" placeholder="${t("search")||"Search"}"><button class="button small" data-action="refresh">${I("arrow-clockwise")} ${t("refresh")}</button></div>${table([t("slot"),t("role"),t("model"),t("backend"),t("health"),t("diagnostics")],rows.map(row=>{const runtime=row.runtime;const health=runtime?(runtime.healthy?"healthy":runtime.running?"running":"unhealthy"):row.health||"unknown";const diagnostics=runtime?.failure_code?`${runtime.failure_code}${runtime.exit_code==null?"":` (${runtime.exit_code})`}`:"—";return [row.id,row.role,row.model_id,row.backend_type,health,diagnostics];}))}</div>`; }
     function routingPage() { const aliases=state.modelsList.filter(row=>row.meta?.kind==="alias");const evaluated=state.evaluations?.payload?.models||[];const ranked=state.routingDecision?.ranked_candidates||[];return `<div class="page">${pageHeader(t("routingPage"),t("routingCopy"),`<button class="button" data-action="route-test">${I("git-branch")} ${t("testRoute")}</button>`)}${laneCards()}<div class="toolbar"><select class="select" id="routing-role">${["chat","utility","scribe","embed"].map(role=>`<option ${state.routingRole===role?"selected":""}>${role}</option>`).join("")}</select><select class="select" id="routing-strategy">${["balanced_local","fastest","quality","economy"].map(strategy=>`<option ${state.routingStrategy===strategy?"selected":""}>${strategy}</option>`).join("")}</select></div>${ranked.length?`<section><h2>Ranked candidates</h2>${table([t("model"),"Source","Score","Reasons"],ranked.map(row=>[row.model_id,row.source,row.score,(row.reason_codes||[]).join(", ")]))}</section>`:""}${table([t("alias"),t("mapsTo"),t("liveModel")],aliases.map(row=>[row.id,row.meta?.maps_to_role,row.meta?.live?.model||"—"]))}${evaluated.length?`<section style="margin-top:32px"><h2>Evaluated models</h2>${table([t("model"),t("role"),"Quality","Latency","Reliability"],evaluated.flatMap(model=>Object.entries(model.roles||{}).map(([role,score])=>[model.model_id,role,score.pass_rate,score.median_latency_ms,score.reliability])))}</section>`:""}</div>`; }
     function configurationPage() { return `<div class="page">${pageHeader(t("configurationPage"),t("configurationCopy"))}<div class="cards"><section class="card"><h3>${t("apiKey")}</h3><p class="muted">${t("savedBrowser")}</p><div class="field"><label for="api-key">${t("apiKey")}</label><input class="input mono" id="api-key" type="password" value="${esc(state.apiKey)}" autocomplete="off"></div><button class="button primary" data-action="save-api-key">${t("saveLocal")}</button></section><section class="card"><h3>${t("rawPreview")}</h3><p class="muted">${t("redactedPreview")}</p><button class="button" data-action="show-config">${I("file-code")} ${t("rawPreview")}</button></section><section class="card"><h3>${t("customHarnesses")}</h3><p class="muted">${t("customHarnessCopy")}</p><button class="button" data-action="open-harness">${I("plus")} ${t("addHarness")}</button></section></div></div>`; }
@@ -731,11 +734,12 @@
       if (setupStepByRoute[route]) state.wizardStep=setupStepByRoute[route];
       history.replaceState(null,"",`#/${route}`);
       document.getElementById("sidebar").classList.remove("open");
+      document.getElementById("mobile-menu").setAttribute("aria-expanded","false");
       if (route.startsWith("setup")) saveSetup();
       render();
     }
-    function openDrawer(title,body) { document.getElementById("drawer-title").textContent=title; document.getElementById("drawer-body").innerHTML=body; document.getElementById("drawer").classList.add("open"); }
-    function closeDrawer() { document.getElementById("drawer").classList.remove("open"); }
+    function openDrawer(title,body) { const drawer=document.getElementById("drawer");if(!drawer.classList.contains("open"))drawerReturnFocus=document.activeElement;document.getElementById("drawer-title").textContent=title;document.getElementById("drawer-body").innerHTML=body;drawer.classList.add("open");requestAnimationFrame(()=>drawer.querySelector('[data-action="close-drawer"]')?.focus()); }
+    function closeDrawer() { const drawer=document.getElementById("drawer");const wasOpen=drawer.classList.contains("open");drawer.classList.remove("open");if(wasOpen&&drawerReturnFocus?.isConnected)drawerReturnFocus.focus();drawerReturnFocus=null; }
     function openAlerts() { openDrawer(t("alerts"),`<p class="muted">${t("alertsCopy")}</p>${issuesHtml()}`); }
     function setupNeedsDownload() { return (state.setupPlan?.steps||[]).some(step=>step.action==="install_runtime"||step.action==="download_model"); }
     function setupPayload(confirm=false) { return {backend:state.wizard.runtime==="existing"?"existing":state.wizard.backend,runtime_channel:state.wizard.channel,model_id:state.wizard.runtime==="existing"?null:state.wizard.modelId,existing_url:state.wizard.existingUrl,launch_mode:state.wizard.launch,...(confirm?{confirm_download:!setupNeedsDownload()||state.wizard.confirmDownloads,confirm_write:state.wizard.confirmConfig}:{})}; }
@@ -744,15 +748,12 @@
     async function pollEvents() { try { const payload=await request(`/setup/events?after=${state.events.at(-1)?.id||0}`); if(payload.events?.length){ for(const event of payload.events){const last=state.events.at(-1);if(last&&last.stage===event.stage&&last.status===event.status&&last.detail===event.detail)state.events[state.events.length-1]=event;else state.events.push(event);}state.events=state.events.slice(-50);const progress=payload.events.filter(e=>typeof e.progress==="number").at(-1)?.progress;if(typeof progress==="number")state.progress=progress;render(); } } catch(_){} }
     async function applySetup() { if(state.setupRunning)return;state.setupRunning=true;setWizardStep(6);state.setupFailure=null;state.events=[];state.progress=.02;render();const timer=setInterval(pollEvents,700);try{const result=await request("/setup/apply",{method:"POST",body:JSON.stringify(setupPayload(true))});clearInterval(timer);state.setup=result.state||state.setup;state.progress=1;announce(t("setupComplete"));await loadData();}catch(error){state.setupFailure={code:error.payload?.error,message:error.message,remediation:error.payload?.remediation||[]};state.events.push({status:"error",detail:error.message});}finally{state.setupRunning=false;clearInterval(timer);saveSetup();render();} }
     async function sendChat(prompt) { const content=(prompt||document.getElementById("chat-input")?.value||"").trim(); if(!content||state.busy)return; state.messages.push({role:"user",content});saveChat();state.busy=true; state.aborter=new AbortController(); render(); try { const response=await request("/v1/chat/completions",{method:"POST",signal:state.aborter.signal,body:JSON.stringify({model:state.chatModel||"auto",messages:state.messages.filter(m=>!m.error).map(({role,content})=>({role,content})),stream:false,max_tokens:1024})}); const message=response.choices?.[0]?.message||{}; const answer=(message.content||message.reasoning_content||response.choices?.[0]?.text||"").trim(); state.messages.push({role:"assistant",content:answer||"—",routing:response.model||""}); } catch(error){ if(error.name!=="AbortError") state.messages.push({role:"assistant",content:`${t("chatFailed")} ${error.message}`,error:true}); } finally { saveChat();state.busy=false;state.aborter=null;render(); } }
-    async function verifyConnection(model="auto") { /* #region agent log */ dbgLog("E","dashboard:verifyConnection","verify_only_lists_models",{requestedModel:model,endpoint:"/v1/models",chatProbe:false}); /* #endregion */ try { await request("/v1/models"); toast(t("connectionOk")+` · ${model}`); } catch(error){ toast(`${t("connectionFailed")}: ${error.message}`); } }
+    async function verifyConnection(model="auto") { try { await request("/v1/models"); toast(t("connectionOk")+` · ${model}`); } catch(error){ toast(`${t("connectionFailed")}: ${error.message}`); } }
     async function testRouting(showDrawer=true) { try { const payload=await request("/routing/request",{method:"POST",body:JSON.stringify({agent_id:"dashboard",agent_type:"human",role:state.routingRole,task_type:state.routingRole==="embed"?"embedding":"chat",requested_model:"auto",routing_strategy:state.routingStrategy})});state.routingDecision=payload;render();if(showDrawer)openDrawer(t("testRoute"),`<div class="meta-line"><span>${esc(payload.selected_model||"—")}</span><span>${esc(payload.selected_source||"—")}</span><span>${esc(payload.routing_strategy||"—")}</span></div><p class="muted">${esc((payload.reason_codes||[]).join(" · "))}</p><details><summary>${t("technicalDetails")}</summary><pre class="json">${esc(JSON.stringify(payload,null,2))}</pre></details>`); } catch(error){toast(error.message);} }
     document.addEventListener("click", async event => {
       const language=event.target.closest("[data-language]")?.dataset.language;if(language){state.lang=language;localStorage.setItem("imperium.lang",state.lang);saveSetup();render();return;}
       const route=event.target.closest("[data-route]")?.dataset.route; if(route){closeDrawer();routeTo(route);return;}
       const action=event.target.closest("[data-action]")?.dataset.action; if(!action)return;
-      // #region agent log
-      dbgLog("A","dashboard:click","action_fired",{action,route:state.route,model:event.target.closest("[data-model]")?.dataset.model||null});
-      // #endregion
       if(action==="close-drawer")closeDrawer();
       if(action==="show-alerts")openAlerts();
       if(action==="refresh-alerts"){await loadData();openAlerts();}
@@ -769,21 +770,22 @@
       if(action==="use-existing-setup"){state.setupFailure=null;state.wizard.runtime="existing";setWizardStep(3);render();}
       if(action==="cancel-setup")request("/setup/cancel",{method:"POST",body:"{}"}).then(()=>toast(t("cancel"))).catch(error=>toast(error.message));
       if(action==="finish-setup"){localStorage.removeItem("imperium.setup");state.wizardStep=1;routeTo("chat");}
-      if(action==="select-model"){const mid=event.target.closest("[data-model]").dataset.model; /* #region agent log */ dbgLog("A","dashboard:select-model","local_only_no_download_api",{modelId:mid,callsApi:false,next:"wizard_step_4"}); /* #endregion */ state.wizard.modelId=mid;setWizardStep(4);render();}
-      if(action==="choose-chat-model"){const mid=event.target.closest("[data-model]").dataset.model; /* #region agent log */ dbgLog("A","dashboard:choose-chat-model","local_only_no_fleet_activate",{modelId:mid,callsApi:false,persists:"localStorage.imperium.chatModel"}); /* #endregion */ state.chatModel=mid;localStorage.setItem("imperium.chatModel",state.chatModel);routeTo("chat");}
+      if(action==="select-model"){const mid=event.target.closest("[data-model]").dataset.model;state.wizard.modelId=mid;setWizardStep(4);render();}
+      if(action==="choose-chat-model"){const mid=event.target.closest("[data-model]").dataset.model;state.chatModel=mid;localStorage.setItem("imperium.chatModel",state.chatModel);routeTo("chat");}
       if(action==="model-details"){const model=modelDetails(event.target.closest("[data-model]").dataset.model);openDrawer(model?.name||t("details"),`<div class="meta-line"><span>${esc(model?.quant||"—")}</span><span>${esc(model?.size_gb||"—")} GB</span><span>${esc(model?.max_ctx_fit||model?.context||"—")} ctx</span></div><p class="muted">${esc((model?.reasons||[]).join(" · ")||model?.fit_reason||model?.path||"")}</p><details><summary>${t("technicalDetails")}</summary><pre class="json">${esc(JSON.stringify(model,null,2))}</pre></details>`);}
       if(action==="models-folder"){const folder=state.setup?.discovery?.models_dir||"";openDrawer(t("modelsFolder"),`<p class="muted">${t("modelsFolderCopy")}</p><div class="field"><label for="models-folder-path">${t("destination")}</label><input class="input mono" id="models-folder-path" value="${esc(folder)}"></div><button class="button primary" data-action="save-models-folder">${t("saveFolder")}</button>`);}
       if(action==="save-models-folder"){const path=document.getElementById("models-folder-path").value.trim();try{const payload=await request("/models/directory",{method:"POST",body:JSON.stringify({path})});state.setup={...(state.setup||{}),discovery:payload.discovery};const locals=payload.discovery?.local_models||[];if(locals.length&&!locals.some(row=>row.id===state.wizard.modelId)){state.wizard.modelId="";state.wizard.preferLocal=true;}closeDrawer();toast(t("saveFolder"));await loadData();if(state.setup?.recommendation?.local){state.wizard.modelId=state.setup.recommendation.id;state.wizard.preferLocal=true;}saveSetup();render();}catch(error){toast(error.message);}}
-      if(action==="integration-details"){const app=integrations.find(row=>row.id===event.target.closest("[data-integration]").dataset.integration);const base=state.status?.api?.base_url||location.origin;openDrawer(app.name,`<p class="muted">${localized(app.copy)}</p><div class="field"><label>${t("endpoint")}</label><div class="copy-field"><input class="input mono" readonly value="${esc(base)}/v1"><button class="button" data-copy="${esc(base)}/v1">${t("copy")}</button></div></div><div class="field"><label>${t("pinnedModel")}</label><div class="copy-field"><input class="input mono" readonly value="${esc(app.model)}"><button class="button" data-copy="${esc(app.model)}">${t("copy")}</button></div></div><button class="button primary" data-verify="${esc(app.model)}">${t("verify")}</button>`);}
+      if(action==="integration-details"){const app=integrations.find(row=>row.id===event.target.closest("[data-integration]").dataset.integration);const base=state.status?.api?.base_url||location.origin;const model=app.id==="hermes"?(hermesConnection()?.model||app.model):app.model;openDrawer(app.name,`<p class="muted">${localized(app.copy)}</p><div class="field"><label>${t("endpoint")}</label><div class="copy-field"><input class="input mono" readonly value="${esc(base)}/v1"><button class="button" data-copy="${esc(base)}/v1">${t("copy")}</button></div></div><div class="field"><label>${t("pinnedModel")}</label><div class="copy-field"><input class="input mono" readonly value="${esc(model)}"><button class="button" data-copy="${esc(model)}">${t("copy")}</button></div></div><button class="button primary" data-verify="${esc(model)}">${t("verify")}</button>`);}
+      if(action==="pin-hermes"){const harness=hermesHarness();const connection=hermesConnection();const model=document.getElementById("hermes-pin-model")?.value;if(!harness||!connection||!model)return;request(`/harnesses/${encodeURIComponent(harness.harness_id)}/connections/${encodeURIComponent(connection.name)}`,{method:"PATCH",body:JSON.stringify({model})}).then(()=>{toast(t("pinHermesSaved"));return loadData();}).catch(error=>toast(error.message));}
       if(action==="open-harness")openDrawer(t("addHarness"),`<div class="field"><label for="harness-id">ID</label><input class="input mono" id="harness-id" value="custom_app"></div><div class="field"><label for="harness-name">${t("name")}</label><input class="input" id="harness-name" value="${t("customApp")}"></div><div class="field"><label for="harness-model">${t("pinnedModel")}</label><input class="input mono" id="harness-model" value="auto"></div><button class="button primary" data-action="create-harness">${t("addHarness")}</button>`);
-      if(action==="create-harness"){const id=document.getElementById("harness-id").value.trim();const name=document.getElementById("harness-name").value.trim();const model=document.getElementById("harness-model").value.trim();/* #region agent log */ dbgLog("C","dashboard:create-harness","harness_create_attempt",{id,model}); /* #endregion */ request("/harnesses",{method:"POST",body:JSON.stringify({harness_id:id,display_name:name,kind:"custom",protocol:"openai",location:"host",connections:{default:{model}}})}).then(()=>{toast(t("saveLocal"));closeDrawer();loadData();}).catch(error=>{/* #region agent log */ dbgLog("C","dashboard:create-harness","harness_create_error",{status:error.status,message:error.message,payload:error.payload||null}); /* #endregion */ toast(error.message);});}
+      if(action==="create-harness"){const id=document.getElementById("harness-id").value.trim();const name=document.getElementById("harness-name").value.trim();const model=document.getElementById("harness-model").value.trim();request("/harnesses",{method:"POST",body:JSON.stringify({harness_id:id,display_name:name,kind:"custom",protocol:"openai",location:"host",connections:{default:{model}}})}).then(()=>{toast(t("saveLocal"));closeDrawer();loadData();}).catch(error=>toast(error.message));}
       if(action==="clear-chat"){state.messages=[];localStorage.removeItem("imperium.chat");render();}
       if(action==="stop-chat")state.aborter?.abort();
       if(action==="retry-chat"){const last=[...state.messages].reverse().find(m=>m.role==="user");state.messages=state.messages.filter(m=>!m.error);if(last)sendChat(last.content);}
       if(action==="refresh")loadData();
       if(action==="show-config")openDrawer(t("rawPreview"),`<pre class="json">${esc(JSON.stringify(state.config,null,2))}</pre>`);
       if(action==="save-api-key"){state.apiKey=document.getElementById("api-key").value.trim();localStorage.setItem("imperium.apiKey",state.apiKey);toast(t("saveLocal"));loadData();}
-      if(action==="fleet-start"||action==="fleet-stop"){/* #region agent log */ dbgLog("B","dashboard:fleet","fleet_action",{action}); /* #endregion */ if(action==="fleet-stop"&&!confirm(t("stopAll")+"?"))return;request(action==="fleet-start"?"/fleet/start":"/fleet/stop",{method:"POST",body:"{}"}).then(loadData).catch(error=>{/* #region agent log */ dbgLog("B","dashboard:fleet","fleet_error",{action,status:error.status,message:error.message,payload:error.payload||null}); /* #endregion */ toast(error.message);});}
+      if(action==="fleet-start"||action==="fleet-stop"){if(action==="fleet-stop"&&!confirm(t("stopAll")+"?"))return;request(action==="fleet-start"?"/fleet/start":"/fleet/stop",{method:"POST",body:"{}"}).then(loadData).catch(error=>toast(error.message));}
       if(action==="route-test")testRouting();
     });
     document.addEventListener("change", event => {
@@ -805,11 +807,10 @@
     document.addEventListener("click", event => { const copy=event.target.closest("[data-copy]")?.dataset.copy;if(copy)navigator.clipboard.writeText(copy).then(()=>toast(t("copied")));const verify=event.target.closest("[data-verify]")?.dataset.verify;if(verify)verifyConnection(verify);const prompt=event.target.closest("[data-prompt]")?.dataset.prompt;if(prompt)sendChat(prompt);const tab=event.target.closest("[data-model-tab]")?.dataset.modelTab;if(tab){state.modelTab=tab;render();} });
     document.getElementById("theme-control").addEventListener("click",()=>{state.theme=state.theme==="light"?"dark":"light";localStorage.setItem("imperium.theme",state.theme);render();});
     document.getElementById("language-control").addEventListener("click",()=>{state.lang=state.lang==="en"?"he":"en";localStorage.setItem("imperium.lang",state.lang);render();});
-    document.getElementById("mode-control").addEventListener("click",()=>{state.mode=state.mode==="simple"?"advanced":"simple";localStorage.setItem("imperium.mode",state.mode);if(state.mode==="advanced")routeTo("advanced/fleet");else routeTo("home");});
     document.getElementById("advanced-toggle").addEventListener("click",event=>{const open=event.currentTarget.getAttribute("aria-expanded")!=="true";event.currentTarget.setAttribute("aria-expanded",String(open));document.getElementById("advanced-nav").classList.toggle("open",open);});
-    document.getElementById("mobile-menu").addEventListener("click",()=>document.getElementById("sidebar").classList.toggle("open"));
+    document.getElementById("mobile-menu").addEventListener("click",event=>{const open=document.getElementById("sidebar").classList.toggle("open");event.currentTarget.setAttribute("aria-expanded",String(open));});
     document.getElementById("drawer").addEventListener("click",event=>{if(event.target.id==="drawer")closeDrawer();});
-    document.addEventListener("keydown",event=>{if(event.key==="Escape"){closeDrawer();document.getElementById("sidebar").classList.remove("open");}});
+    document.addEventListener("keydown",event=>{if(event.key==="Escape"){closeDrawer();document.getElementById("sidebar").classList.remove("open");document.getElementById("mobile-menu").setAttribute("aria-expanded","false");}});
     function tick(){document.getElementById("clock").textContent=new Intl.DateTimeFormat(state.lang==="he"?"he-IL":"en-US",{dateStyle:"medium",timeStyle:"short"}).format(new Date());}
     tick();setInterval(tick,30000);
     const initial=location.hash.replace(/^#\//,"");state.route=initial||"home";if(setupStepByRoute[state.route])state.wizardStep=setupStepByRoute[state.route];if(state.route==="setup"&&savedSetup.step>1)state.route=setupRoutes[savedSetup.step-1];applyPreferences();renderNav();render();loadData();

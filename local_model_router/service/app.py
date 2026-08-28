@@ -207,6 +207,27 @@ def _capabilities_for_pinned_model(
     return {"tools": False, "vision": False, "json_mode": True}
 
 
+def _pin_model_allowed(model: str, slots: list, upstream_list: list) -> bool:
+    """Accept configured slot models, serving upstream targets, or live aliases."""
+    target = str(model or "").strip()
+    if not target:
+        return False
+    if match_upstream_model(target, upstream_list) is not None:
+        return True
+    candidates = build_slot_candidates(slots)
+    if any(
+        target in {candidate.slot_id, candidate.model_id, candidate.id}
+        for candidate in candidates
+    ):
+        return True
+    alias = resolve_alias(target)
+    return bool(
+        alias.recognized
+        and alias.role
+        and any(candidate.role == alias.role for candidate in candidates)
+    )
+
+
 def _configured_api_key() -> str:
     return os.environ.get(_API_KEY_ENV, "").strip()
 
@@ -515,6 +536,8 @@ def create_app(
     """Return a configured Starlette app.  Safe to call multiple times (no side-effects)."""
     observer = ObserverBackend(config_path)
     api_key = _configured_api_key()
+    config_writes_requested = os.environ.get("A0_LMM_ROUTER_ENABLE_CONFIG_WRITES") == "1"
+    config_writes_enabled = config_writes_requested and bool(api_key)
     store = fleet_store or FleetStore()
     queue = fleet_queue or FleetQueue()
     prompt_cache = InMemoryPromptCache() if prompt_cache_enabled() else None
@@ -1093,15 +1116,21 @@ def create_app(
         return JSONResponse({
             "harnesses": [harness_manifest(profile) for profile in harness_profiles.list_profiles()],
             "source": harness_profiles.source,
-            "config_writes_enabled": os.environ.get("A0_LMM_ROUTER_ENABLE_CONFIG_WRITES") == "1",
+            "config_writes_enabled": config_writes_enabled,
         })
 
-    async def harness_create(request: Request) -> JSONResponse:
-        nonlocal harness_profiles
-        if os.environ.get("A0_LMM_ROUTER_ENABLE_CONFIG_WRITES") != "1":
+    def config_write_denial() -> Optional[JSONResponse]:
+        if not config_writes_requested:
             return JSONResponse({"error": "config_writes_disabled"}, status_code=403)
         if not api_key:
             return JSONResponse({"error": "config_write_requires_api_key"}, status_code=403)
+        return None
+
+    async def harness_create(request: Request) -> JSONResponse:
+        nonlocal harness_profiles
+        denial = config_write_denial()
+        if denial is not None:
+            return denial
         try:
             payload = await request.json()
         except Exception:
@@ -1117,6 +1146,61 @@ def create_app(
                 status_code=422,
             )
         return JSONResponse(harness_manifest(profile), status_code=201)
+
+    async def harness_pin(request: Request) -> JSONResponse:
+        nonlocal harness_profiles
+        denial = config_write_denial()
+        if denial is not None:
+            return denial
+        harness_id = request.path_params.get("harness_id", "")
+        connection_name = request.path_params.get("connection", "")
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid_json"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "invalid_request_body"}, status_code=400)
+        model = str(body.get("model") or "").strip()
+        if not model:
+            return JSONResponse({"error": "model_required"}, status_code=422)
+        try:
+            harness_profiles.get(harness_id)
+        except (HarnessConfigError, KeyError):
+            return JSONResponse(
+                {"error": "unknown_harness", "harness_id": harness_id},
+                status_code=404,
+            )
+        try:
+            harness_profiles.resolve(harness_id, connection_name)
+        except (HarnessConfigError, KeyError):
+            return JSONResponse(
+                {
+                    "error": "unknown_harness_connection",
+                    "harness_id": harness_id,
+                    "connection": connection_name,
+                },
+                status_code=404,
+            )
+        if not _pin_model_allowed(model, observer.get_slots(), upstreams):
+            return JSONResponse(
+                {
+                    "error": "unknown_pin_target",
+                    "model": model,
+                    "detail": "No matching slot, upstream, or live alias is configured.",
+                },
+                status_code=422,
+            )
+        try:
+            harness_profiles, _backup = harness_profiles.set_connection_model(
+                harness_id, connection_name, model
+            )
+            profile = harness_profiles.get(harness_id)
+        except HarnessConfigError as exc:
+            return JSONResponse(
+                {"error": "invalid_harness_config", "detail": str(exc)},
+                status_code=422,
+            )
+        return JSONResponse(harness_manifest(profile))
 
     async def harness_detail(request: Request) -> JSONResponse:
         try:
@@ -2467,6 +2551,11 @@ def create_app(
         Route("/agents/{agent_id}/runs", protected(agent_run), methods=["POST"]),
         Route("/harnesses", protected(harnesses_list)),
         Route("/harnesses", protected(harness_create), methods=["POST"]),
+        Route(
+            "/harnesses/{harness_id}/connections/{connection}",
+            protected(harness_pin),
+            methods=["PATCH"],
+        ),
         Route("/harnesses/{harness_id}/v1/models", protected(harness_models)),
         Route(
             "/harnesses/{harness_id}/v1/chat/completions",

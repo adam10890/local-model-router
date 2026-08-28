@@ -6,6 +6,14 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- A path-filtered Windows validation workflow now separates PR clean-install
+  checks, nightly CPU offline lifecycle evidence, and opt-in packaged NVIDIA
+  evidence. Provider and harness smoke commands can emit sanitized JSON, and
+  RC mode requires live chat, stream, and actual tool-call results.
+- A separate `browser` development extra and real-Chromium dashboard gate for
+  navigation, localization, persistence, degraded states, responsive layout,
+  keyboard behavior, and guarded Hermes model pinning. Failure screenshots and
+  traces are retained only by the dedicated browser workflow.
 - Task disclosure (`local_model_router/disclosure/`, ADR 0013/0014): an
   executor trust ladder (`local_uncensored` → `local_aligned` →
   `private_cloud` → `other_provider`) declared per slot, upstream, or agent,
@@ -51,6 +59,30 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- `setup --repair --yes` now re-applies a saved, non-secret managed setup plan;
+  cleanroom validation exercises controlled recovery, scoped rollback and
+  uninstall while proving model/settings and outside sentinels are preserved.
+  Tag-triggered release publication was removed from bundle assembly, and the
+  development extra now carries the build backend required by offline wheel assembly.
+- Runtime update discovery now selects the newest compatible llama.cpp rolling
+  release with the complete expected asset set and GitHub SHA-256 digests,
+  skipping unrelated semantic “latest” releases. Update and rollback also keep
+  the managed configuration pointed at the selected runtime.
+- Dashboard dialogs now manage focus, mobile navigation exposes its expanded
+  state, and Hermes pin writes require both API authentication and the explicit
+  config-write opt-in.
+- Backend lifecycle control now refuses unknown configurations and recycled
+  processes, keeps Docker access lazy and opt-in, sanitizes remote/MCP
+  failures, and omits raw task text from routing bridge metadata. The main CI
+  gate now enforces 75% total coverage and 70% for backends, MCP, and CLI/setup.
+- `imperium doctor` now verifies the callable dependency capabilities used by
+  the router, reports sanitized recovery guidance for broken namespace
+  packages, and preserves its existing machine-readable dependency codes.
+- The Windows bundle workflow now tests Python 3.12 and validates tag builds
+  against package metadata instead of a stale hard-coded release version.
+- Advanced dashboard navigation is always available, simple model choices stay
+  filtered, pinned tool-path labels replace the older custom-harness wording,
+  and leftover local debug telemetry has been removed.
 - Managed subprocess fleet status now probes live process health, automatically
   retries crashed slots within the configured limit, and closes the alert
   drawer before navigating to recovery controls.

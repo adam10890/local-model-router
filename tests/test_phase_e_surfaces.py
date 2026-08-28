@@ -54,10 +54,14 @@ def test_dashboard_page_loads(tmp_path, monkeypatch):
     assert "/setup/plan" in html
     assert "/v1/models" in html  # the page consumes the router's own API
     assert 'request("/harnesses")' in html
-    assert "Add custom harness" in html
+    assert "Add a pinned tool path" in html
     assert "Verify connection" in html
     assert "Connections" in html
     assert "Advanced" in html
+    assert 'x.config_writes_enabled===true' in html
+    assert 'if(!state.configWritesEnabled||!hermesHarness()||!hermesConnection())return ""' in html
+    assert '/connections/${encodeURIComponent(connection.name)}' in html
+    assert 'method:"PATCH",body:JSON.stringify({model})' in html
     assert 'localStorage.getItem("imperium.chat")' in html
     assert 'localStorage.setItem("imperium.chat"' in html
     assert "if(state.setupRunning)return" in html
@@ -72,7 +76,9 @@ def test_dashboard_has_six_resumable_setup_stages_and_simple_model_aliases(tmp_p
     assert 'localStorage.getItem("imperium.setup")' in html
     assert 'localStorage.setItem("imperium.setup"' in html
     assert 'const simpleModelAliases=["auto","chat","fast","coder"]' in html
-    assert 'state.mode==="advanced"?all:all.filter' in html
+    assert "simpleModelAliases.includes(row.id)" in html
+    assert 'id="mode-control"' not in html
+    assert 'id="advanced-toggle"' in html
     assert 'min-height: 52px' in html
     assert 'reportedGraphicsMemory' in html
     assert 'data-action="finish-setup"' in html

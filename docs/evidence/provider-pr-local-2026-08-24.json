@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "kind": "provider_smoke",
+  "ok": true,
+  "require_live": false,
+  "live": false,
+  "checks": [
+    {"name": "health", "status": "pass", "http_status": 200},
+    {"name": "models", "status": "pass", "http_status": 200},
+    {"name": "fleet", "status": "pass", "http_status": 200},
+    {"name": "route", "status": "pass", "http_status": 200},
+    {"name": "chat", "status": "unavailable", "http_status": 503, "error_code": "model_unavailable"},
+    {"name": "stream", "status": "unavailable", "http_status": 503, "error_code": "model_unavailable"},
+    {"name": "tools", "status": "unavailable", "http_status": 503, "error_code": "model_unavailable"}
+  ]
+}

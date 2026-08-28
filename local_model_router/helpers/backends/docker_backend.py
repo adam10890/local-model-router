@@ -33,11 +33,11 @@ def _ensure_docker():
             import docker.errors
             _docker = docker
             _docker_errors = docker.errors
-        except ImportError:
-            raise RuntimeError(
+        except ImportError as exc:
+            raise ImportError(
                 "Docker SDK not installed. Run: pip install docker\n"
                 "Or switch backend to 'subprocess' in llama_cpp_servers.yaml"
-            )
+            ) from exc
 
 
 # ── Default config ──────────────────────────────────────────────────

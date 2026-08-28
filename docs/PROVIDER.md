@@ -80,11 +80,11 @@ With a local API key:
   -InstallDeps
 ```
 
-Smoke test:
+Release smoke (sanitized JSON; live model required):
 
 ```powershell
-.\scripts\smoke_provider.ps1 -ApiKey "change-me"
-python .\scripts\smoke_harnesses.py --api-key "change-me"
+.\scripts\smoke_provider.ps1 -ApiKey "change-me" -RequireLive -JsonOutput output\evidence\provider.json
+python .\scripts\smoke_harnesses.py --api-key "change-me" --rc --harness hermes --json-output output\evidence\hermes.json
 ```
 
 `SETUP.bat` installs the agent runner extra. `START.bat` derives
@@ -111,16 +111,16 @@ With a local API key:
   --install-deps
 ```
 
-Smoke test:
+Release smoke:
 
 ```bash
-./scripts/smoke_provider.sh --api-key "change-me"
-python scripts/smoke_harnesses.py --api-key "change-me"
+./scripts/smoke_provider.sh --api-key "change-me" --require-live --json-output output/evidence/provider.json
+python scripts/smoke_harnesses.py --api-key "change-me" --rc --harness hermes --json-output output/evidence/hermes.json
 ```
 
-The harness smoke checks `/models` and one short completion for every
-configured dedicated connection. It fails when a pinned model is unavailable,
-so run it only when the configured harness fleet is expected to be online.
+The provider result contains statuses and HTTP codes, never response or prompt
+bodies. The harness RC smoke checks models, chat, stream, and an actual tool
+call for every explicitly required harness. Missing harnesses are failures.
 
 ## Public Bind Safety
 
@@ -206,6 +206,11 @@ stored. Use `--force` to refresh an unchanged model.
    contains machine-specific host or port settings.
 4. Restart the provider process.
 5. Run the smoke script before pointing clients at the provider.
+
+Managed Windows runtime updates query recent llama.cpp rolling releases and
+accept only the newest build that supplies every expected backend asset with a
+GitHub SHA-256 digest. `imperium rollback` restores the previous pinned runtime
+and updates the managed configuration path with it.
 
 ## Local llama.cpp vs upstreams
 
