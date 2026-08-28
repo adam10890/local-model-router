@@ -155,8 +155,8 @@ def build_ui_status(
                     if externally_managed
                     else "שרת המודל מוגדר אך אינו מגיב."
                 ),
-                action_en="View guidance" if externally_managed else "Resolve",
-                action_he="הצגת הנחיות" if externally_managed else "פתרון",
+                action_en="View guidance" if externally_managed else "Open fleet controls",
+                action_he="הצגת הנחיות" if externally_managed else "פתיחת בקרות Fleet",
             )
         )
 

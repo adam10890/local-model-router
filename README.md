@@ -67,6 +67,7 @@ What works today:
 | Simple dashboard | `GET /ui` | Home, Chat, Models, Connections, and a global configuration/system alert center; light/dark, English/Hebrew, LTR/RTL |
 | Advanced dashboard | `GET /ui#/advanced/fleet` | Fleet, Routing, Configuration, and Diagnostics |
 | Readiness | `GET /ui/status` | categorized configuration/system issues, stable severity/action codes, and one recommended next action |
+| Sanitized diagnostics | `GET /diagnostics/report` | authenticated, read-only support report with doctor checks, readiness, slots/runtime failure codes, and CPU/RAM/GPU data; no paths, credentials, prompts, responses, headers, environment values, logs, or raw exceptions |
 | First-run setup | loopback-only `/setup/*` | hardware discovery, reviewed plan, managed downloads, progress, cancellation, and smoke test |
 | Cookbook | `GET /cookbook` | scans your GGUF folder, VRAM fit math, per-role model recommendations with confidence grades |
 | A2A | `GET /.well-known/agent-card.json`, `POST /a2a` | agent card + skills for agent-to-agent use |
@@ -207,6 +208,15 @@ imperium update --yes
 imperium rollback               # managed llama.cpp runtime
 .\Rollback-Imperium.bat          # Imperium application
 ```
+
+The Advanced → Diagnostics page runs the same checks through the protected
+`GET /diagnostics/report` endpoint and can download
+`imperium-diagnostics-<UTC>.json`. The exported report is intended for support:
+it contains stable status/failure codes and operational resource totals, but
+never configuration paths, secrets, request headers, prompts, responses, log
+content, environment values, URL credentials, or raw exception text. It does
+not start or repair a model server; server recovery continues to respect the
+fleet-control opt-in.
 
 ## Developer quickstart
 
