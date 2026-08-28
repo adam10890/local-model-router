@@ -1,0 +1,59 @@
+name: Dashboard browser
+
+on:
+  pull_request:
+    paths:
+      - "local_model_router/dashboard/**"
+      - "local_model_router/service/**"
+      - "local_model_router/harnesses/**"
+      - "tests/test_dashboard_static_contract.py"
+      - "tests/test_harness_api.py"
+      - "tests/test_harness_profiles.py"
+      - "tests/test_phase_e_surfaces.py"
+      - "tests_e2e/dashboard/**"
+      - "pyproject.toml"
+      - ".github/workflows/dashboard-browser.yml"
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static-contract:
+    name: Static dashboard contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest tests/test_dashboard_static_contract.py -q
+
+  browser:
+    name: Chromium dashboard gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e ".[dev,browser]"
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+      - name: Run browser suite
+        env:
+          PLAYWRIGHT_OUTPUT_DIR: output/playwright
+        run: python -m pytest tests_e2e/dashboard -q
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-browser-${{ github.run_id }}
+          path: output/playwright/
+          if-no-files-found: ignore
+          retention-days: 7

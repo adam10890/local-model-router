@@ -226,7 +226,9 @@ python -m venv .venv
 Or use the wrapper scripts: `scripts\run_provider.ps1` (Windows),
 `scripts/run_provider.sh` (WSL/Linux), plus `smoke_provider.*` for a
 post-start check and `scripts/smoke_harnesses.py` to verify every configured
-dedicated harness connection.
+dedicated harness connection. Release validation adds `--require-live` (or
+`-RequireLive`) and a JSON output path; harness RC runs require explicit
+`--harness` filters and fail on a missing stream or tool call.
 
 ## Calling it from the OpenAI SDK
 
@@ -348,6 +350,13 @@ Vercel AI SDK style setup snippets.
 
 ```powershell
 .venv\Scripts\python -m pytest tests/ -q     # full suite
+.venv\Scripts\coverage run --source=local_model_router -m pytest tests/ -q
+.venv\Scripts\coverage report --fail-under=75
+.venv\Scripts\coverage report --include="local_model_router/helpers/backends/*" --fail-under=70
+.venv\Scripts\coverage report --include="local_model_router/mcp/*" --fail-under=70
+.venv\Scripts\coverage report --include="local_model_router/cli.py,local_model_router/setup/*" --fail-under=70
+.venv\Scripts\python -m playwright install chromium
+.venv\Scripts\python -m pytest tests_e2e/dashboard -q
 ```
 
 Pull requests and pushes to `main` run the same hermetic suite in GitHub

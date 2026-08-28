@@ -92,6 +92,7 @@ class SetupEngine:
         self.inventory_path = self.state_dir / "model-inventory.json"
         self.hardware_path = self.state_dir / "hardware-profile.json"
         self.process_path = self.state_dir / "runtime-process.json"
+        self.repair_plan_path = self.state_dir / "repair-plan.json"
         configured_offline = os.environ.get("IMPERIUM_OFFLINE_DIR", "").strip()
         executable = Path(sys.executable).resolve(strict=False)
         packaged_offline = (executable.parents[2] if len(executable.parents) > 2 else executable.parent) / "offline"
@@ -728,16 +729,67 @@ class SetupEngine:
         }
 
     @staticmethod
-    def _github_release(api_url: str) -> dict[str, Any]:
+    def _github_releases(api_url: str) -> list[dict[str, Any]]:
         request = urllib.request.Request(api_url, headers={"Accept": "application/vnd.github+json", "User-Agent": "Imperium-Setup"})
         try:
             with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310
                 payload = json.load(response)
         except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
             raise SetupError("release_lookup_failed", f"Could not read the official llama.cpp release: {exc}") from exc
-        if not isinstance(payload, dict):
+        if isinstance(payload, dict):
+            payload = [payload]
+        if not isinstance(payload, list) or not payload:
             raise SetupError("invalid_release", "The official release response was not valid")
-        return payload
+        releases = [row for row in payload if isinstance(row, dict)]
+        if not releases:
+            raise SetupError("invalid_release", "The official release response was not valid")
+        return releases
+
+    def _latest_runtime_release(self, backend: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        hardware = self.hardware()
+        platform_entry = self._platform_entry(hardware)
+        backend_entry = ((platform_entry or {}).get("backends") or {}).get(backend) or {}
+        pinned_assets = [dict(asset) for asset in backend_entry.get("assets", [])]
+        if not pinned_assets:
+            raise SetupError("runtime_asset_missing", f"No runtime assets are defined for {backend}")
+        recommended_tag = str(self.runtime_catalog["recommended"]["tag"])
+        releases = self._github_releases(self.runtime_catalog["releases_api"])
+        for release in releases:
+            tag = str(release.get("tag_name") or "")
+            if release.get("draft") or not re.fullmatch(r"b\d+", tag):
+                continue
+            released = {
+                str(row.get("name")): row
+                for row in release.get("assets", [])
+                if isinstance(row, dict)
+            }
+            assets = []
+            for pinned in pinned_assets:
+                name = str(pinned["name"]).replace(recommended_tag, tag)
+                row = released.get(name)
+                digest = str((row or {}).get("digest") or "")
+                checksum = digest.split(":", 1)[1] if digest.startswith("sha256:") else ""
+                if (
+                    not row
+                    or not re.fullmatch(r"[0-9a-fA-F]{64}", checksum)
+                    or not row.get("browser_download_url")
+                ):
+                    assets = []
+                    break
+                assets.append(
+                    {
+                        "name": name,
+                        "url": row["browser_download_url"],
+                        "sha256": checksum.lower(),
+                        "size_bytes": row.get("size"),
+                    }
+                )
+            if len(assets) == len(pinned_assets):
+                return release, assets
+        raise SetupError(
+            "runtime_asset_missing",
+            f"No recent llama.cpp rolling release provides verified {backend} assets",
+        )
 
     @staticmethod
     def _safe_extract(bundle: zipfile.ZipFile, destination: Path) -> None:
@@ -836,26 +888,9 @@ class SetupEngine:
         source = str(recommended["source"])
         assets = [dict(asset) for asset in backend_entry.get("assets", [])]
         if channel == "latest":
-            release = self._github_release(self.runtime_catalog["latest_api"])
+            release, assets = self._latest_runtime_release(backend)
             tag = str(release.get("tag_name") or "")
             source = str(release.get("html_url") or "")
-            released = {str(row.get("name")): row for row in release.get("assets", []) if isinstance(row, dict)}
-            latest_assets = []
-            for pinned in assets:
-                name = str(pinned["name"]).replace(str(recommended["tag"]), tag)
-                row = released.get(name)
-                digest = str((row or {}).get("digest") or "")
-                if not row or not digest.startswith("sha256:"):
-                    raise SetupError("runtime_asset_missing", f"The latest release does not provide a verified {name}")
-                latest_assets.append(
-                    {
-                        "name": name,
-                        "url": row["browser_download_url"],
-                        "sha256": digest.split(":", 1)[1],
-                        "size_bytes": row.get("size"),
-                    }
-                )
-            assets = latest_assets
         if not assets:
             raise SetupError("runtime_asset_missing", f"No runtime assets are defined for {backend}")
         archives = []
@@ -909,12 +944,22 @@ class SetupEngine:
             }
         )
         self._atomic_json(self.manifest_path, manifest)
+        self._sync_runtime_config(manifest["runtime"])
         return manifest["runtime"]
 
     def update_status(self) -> dict[str, Any]:
-        release = self._github_release(self.runtime_catalog["latest_api"])
+        runtime = self._managed_runtime()
+        installed = str((runtime or {}).get("tag") or "")
+        if not runtime:
+            return {
+                "installed": None,
+                "latest": None,
+                "update_available": False,
+                "runtime_installed": False,
+                "source": None,
+            }
+        release, _assets = self._latest_runtime_release(str(runtime.get("backend") or ""))
         latest = str(release.get("tag_name") or "")
-        installed = str((self._managed_runtime() or {}).get("tag") or "")
         return {
             "installed": installed or None,
             "latest": latest or None,
@@ -922,6 +967,23 @@ class SetupEngine:
             "runtime_installed": bool(installed),
             "source": release.get("html_url"),
         }
+
+    def _sync_runtime_config(self, runtime: dict[str, Any]) -> None:
+        if not self.config_path.is_file():
+            return
+        try:
+            payload = yaml.safe_load(self.config_path.read_text(encoding="utf-8")) or {}
+            if not isinstance(payload, dict):
+                raise TypeError("configuration root is not a mapping")
+            global_config = payload.setdefault("global", {})
+            if not isinstance(global_config, dict):
+                raise TypeError("global configuration is not a mapping")
+            global_config["llama_cpp_path"] = str(Path(str(runtime["binary"])).parent)
+            temporary = self.config_path.with_suffix(self.config_path.suffix + ".tmp")
+            temporary.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+            os.replace(temporary, self.config_path)
+        except (OSError, KeyError, TypeError, yaml.YAMLError) as exc:
+            raise SetupError("configuration_invalid", "Could not point the managed configuration at the selected runtime") from exc
 
     def download_model(self, model_id: str) -> dict[str, Any]:
         model = next((row for row in self.catalog.get("models", []) if row.get("id") == model_id), None)
@@ -1060,6 +1122,7 @@ class SetupEngine:
         from local_model_router.helpers.backends.subprocess_backend import SubprocessBackend
 
         global_config = dict(payload.get("global") or {})
+        global_config["llama_cpp_path"] = str(Path(str(runtime["binary"])).parent)
         slot_config = {**slot, "visible_terminal": visible_terminal}
         self._runtime_backend = SubprocessBackend(global_config)
         slot_id = str(slot.get("id") or "local_default")
@@ -1198,6 +1261,18 @@ class SetupEngine:
                                 code for code, ok in smoke_result.get("checks", {}).items() if not ok
                             )
                             raise SetupError("smoke_failed", f"Final checks failed: {failed}")
+                if backend != "existing" and model_id:
+                    self._atomic_json(
+                        self.repair_plan_path,
+                        {
+                            "schema_version": 1,
+                            "backend": backend,
+                            "model_id": model_id,
+                            "runtime_channel": channel,
+                            "launch_mode": str(payload.get("launch_mode") or "background"),
+                            "port": int(plan.get("port") or 8080),
+                        },
+                    )
                 return {"ok": True, "results": results, "state": self.state(refresh_hardware=True)}
             except Exception:
                 if runtime_started:
@@ -1220,6 +1295,85 @@ class SetupEngine:
                 raise
         finally:
             self._apply_lock.release()
+
+    def repair(self, *, confirm: bool = False) -> dict[str, Any]:
+        """Re-apply the installed managed setup after explicit confirmation."""
+        state = self.state(refresh_hardware=True)
+        discovery = state["discovery"]
+        missing = []
+        if not discovery["runtime_installed"]:
+            missing.append("runtime")
+        if not discovery["gguf_models"]:
+            missing.append("model")
+        if not discovery.get("config_exists") or not discovery.get("enabled_slots"):
+            missing.append("configuration")
+        if not confirm:
+            return {
+                "ok": not missing,
+                "missing": missing,
+                "confirmation_required": bool(missing),
+                "next": "imperium setup --repair --yes" if missing else None,
+            }
+
+        configured: dict[str, Any] = {}
+        if self.config_path.is_file():
+            try:
+                payload = yaml.safe_load(self.config_path.read_text(encoding="utf-8")) or {}
+                configured = next(
+                    (row for row in payload.get("active_slots", []) if row.get("enabled", True)),
+                    {},
+                )
+            except (OSError, yaml.YAMLError, StopIteration, TypeError, AttributeError):
+                configured = {}
+        runtime = self._managed_runtime() or {}
+        saved_plan = self._read_json(self.repair_plan_path)
+        inventory = self._read_json(self.inventory_path).get("models") or []
+        inventoried = next(
+            (
+                str(row.get("id") or "")
+                for row in inventory
+                if isinstance(row, dict)
+                and row.get("id")
+                and Path(str(row.get("path") or "")).is_file()
+            ),
+            "",
+        )
+        recommendation = state.get("recommendation") or {}
+        backend = str(
+            saved_plan.get("backend")
+            or runtime.get("backend")
+            or state.get("recommended_backend")
+            or ""
+        )
+        model_id = str(
+            saved_plan.get("model_id")
+            or configured.get("model_id")
+            or configured.get("router_default_model")
+            or inventoried
+            or recommendation.get("id")
+            or ""
+        )
+        if not backend or not model_id:
+            raise SetupError(
+                "repair_plan_unavailable",
+                "No verified managed runtime and model are available for automatic repair",
+            )
+        result = self.apply(
+            {
+                "backend": backend,
+                "model_id": model_id,
+                "runtime_channel": str(
+                    saved_plan.get("runtime_channel")
+                    or runtime.get("channel")
+                    or "recommended"
+                ),
+                "launch_mode": str(saved_plan.get("launch_mode") or "background"),
+                "port": int(saved_plan.get("port") or configured.get("port") or 8080),
+                "confirm_download": True,
+                "confirm_write": True,
+            }
+        )
+        return {"ok": True, "missing": missing, "repaired": True, "result": result}
 
     def smoke(self) -> dict[str, Any]:
         discovery = self.discover()
@@ -1356,4 +1510,5 @@ class SetupEngine:
         manifest["previous_runtime"] = current
         manifest["updated_at"] = time.time()
         self._atomic_json(self.manifest_path, manifest)
+        self._sync_runtime_config(previous)
         return previous

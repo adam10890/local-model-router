@@ -48,7 +48,7 @@ def test_cleanroom_verifies_checksum_and_live_installed_surfaces():
 
     assert "Test-StrictChildPath" in cleanroom
     assert "$Root == $BuildRoot" not in cleanroom
-    assert "Get-FileHash -LiteralPath $Bundle" in cleanroom
+    assert "Get-FileHash -LiteralPath $Archive" in cleanroom
     assert 'IMPERIUM_OFFLINE = "1"' in cleanroom
     assert 'http://127.0.0.1:9100/agents' in cleanroom
     assert 'agents/code-review/runs' in cleanroom
@@ -56,8 +56,19 @@ def test_cleanroom_verifies_checksum_and_live_installed_surfaces():
     assert 'http://127.0.0.1:9100/health' in cleanroom
     assert 'http://127.0.0.1:9100/ui/status' in cleanroom
     assert 'http://127.0.0.1:9100/v1/models' in cleanroom
-    assert "setup --repair" not in cleanroom  # lifecycle RC is operator checklist, not cleanroom
-    assert "Uninstall-Imperium" not in cleanroom
+    assert "setup --repair --yes" in cleanroom
+    assert "update --check" in cleanroom
+    assert 'Join-Path $Target "Rollback-Imperium.ps1"' in cleanroom
+    assert 'Join-Path $Target "Uninstall-Imperium.ps1"' in cleanroom
+    assert "-NoShortcut" in cleanroom
+    assert cleanroom.rindex("finally {") < cleanroom.rindex("setup --stop-runtime")
+    assert cleanroom.count("finally {") >= 2
+    assert "cleanroom-preserve.txt" in cleanroom
+    assert "bundle_name" in cleanroom
+    assert "runtime_transition" in cleanroom
+    assert "rollback = $RolledBack.runtime.tag" in cleanroom
+    assert "private_python = $Python" not in cleanroom
+    assert "installed = $Target" not in cleanroom
 
 
 def test_lifecycle_recovery_commands_are_documented_for_operators():
@@ -100,6 +111,43 @@ def test_application_uninstall_is_path_scoped_and_preserves_settings():
     assert 'Programs "Imperium.previous"' in uninstall
     assert 'Join-Path $Target "STOP.bat"' in uninstall
     assert "setup --stop-runtime" in uninstall
+    assert "param([switch]$NoShortcut)" in uninstall
+    assert "if (-not $NoShortcut)" in uninstall
     assert "Models and settings remain under %LOCALAPPDATA%\\Imperium." in uninstall
     assert "Uninstall-Imperium.ps1" in launcher
     assert "Uninstall-Imperium.bat" in build
+
+
+def test_windows_validation_separates_pr_nightly_and_nvidia_evidence():
+    workflow = (ROOT / ".github" / "workflows" / "windows-validation.yml").read_text(
+        encoding="utf-8"
+    )
+    release_workflow = (ROOT / ".github" / "workflows" / "windows-bundle.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "pull_request:" in workflow and "schedule:" in workflow
+    assert 'python-version: "3.12"' in workflow
+    assert "coverage report --fail-under=75" in workflow
+    assert "test_windows_cleanroom.ps1" in workflow
+    assert "-FullOfflineSetup -Backend cpu -Lifecycle" in workflow
+    assert "self-hosted, windows, x64, nvidia" in workflow
+    assert "cleanroom-result.json" in workflow and "provider-smoke.json" in workflow
+    assert "push:" not in release_workflow
+    assert "gh release create" not in release_workflow
+
+
+def test_provider_smokes_are_machine_readable_and_rc_strict():
+    powershell = (ROOT / "scripts" / "smoke_provider.ps1").read_text(encoding="utf-8")
+    shell = (ROOT / "scripts" / "smoke_provider.sh").read_text(encoding="utf-8")
+
+    for script in (powershell, shell):
+        assert "provider_smoke" in script
+        assert "health" in script and "models" in script and "fleet" in script
+        assert "route" in script and "chat" in script and "stream" in script
+        assert "tools" in script and "imperium_ping" in script
+        assert "enable_thinking" in script
+        assert "json" in script.lower()
+        assert "require" in script.lower() and "live" in script.lower()
+    assert "Body: $content" not in powershell
+    assert 'cat "$tmp"' not in shell

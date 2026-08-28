@@ -17,6 +17,7 @@ import asyncio
 import logging
 import time
 from typing import Any, Dict, Optional
+from urllib.parse import urlsplit
 
 from .base import BackendType, InferenceBackend, SlotStatus
 
@@ -45,8 +46,9 @@ class RemoteBackend(InferenceBackend):
         # Build host map from config or defaults
         self._hosts = self._build_host_map(global_config)
         logger.info(
-            f"RemoteBackend initialized with {len(self._hosts)} host(s): "
-            + ", ".join(f"{k}={v}" for k, v in self._hosts.items())
+            "RemoteBackend initialized with %d host role(s): %s",
+            len(self._hosts),
+            ", ".join(sorted(self._hosts)),
         )
 
     @property
@@ -71,19 +73,35 @@ class RemoteBackend(InferenceBackend):
             if container_host:
                 host = f"{container_host}:{port}"
             else:
+                try:
+                    safe_port = int(port)
+                except (TypeError, ValueError):
+                    safe_port = 0
                 status = SlotStatus(
                     name=name,
-                    port=int(port),
+                    port=safe_port,
                     host="",
                     model_id=config.get("model_id", ""),
-                    error=f"No remote host configured for slot role '{role}'",
+                    error="No remote host configured for slot",
                     extra={"role": role},
                 )
                 self._slots[name] = status
                 logger.warning(status.error)
                 return status
 
-        hostname, port = self._parse_host(host)
+        try:
+            hostname, port = self._parse_host(host)
+        except (TypeError, ValueError):
+            status = SlotStatus(
+                name=name,
+                host="",
+                model_id=config.get("model_id", ""),
+                error="Invalid remote host configuration",
+                extra={"role": role},
+            )
+            self._slots[name] = status
+            logger.warning("Remote slot '%s' has an invalid host configuration", name)
+            return status
 
         status = SlotStatus(
             name=name,
@@ -129,17 +147,14 @@ class RemoteBackend(InferenceBackend):
             return SlotStatus(name=name, error="Unknown slot")
 
         try:
-            healthy = await self._single_health_probe(status.host, status.port)
+            healthy, failure = await self._health_probe_result(status.host, status.port)
             status.running = healthy
             status.healthy = healthy
-            if not healthy:
-                status.error = "Health check failed"
-            else:
-                status.error = None
-        except Exception as e:
+            status.error = None if healthy else failure or "Remote health check failed"
+        except Exception:
             status.running = False
             status.healthy = False
-            status.error = str(e)
+            status.error = "Remote server unavailable"
 
         return status
 
@@ -158,25 +173,20 @@ class RemoteBackend(InferenceBackend):
         """Get the OpenAI-compatible base URL for a slot."""
         status = self._slots.get(slot_name)
         if status and status.healthy:
-            return f"http://{status.host}:{status.port}/v1"
+            return f"http://{self._url_host(status.host)}:{status.port}/v1"
         return None
 
     def get_endpoint_by_role(self, role: str) -> Optional[str]:
         """Get endpoint by role (chat, utility, embedding)."""
         for name, status in self._slots.items():
             if status.healthy and status.extra.get("role") == role:
-                return f"http://{status.host}:{status.port}/v1"
-        # Fallback: try direct host map
-        host = self._hosts.get(role)
-        if host:
-            hostname, port = self._parse_host(host)
-            return f"http://{hostname}:{port}/v1"
+                return f"http://{self._url_host(status.host)}:{status.port}/v1"
         return None
 
     def get_all_endpoints(self) -> Dict[str, str]:
         """Get all healthy endpoints as {slot_name: url}."""
         return {
-            name: f"http://{s.host}:{s.port}/v1"
+            name: f"http://{self._url_host(s.host)}:{s.port}/v1"
             for name, s in self._slots.items()
             if s.healthy
         }
@@ -202,45 +212,77 @@ class RemoteBackend(InferenceBackend):
         return result
 
     @staticmethod
-    def _parse_host(host_str: str) -> tuple:
-        """Parse 'hostname:port' string."""
-        if ":" in host_str:
-            parts = host_str.rsplit(":", 1)
-            return parts[0], int(parts[1])
-        return host_str, 8080
+    def _parse_host(host_str: str) -> tuple[str, int]:
+        """Parse a host[:port] value without accepting URLs or credentials."""
+        value = str(host_str or "").strip()
+        if (
+            not value
+            or "://" in value
+            or any(char in value for char in "/?#@")
+            or any(char.isspace() for char in value)
+        ):
+            raise ValueError("invalid remote host")
+        try:
+            parsed = urlsplit(f"//{value}")
+            hostname = parsed.hostname
+            port = parsed.port or 8080
+        except ValueError as exc:
+            raise ValueError("invalid remote host") from exc
+        if (
+            not hostname
+            or not 1 <= port <= 65535
+            or any(not (char.isalnum() or char in ".-_:") for char in hostname)
+        ):
+            raise ValueError("invalid remote host")
+        return hostname, port
+
+    @staticmethod
+    def _url_host(hostname: str) -> str:
+        """Wrap IPv6 hosts for use in URLs."""
+        return f"[{hostname}]" if ":" in hostname else hostname
 
     async def _probe_health(self, hostname: str, port: int, timeout: int) -> bool:
         """Wait up to `timeout` seconds for a healthy response."""
-        import aiohttp
+        deadline = time.monotonic() + max(0, timeout)
 
-        start = time.time()
-        url = f"http://{hostname}:{port}/health"
-
-        while time.time() - start < timeout:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            if data.get("status") == "ok":
-                                return True
-            except Exception:
-                pass
-            await asyncio.sleep(3)
+        while time.monotonic() < deadline:
+            healthy, _failure = await self._health_probe_result(hostname, port)
+            if healthy:
+                return True
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                await asyncio.sleep(min(3, remaining))
 
         return False
 
     async def _single_health_probe(self, hostname: str, port: int) -> bool:
         """Single health check (no retry loop)."""
+        healthy, _failure = await self._health_probe_result(hostname, port)
+        return healthy
+
+    async def _health_probe_result(
+        self, hostname: str, port: int
+    ) -> tuple[bool, Optional[str]]:
+        """Return a health result with a stable, sanitized failure message."""
         import aiohttp
 
-        url = f"http://{hostname}:{port}/health"
+        url = f"http://{self._url_host(hostname)}:{port}/health"
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        return data.get("status") == "ok"
+                    if resp.status != 200:
+                        return False, "Remote health check failed"
+                    data = await resp.json()
+                    if not isinstance(data, dict):
+                        return False, "Remote health response was malformed"
+                    if data.get("status") == "ok":
+                        return True, None
+                    return False, "Remote health check failed"
+        except asyncio.TimeoutError:
+            return False, "Remote health check timed out"
+        except (aiohttp.ClientError, OSError):
+            return False, "Remote server unavailable"
+        except (TypeError, ValueError):
+            return False, "Remote health response was malformed"
         except Exception:
-            return False
-        return False
+            return False, "Remote server unavailable"
