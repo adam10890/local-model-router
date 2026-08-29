@@ -420,6 +420,62 @@
         </ul>
       </div>
     </div>
+
+    <div class="phase">
+      <div class="phase-id">Post-beta · Chat V2</div>
+      <div>
+        <h3>צ'אט מקומי עשיר, בלי לשנות את Imperium ל-orchestrator</h3>
+        <p>
+          כיוון מאושר לאחר שערי הבטא. המטרה היא חוויית שיחה יומיומית טובה יותר מעל
+          <code>/v1/chat/completions</code> הקיים; לא נבנה Agent runtime, זיכרון ענני או
+          שכבת תזמור חדשה.
+        </p>
+        <ol>
+          <li>
+            <strong>חוזה אירועי צ'אט מינימלי:</strong> להרחיב את נתיב ה-SSE הקיים לאירועים
+            מתועדים של התחלה, token, tool/action, אישור משתמש, סיום ושגיאה. AG-UI הוא מקור
+            השראה לחוזה, לא תלות מוצרית בשלב זה.
+          </li>
+          <li>
+            <strong>Chat V2 ב-HTML/JS הקיים:</strong> תור הודעות בזמן generation, עצירה,
+            רינדור Markdown וקוד בטוח, export/import מקומי, וכותרת שיחה מקומית. אין React,
+            אין שירות frontend, ואין העברת היסטוריית שיחות לטלמטריה.
+          </li>
+          <li>
+            <strong>שקיפות routing בתוך הצ'אט:</strong> להציג מודל שנבחר, מקור, reason codes
+            ו-failover אם היה. להציג הסבר, לא prompt, secret או claim לא מאומת. הכיוון נשען על
+            דפוסי UX של OrcaRouter-Lite, לא על אימוץ cloud/BYOK.
+          </li>
+          <li>
+            <strong>ניסויים אופציונליים ומבודדים:</strong> רק אחרי שלושת הסעיפים הקודמים,
+            proof-of-concept ל-RAG מקומי עם ציטוטי מקור ולשיחה קולית. שניהם opt-in, מקומיים
+            כברירת מחדל, וכל אחד חייב בדיקת פרטיות, רישוי ו-live smoke משלו.
+          </li>
+        </ol>
+        <p class="note">
+          השראה מותרת אינה בהכרח קוד מותר: LobeHub הוא השראת UX בלבד; כל העתקת קוד מחייבת
+          בדיקת רישיון וייחוס לפני בחירת המימוש.
+        </p>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-id">React gate</div>
+      <div>
+        <h3>לא עוברים ל-React לפני שה-HTML/JS מפסיק להיות הנתיב הקצר והבטוח</h3>
+        <p>מעבר יאושר רק כאשר <strong>כל</strong> התנאים הבאים מתקיימים ומתועדים ב-PRD או ADR:</p>
+        <ul>
+          <li>לפחות שתי יכולות צ'אט מאושרות נחסמות בפועל בגלל שיתוף state או רכיבים, ולא רק בגלל אי-נוחות בקובץ הקיים.</li>
+          <li>יש לפחות שלושה אזורים אינטראקטיביים עצמאיים לתחזוקה — למשל transcript, composer/queue ו-tool-or-approval cards — עם state משותף ביניהם.</li>
+          <li>נבנה pipeline שחוזר באופן דטרמיניסטי מ-lockfile אל assets סטטיים שנארזים ב-Python; משתמש Windows אינו מתקין Node או npm.</li>
+          <li>יש CI ל-build, בדיקת תלות/רישוי, Browser smoke ו-Windows clean-machine check, וכן תוכנית rollback ל-assets הקודמים.</li>
+        </ul>
+        <p class="note">
+          עד שה-gate עובר, ממשיכים ב-vanilla HTML/JS ומעדיפים פיצול מודולים קטן על פני rewrite.
+          CopilotKit הוא מקור השראה ל-UX בלבד, לא עילה להכניס React או runtime נוסף.
+        </p>
+      </div>
+    </div>
   </section>
 
   <section class="grid">
