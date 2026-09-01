@@ -6,6 +6,11 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Harness compatibility evidence schema v2 separates endpoint, installed
+  version, current stable version, and real-client results. The first isolated
+  Hermes canary runs without storing prompts, responses, keys, or local paths;
+  verifies a matching router request, and fails closed when required runtime
+  evidence is missing without making official release lookup a network gate.
 - A protected `GET /diagnostics/report` support surface and dashboard export
   now collect the same capability, configuration, readiness, slot, runtime,
   and hardware checks as `imperium doctor` while emitting only allowlisted,
@@ -64,6 +69,9 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- Hermes setup manifests now use the pinned local slot's real context window
+  instead of a stale 32K default, and the committed Hermes pin matches the
+  local Qwen3.8 27B fleet model used by the live client canary.
 - `setup --repair --yes` now re-applies a saved, non-secret managed setup plan;
   cleanroom validation exercises controlled recovery, scoped rollback and
   uninstall while proving model/settings and outside sentinels are preserved.

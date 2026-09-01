@@ -54,7 +54,15 @@ stream/tool behavior, then rerun the harness tests. Repeat the check whenever
 the runtime or its setup manifest changes. A generic "OpenAI-compatible"
 claim alone is not sufficient evidence of compatibility.
 
-### Version and live-smoke matrix (2026-08-24)
+### Evidence labels
+
+- **Documented** — read from the client's official current release source.
+- **Observed** — read from the executable installed on this machine.
+- **Tested** — the endpoint or real client was executed successfully.
+- **Unverified** — evidence is missing, timed out, or could not be parsed;
+  this is reported as `Unknown`, never `Pass`.
+
+### Version and live-smoke matrix (2026-09-01)
 
 `Unknown` is intentional until the installed client and current upstream
 release are checked again. Historical checks are dated and are not promoted to
@@ -62,10 +70,10 @@ RC evidence automatically.
 
 | Harness | Official repo | Stable version last checked | Installed version | Live smoke | Router path |
 | --- | --- | --- | --- | --- | --- |
-| Agent Zero | [agent0ai/agent-zero](https://github.com/agent0ai/agent-zero) | v2.7 (`87e1e591…`), 2026-08-03; current stable **Unknown** | Unknown | Unknown | `/harnesses/agent_zero/{chat,utility}/v1` |
-| Hermes | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) | v0.20.0 (`v2026.8.3`), 2026-08-03; current stable **Unknown** | v0.20.0, observed 2026-08-15 | Needs RC rerun: historical chat/stream passed, actual tool call was not asserted | `/harnesses/hermes/v1` |
-| Pi | [earendil-works/pi](https://github.com/earendil-works/pi) (`badlogic/pi-mono`) | v0.81.1, 2026-08-03; current stable **Unknown** | Unknown | Unknown | `/harnesses/pi/v1` |
-| Claude Code (local) | Anthropic Claude Code + LiteLLM bridge | Current stable **Unknown** | Unknown | Unknown | `/harnesses/claude_code_local/v1` |
+| Agent Zero | [agent0ai/agent-zero](https://github.com/agent0ai/agent-zero) | 2.11, Documented 2026-09-01 | 2.11, Observed 2026-09-01 | Client canary **Unknown** (not implemented) | `/harnesses/agent_zero/{chat,utility}/v1` |
+| Hermes | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) | 0.21.0, Documented 2026-09-01 | 0.21.0, Observed 2026-09-01 | Tested Pass (local precursor): endpoint + real client + router counter | `/harnesses/hermes/v1` |
+| Pi | [earendil-works/pi](https://github.com/earendil-works/pi) (`badlogic/pi-mono`) | 0.84.4, Documented 2026-09-01 | 0.80.6, Observed 2026-09-01 | Client canary **Unknown**; upgrade gap | `/harnesses/pi/v1` |
+| Claude Code (local) | Anthropic Claude Code + LiteLLM bridge | 2.1.257, Documented 2026-09-01 | 2.1.220, Observed 2026-09-01 | Client canary **Unknown**; upgrade gap | `/harnesses/claude_code_local/v1` |
 
 "Checked against docs" means the Imperium setup snippet was reviewed against
 that release's OpenAI-compatible / provider settings. It is not a substitute
@@ -107,9 +115,27 @@ command checks `/models`, one short completion, and one streaming completion
 per connection. Add `--tools` to require an actual `imperium_ping` tool call;
 add `--no-stream` to skip streaming outside release validation. Use
 `--harness <id>` (repeatable) to limit the run to healthy pins (for example
-`--harness hermes`). Raise `--max-tokens` for thinking models. RC evidence
-must use `--rc`, explicit required harness IDs, and `--json-output <path>`; a
-missing required harness or tool call is a Fail.
+`--harness hermes`). Raise `--max-tokens` for thinking models.
+
+`--versions` adds the bounded installed-version probe and the official stable
+release lookup. When both are available, `stable.alignment` reports `current`,
+`behind`, or `ahead`; an offline/rate-limited stable lookup remains useful
+metadata and does not fail RC. `--client-canary hermes` additionally runs
+Hermes itself with an isolated temporary `HERMES_HOME` and workspace plus
+`--ignore-user-config`. The canary requires and rewrites at least one manifest
+`base_url` to the selected router, then verifies that the router's Hermes
+request counter increased. A correct token without routing evidence remains
+`Unknown` with `routing_unverified`. Prompt, response, API key, executable
+path, and temporary paths are not written to the artifact.
+
+The JSON schema is version 2. It preserves `connections` for existing readers
+and separates `endpoint`, `installed`, `stable`, and `client_canary` evidence.
+RC evidence must use `--rc`, explicit required harness IDs, and
+`--json-output <path>`. RC mode requires endpoint, installed-version, and
+client-canary evidence for every requested harness; the stable lookup is
+reported but deliberately not required. Hermes is the first implemented
+client canary; Agent Zero, Pi, and Claude Code therefore remain `Unknown` in
+RC mode even when their endpoint smoke succeeds.
 
 ## Agent Zero 2.7
 

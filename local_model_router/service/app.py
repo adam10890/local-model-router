@@ -208,6 +208,20 @@ def _capabilities_for_pinned_model(
     return {"tools": False, "vision": False, "json_mode": True}
 
 
+def _context_for_pinned_model(model: str, slots: list[Dict[str, Any]]) -> Optional[int]:
+    target = str(model or "").strip()
+    for slot in slots:
+        if target not in {str(slot.get("id") or ""), str(slot.get("model_id") or "")}:
+            continue
+        try:
+            value = int(slot.get("context_size") or 0)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return None
+
+
 def _pin_model_allowed(model: str, slots: list, upstream_list: list) -> bool:
     """Accept configured slot models, serving upstream targets, or live aliases."""
     target = str(model or "").strip()
@@ -1147,6 +1161,7 @@ def create_app(
         return JSONResponse({"apps": app_profiles.list_profiles()})
 
     def harness_manifest(profile: Any) -> Dict[str, Any]:
+        slots = observer.get_slots()
         activity = {
             connection_name: harness_activity[f"{profile.harness_id}/{connection_name}"]
             for connection_name in profile.connections
@@ -1154,15 +1169,21 @@ def create_app(
         }
         caps_by_connection = {
             connection.name: _capabilities_for_pinned_model(
-                connection.model, observer.get_slots(), upstreams
+                connection.model, slots, upstreams
             )
             for connection in profile.connections.values()
+        }
+        context_by_connection = {
+            connection.name: context
+            for connection in profile.connections.values()
+            if (context := _context_for_pinned_model(connection.model, slots)) is not None
         }
         return setup_manifest(
             profile,
             auth_required=bool(api_key),
             verification_by_connection=activity,
             capabilities_by_connection=caps_by_connection,
+            context_by_connection=context_by_connection,
         )
 
     def resolve_harness_request(request: Request) -> tuple[Any, Any] | JSONResponse:

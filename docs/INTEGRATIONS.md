@@ -34,9 +34,9 @@ local-first `A0_LMM_ROUTER_AUTO_UPSTREAMS=1` policy.
 
 ## Hermes
 
-Checked against Hermes Agent **v0.20.0**
-([`v2026.8.3`](https://github.com/NousResearch/hermes-agent/releases/tag/v2026.8.3),
-current latest as of 2026-08-03) and the official
+Checked against Hermes Agent **v0.21.0**
+([`v2026.8.31`](https://github.com/NousResearch/hermes-agent/releases/tag/v2026.8.31),
+current latest as of 2026-09-01) and the official
 [AI Providers](https://hermes-agent.nousresearch.com/docs/integrations/providers)
 guide. Hermes is a **client** of Imperium (same class as Agent Zero / Pi): it
 owns tools, memory, and the agent loop; Imperium only serves the pinned local
@@ -62,7 +62,7 @@ model:
   provider: custom
   base_url: http://127.0.0.1:9000/harnesses/hermes/v1
   api_key: local   # or Imperium's A0_LMM_ROUTER_API_KEY when auth is on
-  context_length: 32768   # match the llama.cpp slot context
+  context_length: 131072  # match the pinned llama.cpp slot context
   supports_vision: false
 ```
 
@@ -71,7 +71,10 @@ Notes:
 - Imperium ignores the client model label and forwards the pin from
   `conf/harnesses.yaml` (local `model_id`, not `ollama/...`).
 - Set `context_length` to the slot's context (Hermes uses it for compression /
-  request validation). Auto-detect can be wrong for custom endpoints.
+  request validation). The generated Imperium manifest now reads this value
+  from the pinned local slot. Hermes 0.21.0 refuses configurations below its
+  64K minimum, so a stale 32768 default is not a valid substitute for a larger
+  live slot.
 - Prefer `discover_models: false` on a dedicated pin; discovery noise has been
   observed against paths like `/harnesses/hermes/api/v1` (404) while
   `/harnesses/hermes/v1` succeeds.
