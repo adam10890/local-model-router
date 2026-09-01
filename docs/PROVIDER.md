@@ -144,8 +144,13 @@ python scripts/smoke_harnesses.py --api-key "change-me" --rc --harness hermes --
 ```
 
 The provider result contains statuses and HTTP codes, never response or prompt
-bodies. The harness RC smoke checks models, chat, stream, and an actual tool
-call for every explicitly required harness. Missing harnesses are failures.
+bodies. Harness schema v2 distinguishes endpoint evidence from installed and
+stable versions and a real-client canary. RC mode checks models, chat, stream,
+an actual tool call, the installed version, and the client canary for every
+explicitly required harness. The official stable lookup is compared and
+reported when available but never makes an otherwise valid RC network-bound.
+Missing harnesses and missing client evidence are failures; only Hermes has a
+client canary in this release.
 
 ## Public Bind Safety
 

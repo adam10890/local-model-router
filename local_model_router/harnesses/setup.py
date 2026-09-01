@@ -17,6 +17,7 @@ def _setup(
     connections: list[Dict[str, Any]],
     *,
     supports_vision: bool = False,
+    context_length: int = 32768,
 ) -> Dict[str, str]:
     first = connections[0]
     base_url = first["base_url"]
@@ -32,7 +33,7 @@ def _setup(
             ),
         }
     if profile.kind == "hermes":
-        # Shape aligned with Hermes Agent v0.20.0 custom / named OpenAI-compatible
+        # Shape aligned with Hermes Agent v0.21.0 custom / named OpenAI-compatible
         # providers (https://hermes-agent.nousresearch.com/docs/integrations/providers).
         return {
             "target": "Hermes model provider settings (%LOCALAPPDATA%\\hermes\\config.yaml on Windows)",
@@ -43,7 +44,7 @@ def _setup(
                 "  provider: custom\n"
                 f"  base_url: {base_url}\n"
                 "  api_key: ${ROUTER_API_KEY:-local}\n"
-                "  context_length: 32768\n"
+                f"  context_length: {context_length}\n"
                 f"  supports_vision: {vision_flag}\n"
                 "# Optional named entry (same endpoint). Prefer provider: custom above.\n"
                 "providers:\n"
@@ -132,9 +133,11 @@ def setup_manifest(
     auth_required: bool,
     verification_by_connection: Optional[Dict[str, Dict[str, Any]]] = None,
     capabilities_by_connection: Optional[Dict[str, Dict[str, bool]]] = None,
+    context_by_connection: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
     activity = verification_by_connection or {}
     caps_map = capabilities_by_connection or {}
+    context_map = context_by_connection or {}
     connections = []
     for connection in profile.connections.values():
         caps = caps_map.get(
@@ -162,6 +165,8 @@ def setup_manifest(
     smoke_url = connections[0]["base_url"] + "/models"
     default_caps = connections[0].get("capabilities") or {}
     supports_vision = bool(default_caps.get("vision"))
+    first_connection = next(iter(profile.connections.values()))
+    context_length = int(context_map.get(first_connection.name) or 32768)
     return {
         "harness_id": profile.harness_id,
         "display_name": profile.display_name,
@@ -170,7 +175,12 @@ def setup_manifest(
         "location": profile.location,
         "connections": connections,
         "authentication_required": auth_required,
-        "setup": _setup(profile, connections, supports_vision=supports_vision),
+        "setup": _setup(
+            profile,
+            connections,
+            supports_vision=supports_vision,
+            context_length=context_length,
+        ),
         "smoke": f"curl {smoke_url}",
         "verification": state,
         "readiness": connections[0]["readiness"],

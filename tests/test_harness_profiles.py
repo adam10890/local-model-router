@@ -198,7 +198,9 @@ def test_committed_profiles_cover_current_harnesses_and_claude_adapter():
         profiles.get("hermes"),
         auth_required=False,
         capabilities_by_connection={"default": {"tools": True, "vision": True, "json_mode": True}},
+        context_by_connection={"default": 131072},
     )
     assert "supports_vision: true" in hermes["setup"]["content"]
+    assert "context_length: 131072" in hermes["setup"]["content"]
     hermes_off = setup_manifest(profiles.get("hermes"), auth_required=False)
     assert "supports_vision: false" in hermes_off["setup"]["content"]

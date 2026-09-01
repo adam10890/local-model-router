@@ -25,6 +25,29 @@ should own terminal processes and presentation.
 The replacement must not make a platform-specific terminal application a
 Windows runtime dependency.
 
+## HIVE durable-task contract (post-gates)
+
+Spynel's task/goal and recovery patterns are useful design evidence, not a
+runtime dependency. The current adoption sequence is recorded in the
+[Spynel adoption plan](spynel-adoption-plan.md). HIVE should adopt the
+smallest durable contract after the re-entry gates pass:
+
+- One Markdown task record with `objective`, `constraints`, `evidence`,
+  `status`, and append-only progress.
+- A first lifecycle of `todo → working → review → done/failed/waiting`.
+- A minimal lease containing `owner`, `phase`, `heartbeat`, and `attempt`, but
+  never a prompt body.
+- A claim journal written before state mutation so restart recovery can
+  distinguish an owned claim from work that was never dispatched.
+- Executors call Imperium through its API or MCP boundary, never a model slot
+  directly. ACP may be evaluated later as an optional executor adapter.
+
+The central acceptance test is crash recovery: terminate HIVE after claim and
+before completion, restart it, and prove that no task is dispatched twice and
+every worker remains visible and stoppable. Do not copy Spynel implementation
+code into Imperium. Any later material code reuse requires a fresh license
+review and preservation of its MIT notice.
+
 ## Re-entry gates
 
 - Windows first-run and full offline clean-room tests are green.

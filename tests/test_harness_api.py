@@ -55,6 +55,7 @@ active_slots:
     role: chat
     enabled: true
     model_id: ornith
+    context_size: 131072
     mmproj_path: ornith-mmproj.gguf
     supports_vision: true
     supports_tools: true
@@ -176,6 +177,7 @@ def test_single_connection_models_endpoint_lists_only_stable_client_model(tmp_pa
     detail = client.get("/harnesses/hermes").json()
     assert detail["connections"][0]["verification"]["state"] == "connected"
     assert "supports_vision: true" in detail["setup"]["content"]
+    assert "context_length: 131072" in detail["setup"]["content"]
     assert detail["readiness"]["vision_ready"] is True
     assert detail["readiness"]["lifecycle_managed"] is True
 

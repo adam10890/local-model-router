@@ -13,7 +13,7 @@ harnesses:
     connections:
       default:
         # Local llama.cpp slot model_id (see conf/llama_cpp_servers.yaml).
-        model: carnice
+        model: qwen38_27b
 
   agent_zero:
     display_name: Agent Zero

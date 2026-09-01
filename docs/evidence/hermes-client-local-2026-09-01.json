@@ -1,0 +1,51 @@
+{
+  "connections": [
+    {
+      "checks": {
+        "chat": "pass",
+        "models": "pass",
+        "stream": "pass",
+        "tools": "pass"
+      },
+      "connection": "default",
+      "harness": "hermes"
+    }
+  ],
+  "endpoint_ok": true,
+  "evidence": {
+    "hermes": {
+      "client_canary": {
+        "evidence": "tested",
+        "routing": "verified",
+        "status": "pass"
+      },
+      "endpoint": {
+        "connections": [
+          "default"
+        ],
+        "evidence": "tested",
+        "status": "pass"
+      },
+      "installed": {
+        "evidence": "observed",
+        "status": "pass",
+        "version": "0.21.0"
+      },
+      "overall": "pass",
+      "stable": {
+        "alignment": "current",
+        "evidence": "documented",
+        "installed_version": "0.21.0",
+        "source_url": "https://github.com/NousResearch/hermes-agent/releases/latest",
+        "status": "pass",
+        "version": "0.21.0"
+      }
+    }
+  },
+  "kind": "harness_smoke",
+  "ok": true,
+  "required_harnesses": [
+    "hermes"
+  ],
+  "schema_version": 2
+}
