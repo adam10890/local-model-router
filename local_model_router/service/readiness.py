@@ -1,7 +1,13 @@
 """Stable, translated readiness data for the Simple dashboard."""
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
+from typing import Any, Iterable
+
+from local_model_router.routing.aliases import ALIAS_TO_ROLE, AUTO
+
+_GENERIC_MODEL_IDS = frozenset({"", "local", AUTO, "default"}) | frozenset(ALIAS_TO_ROLE)
+_HEALTHY_VALUES = {"healthy", "ok", "ready", "running"}
 
 
 def _text(en: str, he: str) -> dict[str, str]:
@@ -32,12 +38,129 @@ def _issue(
     }
 
 
+def display_model_stem(value: str) -> str:
+    """Filename stem for a GGUF path or model id; never a directory path."""
+    text = str(value or "").strip().strip('"')
+    if not text:
+        return ""
+    name = Path(text.replace("\\", "/")).name
+    if name.lower().endswith(".gguf"):
+        return name[:-5]
+    return name
+
+
+def is_generic_model_id(value: str) -> bool:
+    """Hermes/router aliases such as ``local`` are not a running GGUF identity."""
+    raw = str(value or "").strip().strip('"')
+    if not raw:
+        return True
+    normalized = raw.replace("\\", "/")
+    if "/" in normalized or raw.lower().endswith(".gguf"):
+        return False
+    return raw.lower() in _GENERIC_MODEL_IDS
+
+
+def model_from_llama_cmdline(argv: Iterable[str] | None) -> tuple[int | None, str]:
+    """Read ``--port`` and ``-m`` / ``--model`` from a llama-server command line."""
+    args = [str(part) for part in (argv or [])]
+    port: int | None = None
+    model = ""
+    index = 0
+    while index < len(args):
+        key = args[index]
+        nxt = args[index + 1] if index + 1 < len(args) else ""
+        if key in {"-m", "--model"} and nxt and not nxt.startswith("-"):
+            model = nxt
+            index += 2
+            continue
+        if key.startswith("--model="):
+            model = key.split("=", 1)[1]
+            index += 1
+            continue
+        if key == "--port" and nxt.isdigit():
+            port = int(nxt)
+            index += 2
+            continue
+        if key.startswith("--port=") and key.split("=", 1)[1].isdigit():
+            port = int(key.split("=", 1)[1])
+            index += 1
+            continue
+        index += 1
+    return port, display_model_stem(model)
+
+
+def inspect_running_llama_models(iter_processes: Iterable[Any] | None = None) -> dict[int, str]:
+    """Map llama-server listen ports to the GGUF stem from the live process argv."""
+    found: dict[int, str] = {}
+    iterator = iter_processes
+    if iterator is None:
+        try:
+            import psutil
+        except ImportError:
+            return {}
+        try:
+            iterator = psutil.process_iter(["name", "cmdline"])
+        except (psutil.Error, OSError):
+            return {}
+    for proc in iterator:
+        try:
+            info = proc if isinstance(proc, dict) else getattr(proc, "info", None)
+            if not isinstance(info, dict):
+                continue
+            name = str(info.get("name") or "").lower()
+            cmdline = info.get("cmdline") or []
+            if not isinstance(cmdline, (list, tuple)):
+                continue
+            joined = " ".join(str(part) for part in cmdline).lower()
+            if "llama-server" not in name and "llama-server" not in joined:
+                continue
+            port, model = model_from_llama_cmdline(cmdline)
+            if port and model and not is_generic_model_id(model):
+                found[port] = model
+        except (TypeError, ValueError, OSError):
+            continue
+    return found
+
+
+def active_slot_from_health(slots_health: list[dict[str, Any]]) -> dict[str, Any]:
+    healthy_slots = [
+        slot for slot in slots_health if str(slot.get("health") or "").lower() in _HEALTHY_VALUES
+    ]
+    return healthy_slots[0] if healthy_slots else next(
+        (slot for slot in slots_health if slot.get("enabled")),
+        {},
+    )
+
+
+def choose_running_model(
+    slot: dict[str, Any],
+    *,
+    process_model: str = "",
+    live_ids: list[str] | None = None,
+) -> tuple[str, str]:
+    """Prefer the live process file, then slot ``/v1/models``, never ``local``."""
+    for candidate, source in (
+        (process_model, "process"),
+        *((item, "live_slot") for item in live_ids or []),
+        (slot.get("router_default_model"), "slot"),
+        (slot.get("model_id"), "slot"),
+    ):
+        if is_generic_model_id(str(candidate or "")):
+            continue
+        name = display_model_stem(str(candidate))
+        if name:
+            return name, source
+    return "", ""
+
+
 def build_ui_status(
     *,
     setup_state: dict[str, Any],
     slots_health: list[dict[str, Any]],
     compute: dict[str, Any],
     base_url: str,
+    process_models: dict[int, str] | None = None,
+    live_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     discovery = setup_state.get("discovery") or {}
     hardware = setup_state.get("hardware") or {}
@@ -49,9 +172,8 @@ def build_ui_status(
         discovery.get("servers") and discovery.get("enabled_slots")
     )
     config_ready = bool(discovery.get("config_exists") and discovery.get("enabled_slots"))
-    healthy_values = {"healthy", "ok", "ready", "running"}
     healthy_slots = [
-        slot for slot in slots_health if str(slot.get("health") or "").lower() in healthy_values
+        slot for slot in slots_health if str(slot.get("health") or "").lower() in _HEALTHY_VALUES
     ]
     server_ready = bool(healthy_slots)
     fleet_backend = next(
@@ -201,9 +323,15 @@ def build_ui_status(
             "פתיחת הנחיות השרת" if externally_managed else "פתיחת בקרות הצי",
         )
 
-    active_slot = healthy_slots[0] if healthy_slots else next(
-        (slot for slot in slots_health if slot.get("enabled")),
-        {},
+    active_slot = active_slot_from_health(slots_health)
+    try:
+        active_port = int(active_slot.get("port") or 0)
+    except (TypeError, ValueError):
+        active_port = 0
+    running_name, running_source = choose_running_model(
+        active_slot,
+        process_model=(process_models or {}).get(active_port, ""),
+        live_ids=live_ids,
     )
     gpus = hardware.get("gpus") or compute.get("gpus") or []
     gpu = gpus[0] if gpus else {}
@@ -219,7 +347,8 @@ def build_ui_status(
         "schema_version": 1,
         "overall": overall,
         "active": {
-            "model": active_slot.get("model_id"),
+            "model": running_name or None,
+            "source": running_source or None,
             "backend": active_slot.get("backend_type") or hardware_summary["backend"],
             "slot_id": active_slot.get("id"),
         },

@@ -41,6 +41,16 @@ def test_dashboard_ships_en_he_and_light_dark_theme_hooks(tmp_path, monkeypatch)
     assert 'light:"בהיר"' in html and 'dark:"כהה"' in html
     assert "readyTitle:" in html and "attentionTitle:" in html
     assert "noInstalled:" in html
+    assert 'runningNow:"Currently running"' in html
+    assert 'runningNow:"מודל שרץ עכשיו"' in html
+    assert "function runningModelDetails()" in html
+    assert "isGenericModel(id)" in html
+    assert "state.setup?.recommendation || state.setup?.models?.[0]" not in html
+    assert "function hermesGpuPanel()" in html
+    assert "function gpuChatBlocked()" in html
+    assert 'hermesSelection:"Hermes selection"' in html
+    assert 'hermesSelection:"בחירה ב־Hermes"' in html
+    assert "x-a0-router-output-truncated" not in html  # UI reads finish_reason directly.
     assert "statusUnavailable:" in html or "statusUnavailable" in html
     assert 'if(route){closeDrawer();routeTo(route);return;}' in html
     assert "drawerReturnFocus" in html

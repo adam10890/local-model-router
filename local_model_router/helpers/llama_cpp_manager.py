@@ -6,6 +6,9 @@ import asyncio
 import configparser
 import logging
 import os
+import socket
+import threading
+import time
 from typing import Any, Dict, List, Optional
 
 import aiohttp
@@ -16,6 +19,21 @@ from local_model_router.helpers.conf_resolver import resolve_conf_path
 
 def _default_config_path() -> str:
     return str(resolve_conf_path())
+
+
+# A single forwarded request is already capped by the router's forward timeout,
+# so a drain longer than this means a lease was miscounted, not that a model is
+# slow. ponytail: one global ceiling; per-slot ceilings only if a slot needs one.
+DRAIN_TIMEOUT_SECONDS = 900.0
+
+
+def _tcp_port_open(host: str, port: Any) -> bool:
+    try:
+        target = "127.0.0.1" if host in {"", "localhost", "0.0.0.0", "::"} else host
+        with socket.create_connection((target, int(port)), timeout=0.2):
+            return True
+    except (OSError, TypeError, ValueError):
+        return False
 
 
 def resolve_preset_alias(preset_path: str, alias: str, models_dir: str) -> str:
@@ -43,7 +61,7 @@ class BackendManager:
     _instance: Optional['BackendManager'] = None
     
     def __init__(self, config_path: Optional[str] = None):
-        self.config_path = config_path or _default_config_path()
+        self.config_path = os.path.normcase(os.path.realpath(config_path or _default_config_path()))
         self._backend = None
         self._slot_configs: Dict[str, Dict[str, Any]] = {}
         self.global_config: Dict[str, Any] = {}
@@ -53,9 +71,171 @@ class BackendManager:
     
     @classmethod
     def get_instance(cls, config_path: Optional[str] = None) -> 'BackendManager':
+        requested = os.path.normcase(
+            os.path.realpath(config_path or _default_config_path())
+        )
         if cls._instance is None:
-            cls._instance = cls(config_path)
+            cls._instance = cls(requested)
+        else:
+            current = os.path.normcase(os.path.realpath(cls._instance.config_path))
+            if requested != current:
+                raise ValueError(
+                    f"BackendManager already uses a different config path: {current}"
+                )
         return cls._instance
+
+    def _ensure_coordination_state(self) -> None:
+        """Create process-local slot coordination lazily for legacy test doubles."""
+        if not hasattr(self, "_coordination_lock"):
+            self._coordination_lock = threading.RLock()
+            self._slot_coordination: Dict[str, Dict[str, Any]] = {}
+
+    def _coordination(self, name: str) -> Dict[str, Any]:
+        self._ensure_coordination_state()
+        with self._coordination_lock:
+            return self._slot_coordination.setdefault(name, {
+                "phase": "idle",
+                "started_at": None,
+                "active_requests": 0,
+                "epoch": 0,
+                "manual_stop": False,
+                "restart_suppressed": False,
+            })
+
+    def slot_operation_snapshot(self, name: str) -> Dict[str, Any]:
+        state = self._coordination(name)
+        with self._coordination_lock:
+            started = state.get("started_at")
+            return {
+                **state,
+                "duration_ms": int((time.monotonic() - started) * 1000) if started else 0,
+            }
+
+    def begin_slot_operation(self, name: str, phase: str) -> bool:
+        state = self._coordination(name)
+        with self._coordination_lock:
+            if state["phase"] != "idle":
+                return False
+            state.update(phase=phase, started_at=time.monotonic())
+            return True
+
+    def set_slot_phase(self, name: str, phase: str) -> None:
+        state = self._coordination(name)
+        with self._coordination_lock:
+            if state["phase"] != "idle":
+                state["phase"] = phase
+
+    def finish_slot_operation(self, name: str, *, bump_epoch: bool = True) -> None:
+        state = self._coordination(name)
+        with self._coordination_lock:
+            if bump_epoch:
+                state["epoch"] += 1
+            state.update(phase="idle", started_at=None)
+
+    def slot_epoch(self, name: str) -> int:
+        state = self._coordination(name)
+        with self._coordination_lock:
+            return int(state["epoch"])
+
+    def slot_accepting_requests(self, name: str) -> bool:
+        state = self._coordination(name)
+        with self._coordination_lock:
+            return state["phase"] == "idle"
+
+    def try_begin_slot_request(self, name: str, *, expected_epoch: Optional[int] = None) -> str:
+        """Reserve a slot for one forwarded request; return ok or a retry code."""
+        state = self._coordination(name)
+        with self._coordination_lock:
+            if state["phase"] != "idle":
+                return "gpu_swap_in_progress"
+            if expected_epoch is not None and state["epoch"] != expected_epoch:
+                return "gpu_model_changed"
+            state["active_requests"] += 1
+            return "ok"
+
+    def finish_slot_request(self, name: str) -> None:
+        state = self._coordination(name)
+        with self._coordination_lock:
+            state["active_requests"] = max(0, int(state["active_requests"]) - 1)
+
+    def _drain_timeout(self) -> float:
+        # getattr: slot coordination is also driven by lightweight test doubles
+        # built with object.__new__, same as _ensure_coordination_state.
+        config = getattr(self, "global_config", None) or {}
+        try:
+            return max(1.0, float(config.get("drain_timeout", DRAIN_TIMEOUT_SECONDS)))
+        except (TypeError, ValueError):
+            return DRAIN_TIMEOUT_SECONDS
+
+    async def wait_for_slot_idle(
+        self,
+        name: str,
+        *,
+        notice_seconds: float = 60.0,
+        max_seconds: Optional[float] = None,
+        on_wait: Optional[Any] = None,
+    ) -> bool:
+        """Wait until every accepted request finishes, without cancelling it.
+
+        Returns True once the slot is idle, False when the ceiling expires. The
+        ceiling never cancels a response; it exists so one miscounted lease
+        cannot wedge swap, Stop and shutdown at once with no way back.
+        """
+        warned = False
+        ceiling = self._drain_timeout() if max_seconds is None else max_seconds
+        started = time.monotonic()
+        while self.slot_operation_snapshot(name)["active_requests"]:
+            elapsed = time.monotonic() - started
+            if elapsed >= ceiling:
+                getattr(self, "logger", logging.getLogger(__name__)).error(
+                    "Slot '%s' still reports %d active request(s) after %.0fs; "
+                    "abandoning the drain without cancelling anything",
+                    name,
+                    self.slot_operation_snapshot(name)["active_requests"],
+                    elapsed,
+                )
+                return False
+            if not warned and elapsed >= notice_seconds:
+                warned = True
+                self.set_slot_phase(name, "waiting_for_requests")
+                if on_wait is not None:
+                    on_wait()
+            await asyncio.sleep(0.05)
+        return True
+
+    def set_slot_config(self, name: str, config: Dict[str, Any]) -> None:
+        if name not in self._slot_configs:
+            raise KeyError(name)
+        self._ensure_coordination_state()
+        with self._coordination_lock:
+            self._slot_configs[name] = dict(config)
+
+    def configure_process_ownership(self, path: str | os.PathLike[str]) -> None:
+        if self._backend and hasattr(self._backend, "configure_process_state"):
+            self._backend.configure_process_state(path)
+
+    def adopt_slot(self, name: str) -> bool:
+        if not self._backend or not hasattr(self._backend, "adopt_slot"):
+            return False
+        config = self._slot_configs.get(name)
+        return bool(config and self._backend.adopt_slot(name, config))
+
+    def owns_slot_process(self, name: str) -> bool:
+        return bool(
+            self._backend
+            and hasattr(self._backend, "owns_slot")
+            and self._backend.owns_slot(name)
+        )
+
+    def set_manual_stop(self, name: str, stopped: bool) -> None:
+        state = self._coordination(name)
+        with self._coordination_lock:
+            state["manual_stop"] = bool(stopped)
+
+    def set_auto_restart_suppressed(self, name: str, suppressed: bool) -> None:
+        state = self._coordination(name)
+        with self._coordination_lock:
+            state["restart_suppressed"] = bool(suppressed)
     
     def _load(self) -> None:
         """Load config and create backend."""
@@ -168,7 +348,7 @@ class BackendManager:
     def backend_type(self) -> str:
         return self._backend.backend_type.value if self._backend else "none"
     
-    async def start_slot(self, name: str) -> Dict[str, Any]:
+    async def _start_slot_unlocked(self, name: str) -> Dict[str, Any]:
         """Start a single slot."""
         if not self._backend:
             return {"error": "No backend initialized"}
@@ -194,6 +374,22 @@ class BackendManager:
             "failure_code": status.extra.get("failure_code"),
             "exit_code": status.extra.get("exit_code"),
         }
+
+    async def start_slot(self, name: str) -> Dict[str, Any]:
+        if not self.begin_slot_operation(name, "starting"):
+            return {
+                "name": name,
+                "running": False,
+                "healthy": False,
+                "error": "Another slot operation is already in progress",
+                "failure_code": "slot_operation_in_progress",
+            }
+        try:
+            self.set_manual_stop(name, False)
+            self.set_auto_restart_suppressed(name, False)
+            return await self._start_slot_unlocked(name)
+        finally:
+            self.finish_slot_operation(name)
     
     async def start_all(self) -> Dict[str, Dict[str, Any]]:
         """Start all configured slots in parallel."""
@@ -208,7 +404,7 @@ class BackendManager:
         names = []
         for name, config in self._slot_configs.items():
             if config.get('auto_load', True):
-                tasks.append(self._backend.start_slot(name, config))
+                tasks.append(self.start_slot(name))
                 names.append(name)
         
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -218,28 +414,80 @@ class BackendManager:
             if isinstance(result, Exception):
                 output[name] = {"error": str(result)}
             else:
-                output[name] = {
-                    "running": result.running,
-                    "healthy": result.healthy,
-                    "port": result.port,
-                    "error": result.error,
-                    "uptime_s": result.uptime_s,
-                    "restart_count": result.restart_count,
-                    "failure_code": result.extra.get("failure_code"),
-                    "exit_code": result.extra.get("exit_code"),
-                }
+                output[name] = result
         self._start_restart_monitor()
         return output
     
-    async def stop_slot(self, name: str) -> bool:
+    async def _stop_slot_unlocked(self, name: str) -> bool:
         if not self._backend:
             return False
-        return await self._backend.stop_slot(name)
+        stopped = await self._backend.stop_slot(name)
+        self._record_slot_failure(name, "")
+        if stopped:
+            return True
+        code = "slot_stop_failed"
+        try:
+            status = (await self._backend.list_slots()).get(name)
+            candidate = str(getattr(status, "extra", {}).get("failure_code") or "")
+            if candidate:
+                code = candidate
+        except Exception:
+            pass
+        self._record_slot_failure(name, code)
+        return False
+
+    def _record_slot_failure(self, name: str, code: str) -> None:
+        if not hasattr(self, "_slot_operation_failures"):
+            self._slot_operation_failures: Dict[str, str] = {}
+        if code:
+            self._slot_operation_failures[name] = code
+        else:
+            self._slot_operation_failures.pop(name, None)
+
+    def last_slot_failure_code(self, name: str) -> str:
+        return str(getattr(self, "_slot_operation_failures", {}).get(name) or "")
+
+    async def stop_slot(self, name: str) -> bool:
+        if not self.begin_slot_operation(name, "draining"):
+            return False
+        try:
+            if not await self.wait_for_slot_idle(name):
+                # Requests are still in flight. Stopping here would cut them
+                # off, which ADR 0015 forbids, so report instead of forcing.
+                self._record_slot_failure(name, "drain_timeout")
+                return False
+            self.set_slot_phase(name, "stopping")
+            stopped = await self._stop_slot_unlocked(name)
+            self.set_manual_stop(name, True)
+            return stopped
+        finally:
+            self.finish_slot_operation(name)
     
-    async def stop_all(self) -> None:
-        self._stop_restart_monitor()
-        if self._backend:
-            await self._backend.cleanup()
+    async def stop_all(self) -> Dict[str, bool]:
+        restart_task = self._stop_restart_monitor()
+        if restart_task is not None:
+            await asyncio.gather(restart_task, return_exceptions=True)
+        results: Dict[str, bool] = {}
+        if not self._backend:
+            return results
+        for name in self._slot_configs:
+            was_owned = self.owns_slot_process(name)
+            stopped = await self.stop_slot(name)
+            # An untracked, non-running slot is already stopped. A busy slot or
+            # a tracked process that refused shutdown remains a real failure.
+            busy = self.slot_operation_snapshot(name)["phase"] != "idle"
+            config = self._slot_configs.get(name) or {}
+            port_busy = bool(
+                not stopped
+                and config.get("port")
+                and _tcp_port_open(str(config.get("host") or "127.0.0.1"), config["port"])
+            )
+            results[name] = bool(
+                stopped or (not was_owned and not busy and not port_busy)
+            )
+            if not stopped and not busy:
+                self.set_manual_stop(name, True)
+        return results
     
     async def status(self) -> Dict[str, Dict[str, Any]]:
         """Get status of all slots."""
@@ -345,10 +593,13 @@ class BackendManager:
         except RuntimeError:
             self.logger.debug("Restart monitor deferred (no event loop)")
 
-    def _stop_restart_monitor(self) -> None:
-        if self._restart_task and not self._restart_task.done():
-            self._restart_task.cancel()
+    def _stop_restart_monitor(self) -> Optional[asyncio.Task]:
+        task = getattr(self, "_restart_task", None)
+        if task and not task.done():
+            task.cancel()
             self.logger.info("Subprocess restart monitor stopped")
+            return task
+        return None
 
     async def _restart_unhealthy_slots(self) -> None:
         max_attempts = max(0, int(self.global_config.get("max_restart_attempts", 3)))
@@ -358,17 +609,35 @@ class BackendManager:
                 continue
             if current["running"] or name not in self._slot_configs:
                 continue
+            coordination = self.slot_operation_snapshot(name)
+            if (
+                coordination["phase"] != "idle"
+                or coordination["manual_stop"]
+                or coordination.get("restart_suppressed", False)
+            ):
+                continue
             attempts = self._restart_attempts.get(name, 0)
             if attempts >= max_attempts:
                 continue
-            self._restart_attempts[name] = attempts + 1
-            self.logger.warning(
-                "Restarting crashed slot '%s' (%d/%d)",
-                name,
-                attempts + 1,
-                max_attempts,
-            )
-            await self._backend.start_slot(name, self._slot_configs[name])
+            if not self.begin_slot_operation(name, "auto_restarting"):
+                continue
+            try:
+                if not await self.wait_for_slot_idle(name):
+                    self.logger.warning(
+                        "Auto-restart skipped for '%s'; the drain did not finish",
+                        name,
+                    )
+                    continue
+                self._restart_attempts[name] = attempts + 1
+                self.logger.warning(
+                    "Restarting crashed slot '%s' (%d/%d)",
+                    name,
+                    attempts + 1,
+                    max_attempts,
+                )
+                await self._backend.start_slot(name, self._slot_configs[name])
+            finally:
+                self.finish_slot_operation(name)
 
     async def _restart_loop(self) -> None:
         interval = max(1.0, float(self.global_config.get("health_check_interval", 30)))

@@ -33,6 +33,224 @@ def test_probe_maps_http_status_and_network_failure(monkeypatch):
     assert cli._probe("http://router.test/health") is False
 
 
+def test_shutdown_drains_before_terminating_verified_router(tmp_path, monkeypatch, capsys):
+    import local_model_router.service.__main__ as service_main
+
+    state_path = tmp_path / "router-process.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "pid": 4321,
+                "process_executable": "python.exe",
+                "process_created_at": 12.5,
+                "port": 9012,
+            }
+        ),
+        encoding="utf-8",
+    )
+    events: list[str] = []
+
+    class Process:
+        pid = 4321
+
+        def terminate(self):
+            events.append("terminate")
+
+        def wait(self, timeout):
+            events.append(f"wait:{timeout}")
+
+    class Response:
+        status = 200
+
+        def read(self):
+            events.append("drain")
+            return b'{"ok": true}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    monkeypatch.setattr(service_main, "router_process_state_path", lambda: state_path)
+    monkeypatch.setattr(cli, "_verified_router_process", lambda _state: Process())
+    timeouts = []
+
+    def urlopen(request, *, timeout):
+        timeouts.append(timeout)
+        return Response()
+
+    monkeypatch.setattr(cli.urllib.request, "urlopen", urlopen)
+
+    assert cli.cmd_shutdown(SimpleNamespace()) == 0
+    assert events == ["drain", "terminate", "wait:10"]
+    assert timeouts == [cli._SHUTDOWN_DRAIN_TIMEOUT_SECONDS]
+    assert not state_path.exists()
+    assert json.loads(capsys.readouterr().out)["stopped"] is True
+
+
+def test_shutdown_refuses_live_router_without_ownership_state(tmp_path, monkeypatch, capsys):
+    import local_model_router.service.__main__ as service_main
+
+    monkeypatch.setattr(
+        service_main, "router_process_state_path", lambda: tmp_path / "missing.json"
+    )
+    monkeypatch.setattr(cli, "_probe", lambda _url: True)
+
+    assert cli.cmd_shutdown(SimpleNamespace()) == 1
+    assert json.loads(capsys.readouterr().out)["error"] == "router_ownership_unverified"
+
+
+def test_verified_router_process_checks_pid_creation_executable_and_command(
+    tmp_path, monkeypatch
+):
+    executable = tmp_path / "python.exe"
+    executable.touch()
+    other_executable = tmp_path / "other-python.exe"
+    other_executable.touch()
+    actual = {
+        "created": 12.5,
+        "executable": str(executable),
+        "cmdline": [str(executable), "-m", "local_model_router", "serve"],
+    }
+
+    class Process:
+        pid = 4321
+
+        def __init__(self, pid):
+            assert pid == 4321
+
+        def exe(self):
+            return actual["executable"]
+
+        def create_time(self):
+            return actual["created"]
+
+        def cmdline(self):
+            return actual["cmdline"]
+
+    monkeypatch.setattr("psutil.Process", Process)
+    state = {
+        "pid": 4321,
+        "process_executable": str(executable),
+        "process_created_at": 12.5,
+    }
+
+    verified = cli._verified_router_process(state)
+    assert verified.pid == 4321
+
+    for accepted in (
+        [str(executable), "-m", "local_model_router"],
+        [str(executable), "-m", "local_model_router.service"],
+        [str(executable), "-m", "local_model_router.service.__main__"],
+    ):
+        actual["cmdline"] = accepted
+        assert cli._verified_router_process(state).pid == 4321
+
+    with pytest.raises(RuntimeError, match="router_ownership_unverified"):
+        cli._verified_router_process({**state, "pid": 0})
+
+    actual["created"] = 13.0
+    with pytest.raises(RuntimeError, match="router_ownership_unverified"):
+        cli._verified_router_process(state)
+
+    actual.update(created=12.5, executable=str(other_executable))
+    with pytest.raises(RuntimeError, match="router_ownership_unverified"):
+        cli._verified_router_process(state)
+
+    actual.update(
+        executable=str(executable),
+        cmdline=[str(executable), "-m", "local_model_router", "status"],
+    )
+    with pytest.raises(RuntimeError, match="router_ownership_unverified"):
+        cli._verified_router_process(state)
+
+
+def test_shutdown_timeout_keeps_verified_router_and_state(tmp_path, monkeypatch, capsys):
+    import local_model_router.service.__main__ as service_main
+
+    state_path = tmp_path / "router-process.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "pid": 4321,
+                "process_executable": "python.exe",
+                "process_created_at": 12.5,
+                "port": 9012,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class Process:
+        pid = 4321
+
+        def terminate(self):
+            raise AssertionError("router must remain running after drain timeout")
+
+    def timeout(_request, *, timeout):
+        assert timeout == cli._SHUTDOWN_DRAIN_TIMEOUT_SECONDS
+        raise TimeoutError
+
+    monkeypatch.setattr(service_main, "router_process_state_path", lambda: state_path)
+    monkeypatch.setattr(cli, "_verified_router_process", lambda _state: Process())
+    monkeypatch.setattr(cli.urllib.request, "urlopen", timeout)
+
+    assert cli.cmd_shutdown(SimpleNamespace()) == 1
+    assert json.loads(capsys.readouterr().out)["error"] == "router_drain_timeout"
+    assert state_path.exists()
+
+
+def test_shutdown_accepts_router_exit_during_successful_drain(
+    tmp_path, monkeypatch, capsys
+):
+    import psutil
+    import local_model_router.service.__main__ as service_main
+
+    state_path = tmp_path / "router-process.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "pid": 4321,
+                "process_executable": "python.exe",
+                "process_created_at": 12.5,
+                "port": 9012,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class Process:
+        pid = 4321
+
+        def terminate(self):
+            raise psutil.NoSuchProcess(self.pid)
+
+    class Response:
+        status = 200
+
+        def read(self):
+            return b'{"ok": true}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    monkeypatch.setattr(service_main, "router_process_state_path", lambda: state_path)
+    monkeypatch.setattr(cli, "_verified_router_process", lambda _state: Process())
+    monkeypatch.setattr(
+        cli.urllib.request,
+        "urlopen",
+        lambda _request, *, timeout: Response(),
+    )
+
+    assert cli.cmd_shutdown(SimpleNamespace()) == 0
+    assert json.loads(capsys.readouterr().out)["stopped"] is True
+    assert not state_path.exists()
+
+
 def test_serve_and_mcp_commands_delegate_or_explain_missing_extra(monkeypatch, capsys):
     import local_model_router.mcp.server as mcp_server
     import local_model_router.service.__main__ as service_main

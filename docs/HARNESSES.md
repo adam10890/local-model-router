@@ -7,8 +7,10 @@ internal roles.
 
 ## Contract
 
-`conf/harnesses.yaml` is the source of truth. A normal harness has one
-`default` connection pinned to one concrete model:
+`conf/harnesses.yaml` is the source of truth for connection topology and each
+connection's initial pin. A normal harness has one `default` connection. The
+managed Hermes GPU watcher may replace that pin in process memory only after a
+different profile has loaded and passed process, health, and identity checks:
 
 ```yaml
 harnesses:
@@ -18,19 +20,17 @@ harnesses:
     protocol: openai
     location: host
     connections:
-      chat:
-        # Pin the local llama.cpp slot model_id (or slot id), not ollama/<id>.
-        model: chat_primary
-        role: chat
-      utility:
-        model: chat_primary
-        role: utility
+      default:
+        # Initial local profile/model id, not ollama/<id>.
+        model: ornith
 ```
 
 Prefer a **local** llama.cpp `model_id` / slot id for text. Local Ollama is not
 the primary GGUF path — see `PROVIDER.md` (Local llama.cpp vs upstreams).
 For Vision, pin a local slot that has `mmproj_path` once that slot is healthy.
-DMR may serve optional text/tools but Imperium does not load mmproj into DMR.
+The current Hermes profiles contain no mmproj and explicitly expose
+`supports_vision: false`. DMR may serve optional text/tools but Imperium does
+not load mmproj into DMR.
 LiteLLM is only for the optional Claude Code Anthropic bridge, not a
 substitute for the local fleet.
 
@@ -62,7 +62,7 @@ claim alone is not sufficient evidence of compatibility.
 - **Unverified** — evidence is missing, timed out, or could not be parsed;
   this is reported as `Unknown`, never `Pass`.
 
-### Version and live-smoke matrix (2026-09-01)
+### Version and live-smoke matrix (updated 2026-09-13)
 
 `Unknown` is intentional until the installed client and current upstream
 release are checked again. Historical checks are dated and are not promoted to
@@ -71,13 +71,19 @@ RC evidence automatically.
 | Harness | Official repo | Stable version last checked | Installed version | Live smoke | Router path |
 | --- | --- | --- | --- | --- | --- |
 | Agent Zero | [agent0ai/agent-zero](https://github.com/agent0ai/agent-zero) | 2.11, Documented 2026-09-01 | 2.11, Observed 2026-09-01 | Client canary **Unknown** (not implemented) | `/harnesses/agent_zero/{chat,utility}/v1` |
-| Hermes | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) | 0.21.0, Documented 2026-09-01 | 0.21.0, Observed 2026-09-01 | Tested Pass (local precursor): endpoint + real client + router counter | `/harnesses/hermes/v1` |
+| Hermes | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) | 0.21.0, Documented 2026-09-01 | 0.21.1, Observed 2026-09-13 | Basic client canary Pass; unattended cold-swap wait Partial because the client exhausts three retries before readiness | `/harnesses/hermes/v1` |
 | Pi | [earendil-works/pi](https://github.com/earendil-works/pi) (`badlogic/pi-mono`) | 0.84.4, Documented 2026-09-01 | 0.80.6, Observed 2026-09-01 | Client canary **Unknown**; upgrade gap | `/harnesses/pi/v1` |
 | Claude Code (local) | Anthropic Claude Code + LiteLLM bridge | 2.1.257, Documented 2026-09-01 | 2.1.220, Observed 2026-09-01 | Client canary **Unknown**; upgrade gap | `/harnesses/claude_code_local/v1` |
 
 "Checked against docs" means the Imperium setup snippet was reviewed against
 that release's OpenAI-compatible / provider settings. It is not a substitute
 for recording the operator's installed version and a live smoke Pass.
+
+The controlled 2026-09-13 single-GPU run verified both model directions,
+completion, stream, tools, and the retryable 503 envelope. Hermes 0.21.1
+displayed the five-second retry and made three attempts, but the cold load took
+longer; a manual resend after readiness passed. See the sanitized
+[`hermes-gpu-swap-local-2026-09-13.json`](evidence/hermes-gpu-swap-local-2026-09-13.json).
 
 ## URLs
 
@@ -89,20 +95,36 @@ http://127.0.0.1:9000/harnesses/pi/v1
 ```
 
 Each base URL provides `GET /models` and `POST /chat/completions`. Clients may
-send any compatibility model name; the path's pinned model is authoritative.
+send any compatibility model name; the path's connection pin is authoritative.
 Hermes should use the bare `/harnesses/hermes/v1` form with a single `default`
 connection (see [INTEGRATIONS.md](INTEGRATIONS.md#hermes)). Named connections
 (`chat` / `utility`) require `/harnesses/{id}/{connection}/v1` and are for
 clients like Agent Zero that need separate pins.
-An unavailable pinned target (no connection, timeout, or unloaded slot)
-returns `503 harness_model_unavailable` and does not fail over. Capability
+An unavailable static pinned target (no connection, timeout, or unloaded slot)
+returns `503 harness_model_unavailable` and does not fail over. During a
+managed Hermes GPU operation, new requests instead receive the OpenAI error
+code `gpu_swap_in_progress`, HTTP 503, and `Retry-After` (five seconds outside
+backoff, or the remaining backoff). Capability
 mismatches such as missing mmproj / unsupported image input return
 `upstream_capability_missing` instead of a generic unavailable error.
+An intentional manual stop returns HTTP 503 with `gpu_slot_stopped` and no
+retry delay until the operator starts the slot explicitly.
 Generic `/v1` routing is unchanged.
 Pinned requests use the target's admission lane: `local` for a local model or
 `upstream:<name>` for a capacity-managed upstream. The response includes
 `X-A0-Request-ID` and `X-A0-Admission-Lane`; a full lane returns HTTP 429
 without changing the pinned model.
+
+For Hermes, keep three values separate in status and operator language:
+
+- `desired` is the profile selected by the newest recognized Hermes session.
+- The connection pin is the model id requests on the Hermes URL resolve to;
+  the watcher changes it in memory only after a verified load.
+- `loaded` is the GGUF identity proven by the current healthy process.
+
+The small GPU state file records a last working profile for recovery. It is
+not evidence that the profile is loaded now, and a failed requested target is
+never answered silently by a restored profile.
 
 Verify every configured connection from the router host with:
 
@@ -178,8 +200,10 @@ A0_LMM_ROUTER_API_KEY=<your local secret>
 A0_LMM_ROUTER_ENABLE_CONFIG_WRITES=1
 ```
 
-Writes are atomic and retain a timestamped `harnesses.yaml.*.bak` copy. With
-writes disabled the form only generates a YAML preview.
+Manual dashboard writes are atomic and retain a timestamped
+`harnesses.yaml.*.bak` copy. With writes disabled the form only generates a
+YAML preview. Automatic Hermes swaps do not write this YAML or create a backup
+on each swap; their verified pin update is process-local.
 
 ## Compatibility
 

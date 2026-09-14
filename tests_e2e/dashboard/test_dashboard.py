@@ -15,6 +15,15 @@ def test_ready_navigation_uses_real_dashboard_without_browser_errors(dashboard):
     page = dashboard.page
 
     assert "Your local AI is ready" in page.locator("#main h1").inner_text()
+    home = page.locator("#main").inner_text()
+    assert "Currently running" in home
+    assert "Hermes selection" in home
+    assert "Connection pin" in home
+    assert "Loaded GGUF" in home
+    assert "65,536 tokens" in home
+    assert "qwen-chat" in page.locator(".model-name").inner_text()
+    assert "Recommended for your system" not in home
+    assert "Merged" not in home
     for route, heading in (
         ("chat", "Chat"),
         ("models", "Models"),
@@ -46,6 +55,7 @@ def test_english_hebrew_and_theme_persist_after_reload(dashboard):
     assert html.get_attribute("lang") == "he"
     assert html.get_attribute("dir") == "rtl"
     assert "ה־AI המקומי מוכן" in page.locator("#main h1").inner_text()
+    assert "מודל שרץ עכשיו" in page.locator("#main").inner_text()
 
     page.locator("#theme-control").click()
     selected_theme = html.get_attribute("data-theme")
@@ -70,6 +80,7 @@ def test_empty_degraded_and_error_states_are_actionable(dashboard, state):
 
     if state == "empty":
         assert "Let’s finish setup" in page.locator("#main h1").inner_text()
+        assert "No model is running" in page.locator("#main").inner_text()
         assert page.locator("#alerts-count").is_hidden()
         assert page.locator('[data-route="setup"]').first.is_visible()
     elif state == "degraded":
@@ -103,7 +114,7 @@ def test_model_selection_and_hermes_pin_patch_success_and_failure(dashboard):
     pin.wait_for(state="visible")
     pin.select_option("model-coder")
     page.locator('[data-action="pin-hermes"]').click()
-    page.locator(".toast", has_text="Hermes pin updated").wait_for(state="visible")
+    page.locator(".toast", has_text="Hermes connection pin saved").wait_for(state="visible")
     patch_calls = [call for call in dashboard.calls if call["method"] == "PATCH"]
     assert patch_calls[-1] == {
         "method": "PATCH",
@@ -120,6 +131,98 @@ def test_model_selection_and_hermes_pin_patch_success_and_failure(dashboard):
     assert [call for call in dashboard.calls if call["method"] == "PATCH"][-1]["body"] == {
         "model": "model-chat"
     }
+    dashboard.assert_guards_clean()
+
+
+def test_gpu_swap_status_is_bilingual_and_blocks_relevant_chat(dashboard):
+    dashboard.set_ready()
+    gpu = dashboard.responses["/ui/status"].body["hermes_gpu"]
+    gpu.update(
+        {
+            "desired": "qwen38_27b",
+            "loaded": "ornith",
+            "swapping": True,
+            "phase": "loading",
+            "duration_ms": 12000,
+            "attempt": 2,
+            "retry_after_seconds": 5,
+        }
+    )
+    dashboard.goto("#/chat")
+    page = dashboard.page
+
+    text = page.locator("#main").inner_text()
+    assert "Model change in progress" in text
+    assert "Hermes selection: uncensored" in text
+    assert "Connection pin: model-chat" in text
+    assert "Loaded GGUF: qwen-chat" in text
+    assert "Measured context: 65,536" in text
+    assert "Load attempt 2/3" in text
+    assert page.locator("#chat-input").is_disabled()
+    assert page.locator("#chat-send").is_disabled()
+
+    page.locator("#language-control").click()
+    text = page.locator("#main").inner_text()
+    assert "החלפת מודל בתהליך" in text
+    assert "בחירה ב־Hermes: uncensored" in text
+    assert page.locator("html").get_attribute("dir") == "rtl"
+    dashboard.assert_guards_clean()
+
+
+def test_gpu_swap_panel_covers_every_operator_phase(dashboard):
+    dashboard.set_ready()
+    dashboard.goto("#/chat")
+    page = dashboard.page
+    page.evaluate("localStorage.setItem('imperium.chatModel', 'uncensored')")
+    gpu = dashboard.responses["/ui/status"].body["hermes_gpu"]
+    cases = {
+        "draining": "Draining active requests",
+        "waiting_for_requests": "Waiting for an active response",
+        "stopping": "Stopping server",
+        "loading": "Loading model",
+        "restoring": "Restoring previous model",
+        "backoff": "Waiting before retry",
+        "busy": "Another operation is running",
+        "failed": "Failed",
+        "stopped": "Stopped",
+    }
+
+    for phase, label in cases.items():
+        gpu.update(
+            {
+                "desired": "qwen38_27b",
+                "loaded": None if phase == "stopped" else "ornith",
+                "swapping": phase not in {"failed", "stopped"},
+                "phase": phase,
+                "failure_code": "process_exited" if phase == "failed" else None,
+                "retry_after_seconds": 42 if phase == "backoff" else None,
+            }
+        )
+        dashboard.goto("#/chat")
+        page.locator("#chat-model").select_option("uncensored")
+        banner = page.locator('[data-hermes-gpu-phase="%s"]' % phase)
+        assert label in banner.inner_text()
+        assert page.locator("#chat-input").is_disabled(), phase
+        assert page.locator("#chat-send").is_disabled(), phase
+
+    dashboard.assert_guards_clean()
+
+
+def test_chat_displays_output_limit_warning(dashboard):
+    dashboard.set_ready()
+    dashboard.responses["/v1/chat/completions"].body = {
+        "model": "ornith",
+        "choices": [
+            {"message": {"content": "Partial answer"}, "finish_reason": "length"}
+        ],
+    }
+    dashboard.goto("#/chat")
+    page = dashboard.page
+    page.locator("#chat-input").fill("Hello")
+    page.locator("#chat-send").click()
+
+    page.locator("#chat-messages", has_text="Partial answer").wait_for(state="visible")
+    assert "answer may be incomplete" in page.locator("#chat-messages").inner_text()
     dashboard.assert_guards_clean()
 
 

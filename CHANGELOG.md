@@ -9,6 +9,13 @@ All notable changes to this project are documented here.
 - Opt-in swarm terminal heartbeat, plus a dry-run `POST /v1/execution/plan`
   that filters lanes and picks a route with a local heuristic. The planner
   does not call Jev and does not spawn a terminal.
+- Safe single-GPU Hermes profile switching for `slot_chat`, including recent
+  session selection, shared request draining, bounded retries, MTP fallback,
+  verified recovery, measured context metadata, detailed `hermes_gpu` state in
+  `/ui/status`, and measured model metadata in `/v1/models`.
+- A verified `imperium shutdown` path and `POST /fleet/prepare-shutdown` hook
+  for Windows launchers to stop the watcher, drain managed requests, and stop
+  only processes whose PID, creation time, and executable still match.
 - Harness compatibility evidence schema v2 separates endpoint, installed
   version, current stable version, and real-client results. The first isolated
   Hermes canary runs without storing prompts, responses, keys, or local paths;
@@ -70,11 +77,60 @@ All notable changes to this project are documented here.
 - The protected Work Pages pilot now supports atomic ticket leases, owned
   progress/completion, a Hermes planning skill, and a Pi worker extension.
 
+### Changed
+
+- Managed Hermes model paths, templates, load flags, capabilities, and output
+  defaults now live in `conf/hermes_gpu_profiles.yaml`; `slot_chat` keeps only
+  infrastructure settings and a default-profile reference. Automatic swaps
+  update the connection pin in memory and persist only the last working
+  profile generation in a separate atomic state file.
+- Ornith uses a 16,384-token completion default only when the client omits both
+  OpenAI output-limit fields. Explicit limits remain unchanged, and length
+  truncation is preserved and surfaced to clients and the dashboard.
+
 ### Fixed
 
+- Requests targeting a slot during drain, load, backoff, or recovery now get
+  an OpenAI-compatible `503 gpu_swap_in_progress` response with `Retry-After`.
+  Existing normal and streaming requests keep their slot lease until they
+  finish or disconnect, while auto-restart and fleet actions share the same
+  per-slot operation lock. Hermes selection is checked again after queue
+  admission, while unrelated explicit upstream requests remain available.
+- Slot draining closes ingress and waits until every accepted normal or
+  streaming request finishes or disconnects, and never cancels one. After the
+  notice threshold the operation reports `waiting_for_requests` and keeps
+  waiting, bounded by `global.drain_timeout` (15 minutes by default) so a
+  miscounted request lease cannot wedge model swap, manual Stop and shutdown
+  simultaneously. Reaching that ceiling reports `drain_timeout` and cancels
+  nothing: the model keeps serving, the slot is not stopped, and the
+  auto-restart budget is untouched. The Windows shutdown CLI retains its
+  separate 180-second client timeout and leaves the router running if that
+  request has not completed.
+- Request preparation, admission telemetry failures, and client cancellation
+  while queued now release their admission lane and close telemetry exactly
+  once. Hermes session timestamps accept numeric epochs or ISO-8601 text;
+  transient operation races, sticky warnings, and runtime model/context
+  overlays settle to verified state instead of remaining stale.
+- Failed model starts no longer loop every poll or silently answer with a
+  restored model. Imperium tries at most three starts with 15/60-second
+  backoff, removes speculative flags after the first failure, restores the
+  exact last working in-process configuration once, then requires operator
+  action for the failed target.
+- A Hermes profile that references a missing or disabled managed slot no
+  longer prevents the router from starting; the watcher stays off and emits a
+  sanitized configuration warning.
+- A valid runtime profile-file change now resets an exhausted target budget,
+  and swap state logs include elapsed time and a sanitized result code.
+- `imperium shutdown` now recognizes every documented router entry point and
+  bounds the CLI's wait for the drain request while leaving a still-draining
+  router running; a router that exits during successful drain is treated as
+  already stopped.
+  Bulk fleet actions retain per-slot results when one slot fails, and an
+  intentional manual stop reports `gpu_slot_stopped`.
 - Hermes setup manifests now use the pinned local slot's real context window
-  instead of a stale 32K default, and the committed Hermes pin matches the
-  local Qwen3.8 27B fleet model used by the live client canary.
+  instead of a stale 32K default. The committed Hermes selection pin now names
+  Ornith; selection, connection pin, and the verified loaded GGUF remain
+  separate runtime fields.
 - `setup --repair --yes` now re-applies a saved, non-secret managed setup plan;
   cleanroom validation exercises controlled recovery, scoped rollback and
   uninstall while proving model/settings and outside sentinels are preserved.

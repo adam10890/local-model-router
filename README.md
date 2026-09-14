@@ -57,16 +57,16 @@ What works today:
 | Legacy orchestration | protected `/orchestrator/*` | deprecated compatibility API; hidden from the dashboard, with no removal date assigned |
 | Agent library | `GET /agents`, `POST /agents/{id}/runs` | four built-in prompt-backed agents through router-selected models; runner included in Windows bundles |
 | OpenAI-compatible | `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/embeddings` | aliases + live/upstream models; chat streaming and local embedding forwarding |
-| Harnesses | `GET /harnesses`, `GET /harnesses/{id}`, dedicated `.../v1/models` + `.../v1/chat/completions` | one authoritative model per connection; Agent Zero has chat + utility |
+| Harnesses | `GET /harnesses`, `GET /harnesses/{id}`, dedicated `.../v1/models` + `.../v1/chat/completions` | one connection pin per path; Hermes may update its in-memory pin after a verified GPU profile load |
 | Fleet Manager | `GET /fleet/status`, `GET /fleet/agents`, `POST /fleet/agents/register` | agent identity, per-target bounded queueing, SQLite + cached GPU/CPU/RAM telemetry |
-| Fleet control (opt-in) | `POST /fleet/start`, `POST /fleet/stop`, `POST /fleet/slots/{id}/start` + `/stop` | start/stop slots; off unless `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1` |
+| Fleet control (opt-in) | `POST /fleet/start`, `POST /fleet/stop`, `POST /fleet/slots/{id}/start` + `/stop` | coordinated start/stop; enabled explicitly or by `START.bat` when the local Hermes GPU profile file exists |
 | Backends | `GET /backends` | local fleet + configured upstreams with capabilities and capacity mode |
 | Compute budget | `GET /compute/budget` | local hardware headroom + per-provider usage vs declared/live limits |
 | App profiles | `GET /apps` | per-client routing policy |
 | Config preview | `GET /config/preview` | secrets redacted |
 | Simple dashboard | `GET /ui` | Home, Chat, Models, Connections, and a global configuration/system alert center; light/dark, English/Hebrew, LTR/RTL |
 | Advanced dashboard | `GET /ui#/advanced/fleet` | Fleet, Routing, Configuration, and Diagnostics |
-| Readiness | `GET /ui/status` | categorized configuration/system issues, stable severity/action codes, and one recommended next action |
+| Readiness | `GET /ui/status` | categorized issues plus Hermes desired/loaded GPU state, swap phase, retry timing, and measured context |
 | Sanitized diagnostics | `GET /diagnostics/report` | authenticated, read-only support report with doctor checks, readiness, slots/runtime failure codes, and CPU/RAM/GPU data; no paths, credentials, prompts, responses, headers, environment values, logs, or raw exceptions |
 | First-run setup | loopback-only `/setup/*` | hardware discovery, reviewed plan, managed downloads, progress, cancellation, and smoke test |
 | Cookbook | `GET /cookbook` | scans your GGUF folder, VRAM fit math, per-role model recommendations with confidence grades |
@@ -159,7 +159,7 @@ declared upstream only after local routing is exhausted; local-only agents
 never leave the fleet. Input is limited to 64 KiB and a run times out after
 120 seconds. Prompts are not exposed by the catalog or stored in telemetry.
 
-**CLI:** `imperium [serve|setup|doctor|list-models|test-route|evaluate-models|config-check|update|rollback]`
+**CLI:** `imperium [serve|shutdown|setup|doctor|list-models|test-route|evaluate-models|config-check|update|rollback]`
 
 Evaluate each reachable local model with deterministic instruction, JSON,
 tool, coding, scribe, or embedding checks:
@@ -257,8 +257,12 @@ print(resp.choices[0].message.content)
 ## Fleet control (optional)
 
 By default the router only **routes** — your llama.cpp fleet is started by
-you (compose files, scripts). Set this in `.env` to let the router also
-start and stop slots, from the API or the dashboard buttons:
+you (compose files, scripts). Set this in `.env` to let the router also start
+and stop slots from the API or dashboard. On Windows, a local
+`conf/hermes_gpu_profiles.yaml` is also an explicit opt-in: `START.bat`
+enables fleet control unless the variable was already set. Set
+`A0_LMM_ROUTER_HERMES_WATCHER=0` to keep fleet control on while disabling the
+Hermes watcher.
 
 ```text
 A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1
@@ -277,6 +281,41 @@ What "start" does follows `global.backend` in `conf/llama_cpp_servers.yaml`:
 
 The endpoints honor the API key like everything else, and the dashboard
 shows start/stop buttons per slot only when the flag is on.
+
+For a single-GPU Hermes setup, copy
+`conf/hermes_gpu_profiles.example.yaml` to the ignored local file
+`conf/hermes_gpu_profiles.yaml`. The fleet slot `slot_chat` then owns only
+infrastructure such as host, port, and role. The profile file owns each
+model's GGUF path, chat template, load flags, capabilities, context request,
+and default output budget. No current profile loads an mmproj, so the
+configuration reports `supports_vision: false`.
+
+The watcher follows the newest open, non-archived Hermes session active in the
+last 15 minutes. With no recent session it keeps a healthy loaded model; on a
+cold start it uses the configured default profile. A swap closes the slot to
+new work, returns OpenAI-compatible `503 gpu_swap_in_progress` responses with
+`Retry-After`, and lets existing non-streaming or streaming responses finish.
+After 60 seconds the status changes to waiting, but Imperium still does not
+cut the active response. Loading is limited to three attempts with 15- and
+60-second backoff; a failed MTP attempt retries the same GGUF without
+speculative flags. If the target still fails, Imperium attempts one reload of
+the previous working profile and reports the requested target as failed.
+
+The dashboard combines `/ui/status`, `/harnesses`, and `/v1/models` to keep
+three identities separate: the Hermes selection (`desired`), the connection
+pin, and the GGUF proven healthy by the live process (`loaded`). The status and
+model metadata also expose `configured_n_ctx`,
+`effective_n_ctx`, and the measurement source. An unmeasured effective context
+is `Unknown`; the configured 128K value is not presented as measured. Ornith's
+16,384-token output default applies only when a client omitted both completion
+limit fields, and an explicit client limit is preserved.
+
+`STOP.bat` asks the router to stop the watcher, drain requests, and stop only
+managed processes whose PID, creation time, and executable still match their
+ownership records. It then stops the verified router process. It never kills
+an arbitrary listener merely because it owns a configured port. If the drain
+request does not finish within three minutes, the command reports
+`router_drain_timeout` and leaves the verified router running.
 
 ## Compute Budget
 
@@ -310,7 +349,7 @@ Hermes and Pi each receive one host URL. Agent Zero is the only current
 exception and receives separate Docker-reachable chat and utility URLs:
 
 ```text
-Hermes:             http://127.0.0.1:9000/harnesses/hermes/chat/v1
+Hermes:             http://127.0.0.1:9000/harnesses/hermes/v1
 Pi:                 http://127.0.0.1:9000/harnesses/pi/v1
 Agent Zero chat:    http://host.docker.internal:9000/harnesses/agent_zero/chat/v1
 Agent Zero utility: http://host.docker.internal:9000/harnesses/agent_zero/utility/v1
@@ -318,8 +357,10 @@ Claude Code local:  http://127.0.0.1:9000/harnesses/claude_code_local/v1 (throug
 ```
 
 Use model ID `local` in the consumers. The router ignores that compatibility
-label and forwards the model pinned in `conf/harnesses.yaml` (prefer a local
-llama.cpp `model_id`, not `ollama/<id>`). For Agent Zero
+label. `conf/harnesses.yaml` provides the connection's initial pin; after a
+verified Hermes GPU swap the process-local pin follows the loaded profile
+without rewriting YAML. The dashboard labels the Hermes selection, connection
+pin, and loaded GGUF separately. For Agent Zero
 2.7, select provider `other` (`Other OpenAI compatible`) for both Main and
 Utility Model Preset slots and use the two URLs above. See
 `docs/HARNESSES.md` for the versioned setup and runtime compatibility policy.

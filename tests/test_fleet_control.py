@@ -192,6 +192,78 @@ def test_stop_slot_delegates_and_reports(tmp_path, monkeypatch):
     manager_cls._instance = None
 
 
+def test_auto_backend_uses_one_resolved_manager_for_routing_and_control(
+    tmp_path, monkeypatch
+):
+    client, manager_cls = _make_app(
+        tmp_path, monkeypatch, control=True, backend="auto"
+    )
+
+    status = client.get("/fleet/status").json()["fleet_control"]
+
+    assert client.app.state.backend_manager is manager_cls._instance
+    assert client.app.state.backend_manager.backend_type == "subprocess"
+    assert status == {
+        "enabled": True,
+        "backend": "subprocess",
+        "supports_start_stop": True,
+    }
+    manager_cls._instance = None
+
+
+def test_start_slot_failure_returns_backend_code(tmp_path, monkeypatch):
+    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True, backend="subprocess")
+
+    async def fake_start(self, name):
+        return {
+            "name": name,
+            "running": False,
+            "healthy": False,
+            "error": "occupied",
+            "failure_code": "port_in_use",
+        }
+
+    monkeypatch.setattr(manager_cls, "start_slot", fake_start)
+
+    resp = client.post("/fleet/slots/chat/start")
+
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "port_in_use"
+    manager_cls._instance = None
+
+
+def test_stop_slot_failure_returns_stable_error(tmp_path, monkeypatch):
+    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True, backend="subprocess")
+
+    async def fake_stop(self, name):
+        return False
+
+    monkeypatch.setattr(manager_cls, "stop_slot", fake_stop)
+
+    resp = client.post("/fleet/slots/utility/stop")
+
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "slot_stop_failed"
+    manager_cls._instance = None
+
+
+def test_stop_slot_surfaces_drain_timeout_as_its_own_code(tmp_path, monkeypatch):
+    """P1-2: an abandoned drain must be distinguishable from a refused stop."""
+    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True, backend="subprocess")
+
+    async def fake_stop(self, name):
+        self._record_slot_failure(name, "drain_timeout")
+        return False
+
+    monkeypatch.setattr(manager_cls, "stop_slot", fake_stop)
+
+    resp = client.post("/fleet/slots/utility/stop")
+
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "drain_timeout"
+    manager_cls._instance = None
+
+
 def test_start_all_delegates_to_backend_manager(tmp_path, monkeypatch):
     client, manager_cls = _make_app(tmp_path, monkeypatch, control=True, backend="subprocess")
 
@@ -210,6 +282,58 @@ def test_start_all_delegates_to_backend_manager(tmp_path, monkeypatch):
     assert body["ok"] is True
     assert body["action"] == "start_all"
     assert set(body["results"]) == {"chat", "utility"}
+    assert body["failures"] == {}
+    manager_cls._instance = None
+
+
+def test_start_all_preserves_per_slot_results_when_one_slot_fails(tmp_path, monkeypatch):
+    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True, backend="subprocess")
+
+    async def fake_start_all(self):
+        return {
+            "chat": {"running": True, "healthy": True, "error": None},
+            "utility": {
+                "running": False,
+                "healthy": False,
+                "error": "busy",
+                "failure_code": "slot_operation_in_progress",
+            },
+        }
+
+    monkeypatch.setattr(manager_cls, "start_all", fake_start_all)
+
+    response = client.post("/fleet/start")
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is False
+    assert set(response.json()["results"]) == {"chat", "utility"}
+    assert response.json()["failures"] == {
+        "utility": "slot_operation_in_progress"
+    }
+    manager_cls._instance = None
+
+
+def test_stop_all_preserves_per_slot_results_when_one_slot_is_busy(tmp_path, monkeypatch):
+    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True, backend="subprocess")
+
+    async def fake_stop_all(self):
+        return {"chat": True, "utility": False}
+
+    monkeypatch.setattr(manager_cls, "stop_all", fake_stop_all)
+    monkeypatch.setattr(
+        manager_cls,
+        "slot_operation_snapshot",
+        lambda _self, name: {"phase": "loading" if name == "utility" else "idle"},
+    )
+
+    response = client.post("/fleet/stop")
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is False
+    assert response.json()["results"] == {"chat": True, "utility": False}
+    assert response.json()["failures"] == {
+        "utility": "slot_operation_in_progress"
+    }
     manager_cls._instance = None
 
 

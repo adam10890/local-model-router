@@ -585,26 +585,41 @@ class FleetQueue:
             self._waiters.append((rank, self._sequence, future, started))
             self._waiters.sort(key=lambda item: (-item[0], item[1]))
 
-        await future
-        queued_ms = int((_now() - started) * 1000)
-        async with self._lock:
-            return Admission(
-                queued_ms=queued_ms,
-                queue_depth_at_admit=len(self._waiters),
-                active_at_admit=self._active,
-            )
+        try:
+            await future
+            queued_ms = int((_now() - started) * 1000)
+            async with self._lock:
+                return Admission(
+                    queued_ms=queued_ms,
+                    queue_depth_at_admit=len(self._waiters),
+                    active_at_admit=self._active,
+                )
+        except asyncio.CancelledError:
+            async with self._lock:
+                for index, waiter in enumerate(self._waiters):
+                    if waiter[2] is future:
+                        self._waiters.pop(index)
+                        break
+                else:
+                    # release() already granted this waiter before cancellation.
+                    if not future.cancelled():
+                        self._release_locked()
+            raise
 
     async def release(self) -> None:
         async with self._lock:
-            if self._active > 0:
-                self._active -= 1
-            while self._waiters:
-                _rank, _seq, future, _started = self._waiters.pop(0)
-                if future.cancelled():
-                    continue
-                self._active += 1
-                future.set_result(None)
-                break
+            self._release_locked()
+
+    def _release_locked(self) -> None:
+        if self._active > 0:
+            self._active -= 1
+        while self._waiters:
+            _rank, _seq, future, _started = self._waiters.pop(0)
+            if future.cancelled():
+                continue
+            self._active += 1
+            future.set_result(None)
+            break
 
 
 def fleet_config_from_env() -> Dict[str, Any]:

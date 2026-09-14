@@ -2,12 +2,13 @@
 
 **Status:** Accepted direction (not shipped behavior yet)  
 **Owner:** Product / fleet routing  
-**Decisions:** ADR 0002, 0004, 0006, 0009, 0010, 0011  
+**Decisions:** ADR 0002, 0004, 0006, 0009, 0010, 0011, 0015
 **Next doc:** predefined agentic-loop catalog (after this policy stabilizes)
 
 This document is the operator design for Imperium’s warm-weak / promote-strong
-behavior. It is **not** a claim that the router already does this. Today Hermes
-is usually pinned to one local model (ADR 0010).
+behavior. It is **not** a claim that the router already does this. ADR 0015
+ships a separate, explicit Hermes session choice between large GPU profiles;
+that one-card cold swap is not automatic weak-vs-strong routing.
 
 ## Goal
 
@@ -69,15 +70,16 @@ doc. Configure them in the local fleet / decision policy, not in git.
 
 ## Relation to Hermes pins
 
-Hermes harness pins stay **authoritative** until the decision system can vary
-models without silent pin breaks (ADR 0010).
+The Hermes connection pin stays **authoritative** for serving requests. ADR
+0015 may update it in process memory only after a session-selected profile is
+loaded and verified; desired, pin, and loaded GGUF remain separate status.
 
 Until then:
 
-1. Operator may still run a strong model as the Hermes pin (current practice).
-2. Hot/cold automation must not pretend per-turn choice already exists.
-3. Dual-slot experiments (weak + strong) are allowed behind fleet control;
-   Hermes keeps one pin unless the founder approves a new pin contract.
+1. An operator may explicitly select one of the approved Hermes profiles.
+2. Hot/cold automation must not pretend automatic per-turn choice exists.
+3. Dual-slot experiments (weak + strong) remain separate from the serialized
+   one-card session swap.
 
 ## Failure preference
 
@@ -117,7 +119,8 @@ Orchestration of many terminals stays under
 - Idle: weak warm, strong not holding full VRAM (or documented exception).
 - Quality request: strong serves with promote ≤ ~5s on the reference NVIDIA
   box, or status shows budget miss.
-- Hermes pin: no silent model change without decision-system + pin contract.
+- Hermes pin: no silent model change; ADR 0015 changes it only after a verified
+  explicit profile load.
 - Reason codes present on promote/demote paths.
 - Wrong-answer risk: weak must not answer quality Hermes chat unless
   explicitly allowed by policy.

@@ -39,12 +39,15 @@ Checked against Hermes Agent **v0.21.0**
 current latest as of 2026-09-01) and the official
 [AI Providers](https://hermes-agent.nousresearch.com/docs/integrations/providers)
 guide. Hermes is a **client** of Imperium (same class as Agent Zero / Pi): it
-owns tools, memory, and the agent loop; Imperium only serves the pinned local
-llama.cpp model over OpenAI-compatible `/v1`.
+owns tools, memory, the agent loop, and the user's `/model` selection; Imperium
+loads and serves the corresponding local llama.cpp profile over
+OpenAI-compatible `/v1`.
 
 Official Hermes rule: any server with `/v1/chat/completions` works via
-`provider: custom` (or a named entry under `providers:`). `config.yaml` is the
-source of truth; legacy `LLM_MODEL` in `.env` is removed upstream.
+`provider: custom` (or a named entry under `providers:`). `config.yaml` owns
+the provider default; legacy `LLM_MODEL` in `.env` is removed upstream. For a
+running Hermes session, Imperium reads the session selection from `state.db`
+and uses the config default only when no model is loaded on a cold start.
 
 On Windows the install lives under `%LOCALAPPDATA%\hermes` (config:
 `%LOCALAPPDATA%\hermes\config.yaml`). Pin Imperium with a single harness
@@ -62,24 +65,47 @@ model:
   provider: custom
   base_url: http://127.0.0.1:9000/harnesses/hermes/v1
   api_key: local   # or Imperium's A0_LMM_ROUTER_API_KEY when auth is on
-  context_length: 131072  # match the pinned llama.cpp slot context
+  context_length: 65536  # replace with effective_n_ctx observed after load
   supports_vision: false
 ```
 
 Notes:
 
-- Imperium ignores the client model label and forwards the pin from
-  `conf/harnesses.yaml` (local `model_id`, not `ollama/...`).
-- Set `context_length` to the slot's context (Hermes uses it for compression /
-  request validation). The generated Imperium manifest now reads this value
-  from the pinned local slot. Hermes 0.21.0 refuses configurations below its
-  64K minimum, so a stale 32768 default is not a valid substitute for a larger
-  live slot.
+- Imperium ignores the compatibility label in the request. The Hermes session
+  selection (`desired`), the connection pin, and the GGUF proven healthy by
+  the live process (`loaded`) are separate status fields. The connection pin
+  changes in memory only after the selected profile has loaded successfully;
+  normal swaps do not rewrite `conf/harnesses.yaml`.
+- The newest recognized open, non-archived session active in the last 15
+  minutes determines `desired`. With no recent session, Imperium keeps a
+  healthy loaded model; on a cold start it uses the profile default.
+- Set `context_length` to `effective_n_ctx` observed in `/ui/status` or the
+  Hermes connection's `/v1/models` metadata. Imperium first attempts a
+  `/props` probe and then positive live `/v1/models` metadata; `/props` is a
+  probe used by Imperium, not a guaranteed llama.cpp schema. When no effective
+  value is measured it is `Unknown`, and the configured 128K request must not
+  be treated as measured. Hermes 0.21.0 refuses configurations below its 64K
+  minimum, so a stale 32768 default is not a valid substitute.
 - Prefer `discover_models: false` on a dedicated pin; discovery noise has been
   observed against paths like `/harnesses/hermes/api/v1` (404) while
   `/harnesses/hermes/v1` succeeds.
-- Thinking models need enough completion budget (`max_tokens` / server floor)
-  so reasoning does not truncate before the final answer.
+- During drain, stop, load, restore, or retry backoff, new Hermes requests
+  receive HTTP 503 with OpenAI error code `gpu_swap_in_progress` and a
+  `Retry-After` header. Imperium refreshes session choice when a Hermes request
+  arrives and again after local queue admission, but adds no webhook or
+  Hermes-specific API. In the 2026-09-13 controlled run, Hermes 0.21.1 showed
+  the retry delay and retried three times, then stopped before the cold load
+  completed; a manual resend after readiness passed. The integration is
+  therefore `Partial` for unattended `/model` waiting.
+- An explicit `max_tokens` or `max_completion_tokens` is preserved. If neither
+  is sent, the Ornith profile defaults to 16,384 output tokens. A
+  `finish_reason=length` remains visible and the dashboard warns that the
+  answer may be incomplete. The OBLITERATED profile keeps reasoning disabled.
+- The current profiles are text/tools only: `supports_vision: false` because no
+  mmproj is loaded. Vision requires a separate VRAM test and profile change.
+- WhatsApp model changes go through Hermes `/model`; there is no separate
+  WhatsApp-to-Imperium API. The `pnp` workflow remains deferred until swapping
+  is stable.
 - Record your installed Hermes version in
   [`1.0-beta-evidence.md`](1.0-beta-evidence.md) when you smoke.
 

@@ -13,6 +13,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import json
+
 import yaml
 
 # Bootstrap sys.path so local_model_router.* is importable both in the
@@ -66,6 +68,7 @@ class ObserverBackend:
     def __init__(self, config_path: Optional[str | os.PathLike[str]] = None) -> None:
         self.config_path = os.fspath(config_path) if config_path is not None else resolve_conf_path(__file__)
         self._raw: Dict[str, Any] = {}
+        self._runtime_slots: Dict[str, Dict[str, Any]] = {}
         from local_model_router.helpers.smart_router.health import SlotHealthChecker
 
         self._health_checker = SlotHealthChecker()
@@ -81,6 +84,45 @@ class ObserverBackend:
     def reload(self) -> None:
         """Reload the observer after an explicit setup/configuration write."""
         self._load()
+
+    def set_runtime_slot(
+        self,
+        slot_id: str,
+        *,
+        model_id: str,
+        effective_n_ctx: Optional[int] = None,
+        configured_n_ctx: Optional[int] = None,
+        context_source: Optional[str] = None,
+        supports_tools: Optional[bool] = None,
+        supports_vision: Optional[bool] = None,
+        supports_json_mode: Optional[bool] = None,
+        trust_tier: Optional[str] = None,
+    ) -> None:
+        """Publish verified in-process runtime facts for routing and status views."""
+        self._runtime_slots[slot_id] = {
+            "model_id": model_id,
+            "effective_n_ctx": effective_n_ctx,
+            "configured_n_ctx": configured_n_ctx,
+            "context_source": context_source,
+            "supports_tools": supports_tools,
+            "supports_vision": supports_vision,
+            "supports_json_mode": supports_json_mode,
+            "trust_tier": trust_tier,
+        }
+
+    def clear_runtime_slot(self, slot_id: str) -> None:
+        """Remove runtime facts when the managed process is absent or unverified."""
+        self._runtime_slots.pop(slot_id, None)
+
+    def _slot_overlay(self) -> Dict[str, Any]:
+        path = Path(self.config_path).parent / "router_state.json"
+        if not path.is_file():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return data if isinstance(data, dict) else {}
 
     def _make_manager(self):
         """Instantiate a fresh BackendManager from config (not the singleton)."""
@@ -123,6 +165,11 @@ class ObserverBackend:
             else:
                 base_url = None
 
+            overlay = self._slot_overlay().get(slot_id) or {}
+            runtime = self._runtime_slots.get(slot_id) or {}
+            runtime_published = slot_id in self._runtime_slots
+            configured_context = runtime.get("configured_n_ctx") or slot.get("context_size")
+            effective_context = runtime.get("effective_n_ctx")
             slots.append({
                 "id": slot_id,
                 "host": host,
@@ -131,12 +178,18 @@ class ObserverBackend:
                 "enabled": enabled,
                 "backend_type": backend_type,
                 "base_url": base_url,
-                "model_id": slot.get("model_id"),
+                "model_id": runtime.get("model_id", overlay.get("model_id", slot.get("model_id"))),
                 "router_mode": slot.get("router_mode", False),
-                "context_size": slot.get("context_size"),
-                "supports_tools": slot.get("supports_tools"),
-                "supports_vision": slot.get("supports_vision"),
-                "supports_json_mode": slot.get("supports_json_mode"),
+                "context_size": effective_context if runtime_published else configured_context,
+                "configured_context_size": configured_context,
+                "effective_context_size": effective_context,
+                "context_source": runtime.get("context_source"),
+                "supports_tools": runtime.get("supports_tools", slot.get("supports_tools")),
+                "supports_vision": runtime.get("supports_vision", slot.get("supports_vision")),
+                "supports_json_mode": runtime.get(
+                    "supports_json_mode", slot.get("supports_json_mode")
+                ),
+                "trust_tier": runtime.get("trust_tier", slot.get("trust_tier")),
                 "latency_hint_ms": slot.get("latency_hint_ms"),
                 "quality_hint": slot.get("quality_hint"),
                 "resource_cost_hint": slot.get("resource_cost_hint"),

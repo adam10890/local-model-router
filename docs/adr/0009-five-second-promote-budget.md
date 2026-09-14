@@ -16,6 +16,11 @@ The promote/load budget for the strong model is **about five seconds**.
 Longer stalls are a product failure for interactive Hermes chat unless the
 operator explicitly chose a cold path.
 
+ADR 0015's session-selected replacement of one large GGUF with another on a
+single 24GB card is such an explicit cold path. It reports progress and
+retryable unavailability, but it does not satisfy or weaken this five-second
+target for a future warm-weak / hot-strong promotion system.
+
 ## Consequences
 
 - Hot/cold and dual-slot design must meet ~5s promote for the common case.

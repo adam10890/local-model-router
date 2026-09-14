@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import subprocess
 import time
@@ -25,6 +26,9 @@ def test_start_records_process_exit_and_restart(tmp_path, monkeypatch):
     model = tmp_path / "model.gguf"
     model.touch()
     backend = SubprocessBackend({"log_dir": str(tmp_path / "logs")})
+    monkeypatch.setattr(backend, "_port_open", lambda *_args: False)
+    monkeypatch.setattr(backend, "_process_create_time", lambda _pid: 12.5)
+    monkeypatch.setattr(backend, "_process_executable", lambda _pid: "llama-server.exe")
     processes = [_Process(17), _Process()]
     monkeypatch.setattr(backend, "_build_command", lambda _config: ["llama-server"])
     monkeypatch.setattr(
@@ -179,6 +183,7 @@ def test_start_failure_and_missing_model_do_not_expose_paths(tmp_path, monkeypat
 
     model = tmp_path / "model.gguf"
     model.touch()
+    monkeypatch.setattr(backend, "_port_open", lambda *_args: False)
     monkeypatch.setattr(backend, "_build_command", lambda _config: ["llama-server"])
     monkeypatch.setattr(
         "local_model_router.helpers.backends.subprocess_backend.subprocess.Popen",
@@ -199,6 +204,8 @@ def test_start_timeout_tracks_process_and_closes_parent_log_handle(tmp_path, mon
     captured = {}
     monkeypatch.setattr(backend, "_build_command", lambda _config: ["llama-server"])
     monkeypatch.setattr(backend, "_process_create_time", lambda _pid: 12.5)
+    monkeypatch.setattr(backend, "_process_executable", lambda _pid: "llama-server.exe")
+    monkeypatch.setattr(backend, "_port_open", lambda *_args: False)
 
     def popen(*_args, **kwargs):
         captured["stdout"] = kwargs["stdout"]
@@ -237,6 +244,8 @@ def test_wsl_start_tracks_foreground_process_without_shell_backgrounding(tmp_pat
     )
     monkeypatch.setattr(backend, "_wait_healthy", lambda *_args: _async_value(True))
     monkeypatch.setattr(backend, "_process_create_time", lambda _pid: 1.0)
+    monkeypatch.setattr(backend, "_process_executable", lambda _pid: "llama-server.exe")
+    monkeypatch.setattr(backend, "_port_open", lambda *_args: False)
 
     def popen(cmd, **_kwargs):
         captured["cmd"] = cmd
@@ -302,7 +311,10 @@ def test_stop_kills_after_timeout_and_cleanup_removes_only_tracked_processes(mon
     backend = SubprocessBackend({})
     backend._processes["chat"] = process
     backend._slots["chat"] = SlotStatus(name="chat")
-    monkeypatch.setattr(backend, "_process_create_time", lambda _pid: None)
+    backend._process_identities["chat"] = 1.0
+    backend._process_executables["chat"] = "llama-server.exe"
+    monkeypatch.setattr(backend, "_process_create_time", lambda _pid: 1.0)
+    monkeypatch.setattr(backend, "_process_executable", lambda _pid: "llama-server.exe")
     monkeypatch.setattr(
         "local_model_router.helpers.backends.subprocess_backend.sys.platform", "linux"
     )
@@ -313,6 +325,152 @@ def test_stop_kills_after_timeout_and_cleanup_removes_only_tracked_processes(mon
     assert process.killed == 1
     assert asyncio.run(backend.list_slots()) == {}
     assert asyncio.run(backend.stop_slot("unknown")) is False
+
+
+def test_start_refuses_occupied_port_without_spawning(tmp_path, monkeypatch):
+    model = tmp_path / "model.gguf"
+    model.touch()
+    backend = SubprocessBackend({})
+    monkeypatch.setattr(backend, "_port_open", lambda *_args: True)
+    monkeypatch.setattr(
+        "local_model_router.helpers.backends.subprocess_backend.subprocess.Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not spawn")),
+    )
+
+    status = asyncio.run(backend.start_slot("chat", {"model_path": str(model), "port": 8123}))
+
+    assert status.extra["failure_code"] == "port_in_use"
+    assert status.running is False
+
+
+def test_start_stops_exact_process_when_ownership_state_cannot_be_written(tmp_path, monkeypatch):
+    model = tmp_path / "model.gguf"
+    model.touch()
+
+    class Process(_Process):
+        def __init__(self):
+            super().__init__()
+            self.terminated = 0
+
+        def terminate(self):
+            self.terminated += 1
+            self.exit_code = 0
+
+        def wait(self, _timeout):
+            return self.exit_code
+
+    process = Process()
+    backend = SubprocessBackend({"log_dir": str(tmp_path / "logs")})
+    backend.configure_process_state(tmp_path / "state" / "runtime-process.json")
+    monkeypatch.setattr(backend, "_port_open", lambda *_args: False)
+    monkeypatch.setattr(backend, "_process_create_time", lambda _pid: 12.5)
+    monkeypatch.setattr(backend, "_process_executable", lambda _pid: "llama-server.exe")
+    monkeypatch.setattr(backend, "_build_command", lambda _config: ["llama-server"])
+    monkeypatch.setattr(backend, "_wait_healthy", lambda *_args: _async_value(True))
+    monkeypatch.setattr(
+        backend,
+        "_write_process_state",
+        lambda *_args: (_ for _ in ()).throw(OSError("disk full")),
+    )
+    monkeypatch.setattr(
+        "local_model_router.helpers.backends.subprocess_backend.subprocess.Popen",
+        lambda *_args, **_kwargs: process,
+    )
+
+    status = asyncio.run(
+        backend.start_slot("chat", {"model_path": str(model), "port": 8123})
+    )
+
+    assert status.extra["failure_code"] == "state_write_failed"
+    assert status.running is False
+    assert status.healthy is False
+    assert process.terminated == 1
+    assert backend.owns_slot("chat") is False
+
+
+def test_adopt_slot_accepts_matching_ownership_and_rejects_identity_mismatches(
+    tmp_path, monkeypatch
+):
+    executable = tmp_path / "llama-server.exe"
+    executable.touch()
+    other_executable = tmp_path / "other-server.exe"
+    other_executable.touch()
+    model = tmp_path / "model.gguf"
+    model.touch()
+    other_model = tmp_path / "other.gguf"
+    other_model.touch()
+    state_path = tmp_path / "runtime-process.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "slot_id": "slot_chat",
+                "pid": 4321,
+                "port": 8123,
+                "process_created_at": 12.5,
+                "process_executable": str(executable),
+                "model": str(model),
+            }
+        ),
+        encoding="utf-8",
+    )
+    actual = {
+        "created": 12.5,
+        "executable": str(executable),
+        "model": str(model),
+    }
+
+    class Process:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def exe(self):
+            return actual["executable"]
+
+        def cmdline(self):
+            return [actual["executable"], "--model", actual["model"], "--port", "8123"]
+
+        def create_time(self):
+            return actual["created"]
+
+        def is_running(self):
+            return True
+
+    monkeypatch.setattr(
+        "local_model_router.helpers.backends.subprocess_backend.psutil.Process",
+        Process,
+    )
+    config = {"port": 8123, "model_path": str(model), "model_id": "ornith"}
+
+    matching = SubprocessBackend({})
+    matching.configure_process_state(state_path)
+    assert matching.adopt_slot("slot_chat", config) is True
+    assert matching.owns_slot("slot_chat") is True
+    assert matching._slots["slot_chat"].pid == 4321
+
+    wrong_slot = json.loads(state_path.read_text(encoding="utf-8"))
+    wrong_slot["slot_id"] = "slot_other"
+    state_path.write_text(json.dumps(wrong_slot), encoding="utf-8")
+    rejected_slot = SubprocessBackend({})
+    rejected_slot.configure_process_state(state_path)
+    assert rejected_slot.adopt_slot("slot_chat", config) is False
+    wrong_slot["slot_id"] = "slot_chat"
+    state_path.write_text(json.dumps(wrong_slot), encoding="utf-8")
+
+    for mismatch in (
+        {"created": 20.0},
+        {"executable": str(other_executable)},
+        {"model": str(other_model)},
+    ):
+        actual.update(
+            created=12.5,
+            executable=str(executable),
+            model=str(model),
+        )
+        actual.update(mismatch)
+        rejected = SubprocessBackend({})
+        rejected.configure_process_state(state_path)
+        assert rejected.adopt_slot("slot_chat", config) is False
+        assert rejected.owns_slot("slot_chat") is False
 
 
 def test_health_check_maps_unhealthy_and_unavailable_server(monkeypatch):

@@ -213,11 +213,13 @@ class RoutingIntentHandler:
         upstream_rows_fn: Optional[Any] = None,
         budget_status_fn: Optional[Callable[[], Dict[str, str]]] = None,
         evaluation_snapshot_fn: Optional[Any] = None,
+        manager_factory: Optional[Callable[[], Any]] = None,
     ) -> None:
         self._observer = observer
         self._upstream_rows_fn = upstream_rows_fn
         self._budget_status_fn = budget_status_fn
         self._evaluation_snapshot_fn = evaluation_snapshot_fn
+        self._manager_factory = manager_factory
 
     def _upstream_candidates(self, role: str, local_only: bool) -> list:
         if (
@@ -288,7 +290,11 @@ class RoutingIntentHandler:
 
         # ── 5. Get manager ─────────────────────────────────────────────────
         try:
-            mgr = self._observer._make_manager()
+            mgr = (
+                self._manager_factory()
+                if self._manager_factory is not None
+                else self._observer._make_manager()
+            )
         except Exception as exc:
             return RoutingDecisionResponse(
                 decision_id=decision_id,

@@ -32,7 +32,7 @@ active_slots:
   # High-VRAM single-model chat (subprocess / managed CUDA). Prefer this over
   # local Ollama for GGUF serving. Pin conf/harnesses.yaml to model_id.
   # Set global.backend: subprocess and llama_cpp_path to the managed runtime.
-  - id: slot_chat
+  - id: slot_chat_fixed
     port: 8080
     role: chat
     model_id: chat_primary
@@ -51,27 +51,19 @@ active_slots:
     router_mode: false
     extra_args: [--cache-type-k, q8_0, --cache-type-v, q8_0, -ub, "512", --cont-batching]
 
-  # Hermes / multimodal chat — Ornith GGUF + matching mmproj under models_dir.
-  # Place files under global.models_dir (or absolute paths). Do not declare
-  # supports_vision until mmproj is present and an image smoke succeeds.
-  # Enable fleet control (A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1) to start/stop.
-  - id: ornith
-    port: 8081
+  # Hermes managed GPU slot. Copy hermes_gpu_profiles.example.yaml to the
+  # local-only hermes_gpu_profiles.yaml; that profile file owns model paths,
+  # templates, load flags, capabilities, and output defaults. No mmproj is
+  # configured, so the current profiles explicitly report vision=false.
+  # Set this slot to enabled: true and disable every other port-8080 slot,
+  # then enable fleet control (A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1).
+  - id: slot_chat
+    port: 8080
+    host: 127.0.0.1
     role: chat
-    model_id: ornith
-    model_path: ornith-1.0-9b-Q8_0.gguf
-    mmproj_path: ornith-mmproj.gguf
-    context_size: 32768
-    gpu_layers: -1
-    batch_size: 512
-    threads: 8
-    parallel_slots: 1
-    flash_attention: on
-    enabled: true
+    hermes_gpu_profile: ornith
+    enabled: false
     router_mode: false
-    supports_tools: true
-    supports_vision: true
-    supports_json_mode: true
 
   # Optional CPU utility worker for subagents/background work.
   # Start docker/docker-compose.lmm.cpu-worker.yml and set enabled: true.
