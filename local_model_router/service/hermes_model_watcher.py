@@ -626,6 +626,8 @@ class HermesModelWatcher:
         coordination = self._manager().slot_operation_snapshot(self.cfg.slot_id)
         if coordination.get("manual_stop"):
             self.desired = self.read_desired()
+            self.failure_code = None
+            self.error = None
             self._set_phase("stopped")
             return "stopped"
         chosen = self.read_desired()
@@ -677,16 +679,11 @@ class HermesModelWatcher:
         try:
             self._validate_profile(target)
             self._set_phase("draining")
-            if not await manager.wait_for_slot_idle(
+            await manager.wait_for_slot_idle(
                 self.cfg.slot_id,
                 notice_seconds=self.cfg.drain_notice_seconds,
                 on_wait=lambda: self._set_phase("waiting_for_requests"),
-            ):
-                # Nothing was stopped yet, so the running model keeps serving.
-                raise SwapFailure(
-                    "drain_timeout",
-                    "Active requests did not finish, so the current model was left running",
-                )
+            )
             self._set_phase("stopping")
             owns_process = bool(
                 getattr(manager, "owns_slot_process", lambda _name: False)(self.cfg.slot_id)

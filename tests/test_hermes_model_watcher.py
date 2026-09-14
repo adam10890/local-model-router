@@ -83,7 +83,6 @@ class FakeManager:
         self.stops: list[str] = []
         self.starts: list[dict] = []
         self.waited = 0
-        self.drain_ok = True
         self.restart_suppressed = False
 
     def begin_slot_operation(self, _name, phase):
@@ -112,7 +111,6 @@ class FakeManager:
 
     async def wait_for_slot_idle(self, _name, **_kwargs):
         self.waited += 1
-        return self.drain_ok
 
     def set_slot_config(self, name, config):
         self._slot_configs[name] = dict(config)
@@ -1174,25 +1172,4 @@ def test_default_probe_reads_props_and_falls_back_to_v1_models(monkeypatch):
         "context_source": "v1_models",
     }
     assert calls == ["/health", "/props", "/health", "/props", "/v1/models"]
-
-
-def test_drain_timeout_fails_the_swap_and_leaves_the_model_running(tmp_path):
-    """P1-2: the drain gives up, but nothing is stopped and nothing is cancelled."""
-    watcher, manager = _watcher(tmp_path)
-    manager.drain_ok = False
-    watcher.read_desired = lambda: "qwen38_27b"  # type: ignore[method-assign]
-
-    async def run():
-        await watcher.tick()
-        await watcher._task
-
-    asyncio.run(run())
-
-    assert manager.stops == [], "a refused drain must not stop the running model"
-    assert manager.starts == [], "the target must not be started"
-    assert watcher.loaded == "ornith", "the working model keeps serving"
-    assert watcher.phase == "failed"
-    assert watcher.failure_code == "drain_timeout"
-    assert manager.phase == "idle"
-    assert manager.restart_suppressed is True
 

@@ -261,6 +261,14 @@ def test_manual_stop_blocks_hermes_even_when_desired_matches_loaded(
     calls = _patch_forward(monkeypatch)
     manager.set_manual_stop("slot_chat", True)
     assert watcher.desired == watcher.loaded == "ornith"
+    watcher.failure_code = "process_exited"
+    watcher.error = "old failure"
+
+    assert asyncio.run(
+        type(watcher).refresh_desired(watcher, probe_loaded=False)
+    ) == "stopped"
+    assert watcher.failure_code is None
+    assert watcher.error is None
 
     response = _chat(TestClient(app), path="/harnesses/hermes/v1/chat/completions")
 
@@ -466,10 +474,24 @@ def test_ornith_default_output_limit_applies_only_when_client_omits_it(tmp_path,
         path="/harnesses/hermes/v1/chat/completions",
         max_completion_tokens=456,
     ).status_code == 200
+    assert _chat(
+        client,
+        path="/harnesses/hermes/v1/chat/completions",
+        max_tokens=None,
+    ).status_code == 200
+    assert _chat(
+        client,
+        path="/harnesses/hermes/v1/chat/completions",
+        max_completion_tokens=None,
+    ).status_code == 200
     assert calls[0]["kwargs"]["json"]["max_tokens"] == 16384
     assert calls[1]["kwargs"]["json"]["max_tokens"] == 123
     assert "max_tokens" not in calls[2]["kwargs"]["json"]
     assert calls[2]["kwargs"]["json"]["max_completion_tokens"] == 456
+    assert calls[3]["kwargs"]["json"]["max_tokens"] == 16384
+    assert "max_completion_tokens" not in calls[3]["kwargs"]["json"]
+    assert calls[4]["kwargs"]["json"]["max_tokens"] == 16384
+    assert "max_completion_tokens" not in calls[4]["kwargs"]["json"]
 
 
 def test_length_finish_reason_is_preserved_and_signaled(tmp_path, monkeypatch):

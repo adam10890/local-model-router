@@ -147,6 +147,28 @@ def test_verified_router_process_checks_pid_creation_executable_and_command(
         actual["cmdline"] = accepted
         assert cli._verified_router_process(state).pid == 4321
 
+    for script_name in ("imperium.exe", "local-model-router.exe"):
+        script = tmp_path / script_name
+        script.touch()
+        console_state = {**state, "process_executable": str(script)}
+        actual.update(executable=str(script), cmdline=[str(script), "serve"])
+        assert cli._verified_router_process(console_state).pid == 4321
+        actual["cmdline"] = [str(script)]
+        assert cli._verified_router_process(console_state).pid == 4321
+        actual["cmdline"] = [str(script), "doctor"]
+        with pytest.raises(RuntimeError, match="router_ownership_unverified"):
+            cli._verified_router_process(console_state)
+
+    actual.update(
+        executable=str(executable),
+        cmdline=[str(executable), "-m", "local_model_router", "serve"],
+    )
+
+    actual["cmdline"] = []
+    with pytest.raises(RuntimeError, match="router_ownership_unverified"):
+        cli._verified_router_process(state)
+    actual["cmdline"] = [str(executable), "-m", "local_model_router", "serve"]
+
     with pytest.raises(RuntimeError, match="router_ownership_unverified"):
         cli._verified_router_process({**state, "pid": 0})
 

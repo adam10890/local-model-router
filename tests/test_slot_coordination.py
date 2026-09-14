@@ -7,10 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from local_model_router.helpers.llama_cpp_manager import (
-    DRAIN_TIMEOUT_SECONDS,
-    BackendManager,
-)
+from local_model_router.helpers.llama_cpp_manager import BackendManager
 from local_model_router.helpers.backends.base import SlotStatus
 
 
@@ -240,95 +237,4 @@ def test_auto_restart_waits_for_active_request_before_starting():
     assert backend.starts == 1
     assert manager._restart_attempts["slot_chat"] == 1
     assert manager.slot_operation_snapshot("slot_chat")["phase"] == "idle"
-
-
-def test_drain_ceiling_gives_up_without_cancelling_the_request():
-    """P1-2: an unbounded drain wedged swap, Stop and shutdown together."""
-    manager = _manager()
-    assert manager.try_begin_slot_request("slot_chat") == "ok"
-    assert manager.begin_slot_operation("slot_chat", "draining") is True
-
-    async def scenario():
-        return await asyncio.wait_for(
-            manager.wait_for_slot_idle("slot_chat", notice_seconds=10.0, max_seconds=0.2),
-            timeout=5,
-        )
-
-    assert asyncio.run(scenario()) is False
-    # The request was never cancelled; its owner still holds the lease.
-    assert manager.slot_operation_snapshot("slot_chat")["active_requests"] == 1
-    manager.finish_slot_request("slot_chat")
-    manager.finish_slot_operation("slot_chat")
-
-
-def test_drain_ceiling_is_configurable_and_defaults_to_the_module_ceiling():
-    manager = _manager()
-    assert manager._drain_timeout() == DRAIN_TIMEOUT_SECONDS
-    manager.global_config = {"drain_timeout": 30}
-    assert manager._drain_timeout() == 30.0
-    manager.global_config = {"drain_timeout": "nonsense"}
-    assert manager._drain_timeout() == DRAIN_TIMEOUT_SECONDS
-
-
-def test_stop_slot_reports_drain_timeout_instead_of_cutting_off_a_request():
-    class Backend:
-        def __init__(self):
-            self.stops = 0
-
-        async def stop_slot(self, _name):
-            self.stops += 1
-            return True
-
-    manager = _manager()
-    backend = Backend()
-    manager._backend = backend
-    manager.global_config = {"drain_timeout": 0.2}
-    manager.logger = logging.getLogger("test.slot_coordination")
-    assert manager.try_begin_slot_request("slot_chat") == "ok"
-
-    assert asyncio.run(manager.stop_slot("slot_chat")) is False
-    assert backend.stops == 0, "the in-flight request must not be cut off"
-    assert manager.last_slot_failure_code("slot_chat") == "drain_timeout"
-    # A refused stop is not a manual stop: auto-restart stays eligible.
-    assert manager.slot_operation_snapshot("slot_chat")["manual_stop"] is False
-    assert manager.slot_operation_snapshot("slot_chat")["phase"] == "idle"
-
-    manager.finish_slot_request("slot_chat")
-    assert asyncio.run(manager.stop_slot("slot_chat")) is True
-    assert backend.stops == 1
-    assert manager.last_slot_failure_code("slot_chat") == ""
-
-
-def test_auto_restart_skips_an_undrainable_slot_without_burning_an_attempt():
-    class Backend:
-        def __init__(self):
-            self.starts = 0
-
-        async def list_slots(self):
-            return {"slot_chat": SlotStatus(name="slot_chat", running=False)}
-
-        async def health_check(self, _name):
-            return SlotStatus(name="slot_chat", running=False, healthy=False)
-
-        async def start_slot(self, _name, _config):
-            self.starts += 1
-            return SlotStatus(name="slot_chat", running=True, healthy=True)
-
-    manager = _manager()
-    backend = Backend()
-    manager._backend = backend
-    manager.global_config = {"max_restart_attempts": 3, "drain_timeout": 0.2}
-    manager._restart_attempts = {}
-    manager.logger = logging.getLogger("test.slot_coordination")
-
-    assert manager.try_begin_slot_request("slot_chat") == "ok"
-    asyncio.run(manager._restart_unhealthy_slots())
-    assert backend.starts == 0
-    assert manager._restart_attempts.get("slot_chat", 0) == 0
-    assert manager.slot_operation_snapshot("slot_chat")["phase"] == "idle"
-
-    manager.finish_slot_request("slot_chat")
-    asyncio.run(manager._restart_unhealthy_slots())
-    assert backend.starts == 1
-    assert manager._restart_attempts["slot_chat"] == 1
 

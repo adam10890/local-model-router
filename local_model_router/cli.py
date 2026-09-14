@@ -131,12 +131,19 @@ def _verified_router_process(state: dict[str, Any]):
         except (ValueError, IndexError):
             module = ""
             module_args = []
+        console_args = command[1:]
+        console_stem = Path(command[0]).stem if command else ""
+        console_command = (
+            console_stem in {"imperium", "local-model-router"}
+            and (not console_args or console_args[0] == "serve")
+        )
         router_command = (
             module in {"local_model_router.service", "local_model_router.service.__main__"}
             or (
                 module == "local_model_router"
                 and (not module_args or module_args[0] == "serve")
             )
+            or console_command
         )
         if (
             actual_executable != recorded_executable

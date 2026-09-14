@@ -140,7 +140,6 @@ class FleetControlHandler:
                 or ""
             )
             if candidate in {
-                "drain_timeout",
                 "process_identity_changed",
                 "process_ownership_unverified",
             }:

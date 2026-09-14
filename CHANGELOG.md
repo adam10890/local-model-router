@@ -99,18 +99,15 @@ All notable changes to this project are documented here.
 - Slot draining closes ingress and waits until every accepted normal or
   streaming request finishes or disconnects, and never cancels one. After the
   notice threshold the operation reports `waiting_for_requests` and keeps
-  waiting, bounded by `global.drain_timeout` (15 minutes by default) so a
-  miscounted request lease cannot wedge model swap, manual Stop and shutdown
-  simultaneously. Reaching that ceiling reports `drain_timeout` and cancels
-  nothing: the model keeps serving, the slot is not stopped, and the
-  auto-restart budget is untouched. The Windows shutdown CLI retains its
+  waiting without a server-side deadline. The Windows shutdown CLI retains its
   separate 180-second client timeout and leaves the router running if that
   request has not completed.
 - Request preparation, admission telemetry failures, and client cancellation
   while queued now release their admission lane and close telemetry exactly
   once. Hermes session timestamps accept numeric epochs or ISO-8601 text;
   transient operation races, sticky warnings, and runtime model/context
-  overlays settle to verified state instead of remaining stale.
+  overlays settle to verified state instead of remaining stale. Null output
+  limits use the selected profile default; numeric client limits are preserved.
 - Failed model starts no longer loop every poll or silently answer with a
   restored model. Imperium tries at most three starts with 15/60-second
   backoff, removes speculative flags after the first failure, restores the
@@ -126,7 +123,8 @@ All notable changes to this project are documented here.
   router running; a router that exits during successful drain is treated as
   already stopped.
   Bulk fleet actions retain per-slot results when one slot fails, and an
-  intentional manual stop reports `gpu_slot_stopped`.
+  intentional manual stop clears stale failure state and reports
+  `gpu_slot_stopped`.
 - Hermes setup manifests now use the pinned local slot's real context window
   instead of a stale 32K default. The committed Hermes selection pin now names
   Ornith; selection, connection pin, and the verified loaded GGUF remain

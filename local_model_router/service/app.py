@@ -473,9 +473,11 @@ def _forward_payload(
     payload["model"] = selected_model or payload.get("model") or "local"
     if (
         default_max_tokens is not None
-        and "max_tokens" not in payload
-        and "max_completion_tokens" not in payload
+        and payload.get("max_tokens") is None
+        and payload.get("max_completion_tokens") is None
     ):
+        payload.pop("max_tokens", None)
+        payload.pop("max_completion_tokens", None)
         payload["max_tokens"] = int(default_max_tokens)
     return payload
 

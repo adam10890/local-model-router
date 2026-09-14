@@ -21,12 +21,6 @@ def _default_config_path() -> str:
     return str(resolve_conf_path())
 
 
-# A single forwarded request is already capped by the router's forward timeout,
-# so a drain longer than this means a lease was miscounted, not that a model is
-# slow. ponytail: one global ceiling; per-slot ceilings only if a slot needs one.
-DRAIN_TIMEOUT_SECONDS = 900.0
-
-
 def _tcp_port_open(host: str, port: Any) -> bool:
     try:
         target = "127.0.0.1" if host in {"", "localhost", "0.0.0.0", "::"} else host
@@ -158,50 +152,24 @@ class BackendManager:
         with self._coordination_lock:
             state["active_requests"] = max(0, int(state["active_requests"]) - 1)
 
-    def _drain_timeout(self) -> float:
-        # getattr: slot coordination is also driven by lightweight test doubles
-        # built with object.__new__, same as _ensure_coordination_state.
-        config = getattr(self, "global_config", None) or {}
-        try:
-            return max(1.0, float(config.get("drain_timeout", DRAIN_TIMEOUT_SECONDS)))
-        except (TypeError, ValueError):
-            return DRAIN_TIMEOUT_SECONDS
-
     async def wait_for_slot_idle(
         self,
         name: str,
         *,
         notice_seconds: float = 60.0,
-        max_seconds: Optional[float] = None,
         on_wait: Optional[Any] = None,
-    ) -> bool:
-        """Wait until every accepted request finishes, without cancelling it.
-
-        Returns True once the slot is idle, False when the ceiling expires. The
-        ceiling never cancels a response; it exists so one miscounted lease
-        cannot wedge swap, Stop and shutdown at once with no way back.
-        """
+    ) -> None:
+        """Wait until every accepted request finishes, without cancelling it."""
         warned = False
-        ceiling = self._drain_timeout() if max_seconds is None else max_seconds
         started = time.monotonic()
         while self.slot_operation_snapshot(name)["active_requests"]:
             elapsed = time.monotonic() - started
-            if elapsed >= ceiling:
-                getattr(self, "logger", logging.getLogger(__name__)).error(
-                    "Slot '%s' still reports %d active request(s) after %.0fs; "
-                    "abandoning the drain without cancelling anything",
-                    name,
-                    self.slot_operation_snapshot(name)["active_requests"],
-                    elapsed,
-                )
-                return False
             if not warned and elapsed >= notice_seconds:
                 warned = True
                 self.set_slot_phase(name, "waiting_for_requests")
                 if on_wait is not None:
                     on_wait()
             await asyncio.sleep(0.05)
-        return True
 
     def set_slot_config(self, name: str, config: Dict[str, Any]) -> None:
         if name not in self._slot_configs:
@@ -451,11 +419,7 @@ class BackendManager:
         if not self.begin_slot_operation(name, "draining"):
             return False
         try:
-            if not await self.wait_for_slot_idle(name):
-                # Requests are still in flight. Stopping here would cut them
-                # off, which ADR 0015 forbids, so report instead of forcing.
-                self._record_slot_failure(name, "drain_timeout")
-                return False
+            await self.wait_for_slot_idle(name)
             self.set_slot_phase(name, "stopping")
             stopped = await self._stop_slot_unlocked(name)
             self.set_manual_stop(name, True)
@@ -622,12 +586,7 @@ class BackendManager:
             if not self.begin_slot_operation(name, "auto_restarting"):
                 continue
             try:
-                if not await self.wait_for_slot_idle(name):
-                    self.logger.warning(
-                        "Auto-restart skipped for '%s'; the drain did not finish",
-                        name,
-                    )
-                    continue
+                await self.wait_for_slot_idle(name)
                 self._restart_attempts[name] = attempts + 1
                 self.logger.warning(
                     "Restarting crashed slot '%s' (%d/%d)",

@@ -24,19 +24,16 @@
   failures, admission telemetry errors, and queued-client cancellation release
   their lease or queue slot exactly once; numeric and ISO Hermes session
   timestamps are supported, and stale busy/warning/runtime overlays are
-  cleared only when their owning operation succeeds. Manual Stop reports
-  `gpu_slot_stopped`, and bulk fleet operations retain per-slot results.
+  cleared only when their owning operation succeeds. Manual Stop clears stale
+  failure state and reports `gpu_slot_stopped`; null output limits use the
+  profile default, and documented console-script launches pass ownership
+  verification. Bulk fleet operations retain per-slot results.
 - Draining a slot closes ingress and waits until every accepted normal or
   streaming request finishes or disconnects. It never cancels an in-flight
   response: after the notice threshold it reports `waiting_for_requests` and
-  keeps waiting. The wait itself is bounded by `global.drain_timeout` (15
-  minutes by default) so that a request lease which is never released cannot
-  wedge model swap, manual Stop and shutdown at once with no way back. Reaching
-  that ceiling abandons the wait and reports `drain_timeout`; it still cancels
-  nothing, so the running model keeps serving, the slot is not stopped, and no
-  auto-restart attempt is consumed. The Windows shutdown CLI keeps its separate
-  180-second client timeout and leaves the router running when the server-side
-  drain is still active.
+  keeps waiting without a server-side deadline. The Windows shutdown CLI keeps
+  its separate 180-second client timeout and leaves the router running when the
+  server-side drain is still active.
 
 ## Security
 

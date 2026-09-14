@@ -245,25 +245,6 @@ def test_stop_slot_failure_returns_stable_error(tmp_path, monkeypatch):
     assert resp.status_code == 409
     assert resp.json()["error"]["code"] == "slot_stop_failed"
     manager_cls._instance = None
-
-
-def test_stop_slot_surfaces_drain_timeout_as_its_own_code(tmp_path, monkeypatch):
-    """P1-2: an abandoned drain must be distinguishable from a refused stop."""
-    client, manager_cls = _make_app(tmp_path, monkeypatch, control=True, backend="subprocess")
-
-    async def fake_stop(self, name):
-        self._record_slot_failure(name, "drain_timeout")
-        return False
-
-    monkeypatch.setattr(manager_cls, "stop_slot", fake_stop)
-
-    resp = client.post("/fleet/slots/utility/stop")
-
-    assert resp.status_code == 409
-    assert resp.json()["error"]["code"] == "drain_timeout"
-    manager_cls._instance = None
-
-
 def test_start_all_delegates_to_backend_manager(tmp_path, monkeypatch):
     client, manager_cls = _make_app(tmp_path, monkeypatch, control=True, backend="subprocess")
 
