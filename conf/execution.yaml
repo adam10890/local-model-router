@@ -1,0 +1,6 @@
+# Opt-in dry run. Set enabled: true to expose POST /v1/execution/plan.
+execution:
+  enabled: false
+  policy_revision: "2026-10-19.1"
+  fail_open_lane: balanced_local
+  max_workers: 3

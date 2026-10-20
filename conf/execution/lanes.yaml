@@ -1,0 +1,73 @@
+lanes:
+  - label: deterministic_tool
+    description: "Use code or a tool. No generation."
+    model_class: local_small
+    agent_profile: tool_router
+    runtime: none
+    prepare_steps: []
+    confidence_min: 0.0
+    capabilities: [tool]
+
+  - label: fast_local
+    description: "Short local task. Formatting, small edit, classification."
+    model_class: local_small
+    agent_profile: thin_coder
+    runtime: thin
+    prepare_steps: [format_enforce, budget_guard]
+    confidence_min: 0.72
+    capabilities: [chat, classification, coding]
+
+  - label: balanced_local
+    description: "Normal coding or reasoning on a mid local model."
+    model_class: local_balanced
+    agent_profile: coder
+    runtime: thin
+    prepare_steps: [history_compress, repo_context_pack, format_enforce]
+    confidence_min: 0.68
+    capabilities: [coding, review, chat]
+
+  - label: moe_reasoning
+    description: "Hard multi-step reasoning. Prefer a large MoE if loaded."
+    model_class: local_moe_large
+    agent_profile: planner
+    runtime: thin
+    prepare_steps: [history_compress, repo_context_pack, param_tune, format_enforce]
+    confidence_min: 0.75
+    capabilities: [coding, research, orchestration]
+
+  - label: planner_frontier
+    description: "Main planner on the reserved heavy model."
+    model_class: planner_large
+    agent_profile: planner
+    runtime: full_harness
+    prepare_steps: [history_compress, repo_context_pack, policy_patch]
+    confidence_min: 0.70
+    capabilities: [orchestration, coding]
+
+  - label: swarm
+    description: "Split into a planner plus thin workers."
+    model_class: planner_large
+    agent_profile: planner
+    runtime: full_harness
+    prepare_steps: [repo_context_pack, swarm_task_split, policy_patch]
+    confidence_min: 0.70
+    max_workers: 3
+    capabilities: [orchestration, coding]
+
+  - label: review_gate
+    description: "Second pass reviewer before the answer is returned."
+    model_class: local_balanced
+    agent_profile: reviewer
+    runtime: thin
+    prepare_steps: [format_enforce, policy_patch]
+    confidence_min: 0.60
+    capabilities: [review]
+
+  - label: human_review
+    description: "Do not execute. Return the plan for a person."
+    model_class: local_small
+    agent_profile: judge
+    runtime: none
+    prepare_steps: []
+    confidence_min: 0.0
+    capabilities: [review]

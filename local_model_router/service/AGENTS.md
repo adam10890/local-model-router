@@ -24,6 +24,8 @@ control (`fleet_control.py`). Agent ticket coordination lives in
 - `agent_orchestrator.py` owns observe-first plan/ticket state, workspace
   packets, DOX chain snapshots, and wake markers. It must not launch
   containers or edit `AGENTS.md` files directly.
+- `swarm_gate.py` owns the opt-in swarm terminal registry. It grants a
+  logical slot; it does not choose the sub-agent's task or spawn a process.
 
 ## Local Contracts
 
@@ -108,6 +110,13 @@ control (`fleet_control.py`). Agent ticket coordination lives in
 - Default posture stays: no Docker socket, no container lifecycle.
   No prompt logging ever.
 - Public binds without auth must keep refusing to start.
+- `/v1/swarm/*` is an opt-in resource broker (`conf/swarm.yaml` with
+  `enabled: true`). It grants a logical terminal on a pinned model and reaps
+  slots that stop heartbeating. It does not orchestrate the sub-agent.
+- `POST /v1/execution/plan` is an opt-in dry run (`conf/execution.yaml`,
+  disabled by default). It filters lanes and returns a heuristic route. It
+  does not call Jev, does not execute, and does not spawn a swarm terminal.
+  The response must not include prompt bodies.
 
 ## Work Guidance
 
@@ -117,7 +126,7 @@ control (`fleet_control.py`). Agent ticket coordination lives in
 
 ## Verification
 
-- `python -m pytest tests/test_routing_intent.py tests/test_observer_service.py tests/test_openai_chat_completions.py tests/test_fleet_manager.py tests/test_fleet_control.py tests/test_local_first_plus_api.py tests/test_agent_orchestrator.py -q`
+- `python -m pytest tests/test_routing_intent.py tests/test_observer_service.py tests/test_openai_chat_completions.py tests/test_fleet_manager.py tests/test_fleet_control.py tests/test_local_first_plus_api.py tests/test_agent_orchestrator.py tests/test_swarm_gate.py tests/test_execution_plan.py -q`
 
 ## Child DOX Index
 

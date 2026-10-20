@@ -6,6 +6,9 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Opt-in swarm terminal heartbeat, plus a dry-run `POST /v1/execution/plan`
+  that filters lanes and picks a route with a local heuristic. The planner
+  does not call Jev and does not spawn a terminal.
 - Harness compatibility evidence schema v2 separates endpoint, installed
   version, current stable version, and real-client results. The first isolated
   Hermes canary runs without storing prompts, responses, keys, or local paths;

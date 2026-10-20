@@ -1,0 +1,27 @@
+model_classes:
+  local_small:
+    prefer: ["qwen2.5-coder-7b", "gemma-4-e2b"]
+    max_vram_mb: 8000
+    min_context: 8192
+    architecture: dense
+    remote: false
+  local_balanced:
+    prefer: ["qwen2.5-coder-14b"]
+    max_vram_mb: 14000
+    min_context: 32768
+    architecture: dense
+    remote: false
+  local_moe_large:
+    prefer: ["qwen3-moe-30b", "mixtral-8x7b"]
+    max_vram_mb: 24000
+    min_context: 32768
+    architecture: moe
+    remote: false
+    reserved_for_main: false
+  planner_large:
+    prefer: ["local-frontier", "qwen3-moe-30b"]
+    max_vram_mb: 24000
+    min_context: 65536
+    architecture: moe
+    reserved_for_main: true
+    remote: false

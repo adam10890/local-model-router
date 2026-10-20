@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from enum import Enum
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
@@ -26,8 +27,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 logger = logging.getLogger(__name__)
 
-# A terminal is "occupying a slot" in these states; the rest are transient.
-_RUNNING_STATES = frozenset({"ready", "running", "idle"})
+# A terminal occupies a slot from grant until removal. "pending" counts too, or a
+# slow-starting sub (Phase 3) would let the next spawn over-subscribe.
+_RUNNING_STATES = frozenset({"pending", "ready", "running", "idle"})
 # Clock used everywhere so tests can freeze time.
 Monotonic = Callable[[], float]
 # CapacityProvider returns a live fleet snapshot on each spawn.
@@ -94,7 +96,7 @@ class SwarmTerminalSpec(BaseModel):
     terminal_id: Optional[str] = None
     workdir: Optional[str] = None
     parent_session_id: Optional[str] = None
-    ttl_seconds: Optional[int] = None
+    ttl_seconds: Optional[int] = Field(default=None, ge=1)  # capped at the policy TTL
     depth: int = Field(default=1, ge=1)
     task_meta: dict[str, Any] = Field(default_factory=dict)
     callback_url: Optional[str] = None
@@ -177,9 +179,20 @@ class SwarmTerminalRegistry:
                 f"max swarm depth is {self._policy.max_depth}; refused depth {spec.depth}",
             )
 
+        # Outside the lock on purpose: VRAM is a point-in-time gate, not a reservation
+        # (a granted sub uses nothing yet). The slot count below is the atomic part.
         cap = await self._capacity()
 
         async with self._lock:
+            # Same lock as the insert: a reused id would overwrite a live slot and
+            # leave two subs on one ledger entry (silent over-subscription).
+            terminal_id = (spec.terminal_id or "").strip() or f"swarm-{uuid.uuid4().hex[:12]}"
+            if terminal_id in self._terminals:
+                raise SwarmError(
+                    "terminal_id_conflict",
+                    409,
+                    f"terminal '{terminal_id}' is live; release it or pick another id",
+                )
             if spec.model not in cap.available_models:
                 raise SwarmError(
                     "model_unavailable",
@@ -209,9 +222,10 @@ class SwarmTerminalRegistry:
                 )
 
             now = self._clock()
-            ttl = spec.ttl_seconds or self._policy.default_ttl_seconds
+            # Policy TTL is the ceiling: a client may shorten it, never opt out of reaping.
+            ttl = min(spec.ttl_seconds or self._policy.default_ttl_seconds, self._policy.default_ttl_seconds)
             terminal = SwarmTerminal(
-                terminal_id=spec.terminal_id or f"swarm-{now:.6f}-{len(running):03d}",
+                terminal_id=terminal_id,
                 base_url=spec.base_url,
                 model=spec.model,
                 workdir=spec.workdir,
@@ -266,6 +280,29 @@ class SwarmTerminalRegistry:
                     del self._terminals[terminal_id]
                     logger.info("Swarm: reaped zombie terminal %s", terminal_id)
             return dead
+
+    async def sweep_forever(self, interval: float = 15.0) -> None:
+        """Reaper loop, started by the app lifespan when the flag is on.
+
+        Must never die: a dead reaper leaks every slot until restart. Time the loop
+        could not observe (host sleep, a blocked event loop) is not charged to
+        terminals; they could not heartbeat during it either.
+        """
+        last = self._clock()
+        while True:
+            await asyncio.sleep(interval)
+            now = self._clock()
+            stalled = now - last - interval
+            last = now
+            try:
+                if stalled > 2 * interval:
+                    logger.warning("Swarm: reaper stalled %.0fs; not charging it to terminals", stalled)
+                    async with self._lock:
+                        for terminal in self._terminals.values():
+                            terminal.last_heartbeat = min(now, terminal.last_heartbeat + stalled)
+                await self.sweep(now)
+            except Exception:
+                logger.exception("Swarm: sweep failed; reaper keeps running")
 
     def snapshot(self) -> dict[str, Any]:
         running = [t for t in self._terminals.values() if t.status in _RUNNING_STATES]
