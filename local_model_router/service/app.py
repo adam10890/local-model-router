@@ -16,6 +16,7 @@ import logging
 import os
 import secrets
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
@@ -59,6 +60,21 @@ from .fleet_control import (
     fleet_control_enabled,
 )
 from .agent_orchestrator import AgentOrchestrator, OrchestratorError
+from local_model_router.execution import (
+    InventorySnapshot,
+    PlanRequest,
+    build_plan,
+    load_execution_catalog,
+)
+from .swarm_gate import (
+    CapacitySnapshot,
+    SwarmPolicy,
+    SwarmTerminalRegistry,
+    SwarmTerminalSpec,
+    SwarmPolicyError,
+    SwarmError,
+    load_swarm_policy,
+)
 from .agent_library import (
     AGENT_INPUT_MAX_BYTES,
     AgentCatalog,
@@ -651,6 +667,27 @@ def create_app(
                 }
             compute_cache = (time.monotonic(), vram, compute)
             return vram, compute
+
+    async def _swarm_capacity() -> CapacitySnapshot:
+        slots = observer.get_slots()
+        vram, _ = await compute_status()
+        models: set[str] = set()
+        for slot in slots:
+            model_id = str(slot.get("model_id") or "").strip()
+            if model_id:
+                models.add(model_id)
+        free_gb = float(vram.get("available_gb") or 0)
+        total_gb = float(vram.get("total_gb") or 0)
+        occupancy = (total_gb - free_gb) / total_gb if total_gb else None
+        return CapacitySnapshot(
+            available_models=sorted(models),
+            main_vram_occupancy=occupancy,
+            free_vram_gb=free_gb,
+        )
+
+    swarm_policy = load_swarm_policy(conf_dir / "swarm.yaml")
+    swarm_registry = SwarmTerminalRegistry(swarm_policy, _swarm_capacity)
+    execution_catalog = load_execution_catalog(conf_dir)
 
     def protected(handler: Callable[[Request], Awaitable[Response]]) -> Callable[[Request], Awaitable[Response]]:
         async def wrapper(request: Request) -> Response:
@@ -1471,6 +1508,78 @@ def create_app(
         except AgentRunFailed:
             return JSONResponse({"error": "agent_model_error"}, status_code=502)
         return JSONResponse({"agent_id": definition.id, "output": output})
+
+    async def swarm_terminals_spawn(request: Request) -> JSONResponse:
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid_json", "detail": "request body is not valid JSON"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "invalid_request_body"}, status_code=400)
+        try:
+            spec = SwarmTerminalSpec.model_validate(body)
+        except ValidationError as exc:
+            return JSONResponse({"error": "invalid_swarm_request", "detail": exc.errors(include_url=False)}, status_code=422)
+        try:
+            terminal = await swarm_registry.spawn(spec)
+        except SwarmError as exc:
+            return JSONResponse({"error": exc.code, "detail": exc.message}, status_code=exc.status_code)
+        return JSONResponse(terminal.public_dict(), status_code=201)
+
+    async def swarm_terminal_release(request: Request) -> JSONResponse:
+        terminal_id = str(request.path_params.get("terminal_id") or "").strip()
+        if not terminal_id:
+            return JSONResponse({"error": "terminal_id_required"}, status_code=400)
+        released = await swarm_registry.release(terminal_id)
+        if not released:
+            return JSONResponse({"error": "terminal_not_found"}, status_code=404)
+        return JSONResponse({"ok": True, "terminal_id": terminal_id})
+
+    async def swarm_terminal_heartbeat(request: Request) -> JSONResponse:
+        terminal_id = str(request.path_params.get("terminal_id") or "").strip()
+        if not await swarm_registry.heartbeat(terminal_id):
+            # Reaped or released: 404 is the sub's signal to stop using the slot.
+            return JSONResponse({"error": "terminal_not_found"}, status_code=404)
+        return JSONResponse({"ok": True, "terminal_id": terminal_id})
+
+    async def swarm_capacity_view(request: Request) -> JSONResponse:
+        return JSONResponse(swarm_registry.snapshot())
+
+    async def execution_plan(request: Request) -> JSONResponse:
+        if not execution_catalog.settings.enabled:
+            return JSONResponse(
+                {
+                    "error": "execution_disabled",
+                    "detail": "execution planning is disabled; set execution.enabled: true in conf/execution.yaml",
+                },
+                status_code=403,
+            )
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "invalid_json", "detail": "request body is not valid JSON"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "invalid_request_body"}, status_code=400)
+        try:
+            spec = PlanRequest.model_validate(body)
+        except ValidationError as exc:
+            return JSONResponse(
+                {"error": "invalid_execution_request", "detail": exc.errors(include_url=False)},
+                status_code=422,
+            )
+        slots = observer.get_slots()
+        vram, _compute = await compute_status()
+        models = [
+            model_id
+            for slot in slots
+            if (model_id := str(slot.get("model_id") or "").strip())
+        ]
+        inventory = InventorySnapshot(
+            free_vram_mb=float(vram.get("available_gb") or 0) * 1024,
+            loaded_models=models,
+        )
+        plan = build_plan(spec, execution_catalog, inventory)
+        return JSONResponse(plan.model_dump(mode="json"))
 
     def _orchestrator_error(exc: OrchestratorError) -> JSONResponse:
         return JSONResponse({"error": exc.code, "detail": exc.message}, status_code=exc.status_code)
@@ -2653,6 +2762,11 @@ def create_app(
         Route("/apps", protected(apps_list)),
         Route("/agents", protected(agents_list)),
         Route("/agents/{agent_id}/runs", protected(agent_run), methods=["POST"]),
+        Route("/v1/swarm/terminals", protected(swarm_terminals_spawn), methods=["POST"]),
+        Route("/v1/swarm/terminals/{terminal_id}/release", protected(swarm_terminal_release), methods=["POST"]),
+        Route("/v1/swarm/terminals/{terminal_id}/heartbeat", protected(swarm_terminal_heartbeat), methods=["POST"]),
+        Route("/v1/swarm/capacity", protected(swarm_capacity_view), methods=["GET"]),
+        Route("/v1/execution/plan", protected(execution_plan), methods=["POST"]),
         Route("/harnesses", protected(harnesses_list)),
         Route("/harnesses", protected(harness_create), methods=["POST"]),
         Route(
@@ -2683,7 +2797,22 @@ def create_app(
         Route("/v1/embeddings", protected(embeddings), methods=["POST"]),
     ]
 
-    app = Starlette(routes=routes)
+    @asynccontextmanager
+    async def lifespan(_app: Starlette):
+        swarm_sweep = None
+        if swarm_policy.enabled:
+            swarm_sweep = asyncio.create_task(swarm_registry.sweep_forever())
+        try:
+            yield
+        finally:
+            if swarm_sweep is not None:
+                swarm_sweep.cancel()
+                try:
+                    await swarm_sweep
+                except asyncio.CancelledError:
+                    pass
+
+    app = Starlette(routes=routes, lifespan=lifespan)
     app.state.setup_token = setup_token
     app.state.setup_engine = setup_engine
     return app
