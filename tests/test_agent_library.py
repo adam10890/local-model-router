@@ -122,8 +122,9 @@ def test_windows_scripts_prepare_and_stop_the_agent_runner():
 
     assert '.[dev,mcp,agents]' in setup
     assert 'A0_LMM_ROUTER_AGENT_BASE_URL=%BASE_URL%/v1' in start
-    assert "Get-NetTCPConnection -LocalPort %OBSERVER_PORT%" in stop
-    assert "local_model_router\\s+serve" in stop
+    assert '"%PYTHON%" -m local_model_router shutdown' in stop
+    assert "Get-NetTCPConnection" not in stop
+    assert '"%PYTHON%" -m local_model_router setup --stop-runtime' in stop
     assert "netstat" not in stop.lower()
 
 

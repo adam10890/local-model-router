@@ -16,9 +16,9 @@ fleet control is explicitly enabled.
   Completions endpoint.
 - `GET /harnesses` and `GET /harnesses/{id}` emit secret-free setup manifests.
   Dedicated `.../v1/models` and `.../v1/chat/completions` paths pin one model
-  per connection; see `HARNESSES.md`. Hermes Vision pins a local llama.cpp
-  slot (for example `ornith` with `mmproj_path`); DMR is optional text/tools
-  only and is not managed for multimodal projectors.
+  per connection; see `HARNESSES.md`. The current Hermes GPU profiles do not
+  load an mmproj and explicitly report `supports_vision: false`. Enabling
+  vision requires a separate VRAM validation and profile change.
 - `GET /fleet/status` returns the legacy local `queue`, per-lane `queues`,
   agent, request, slot, state, and local hardware summaries.
 - `GET /fleet/agents` lists registered/observed agents.
@@ -114,9 +114,19 @@ python .\scripts\smoke_harnesses.py --api-key "change-me" --rc --harness hermes 
 
 `SETUP.bat` installs the agent runner extra. `START.bat` derives
 `A0_LMM_ROUTER_AGENT_BASE_URL` from the configured bind URL unless `.env`
-overrides it; `STOP.bat` reads the same `OBSERVER_PORT` before stopping the
-router. On Windows Terminal it validates and stops the router process that
-owns that port; it never terminates an unrelated listener.
+overrides it. When `conf/hermes_gpu_profiles.yaml` exists, `START.bat` enables
+fleet control unless the variable was already set, so the watcher starts in
+the router lifespan; set `A0_LMM_ROUTER_HERMES_WATCHER=0` to disable only the
+watcher.
+
+`STOP.bat` calls `imperium shutdown`. The router first stops the watcher and
+automatic restart loop, drains accepted requests, and stops managed model
+processes. The CLI then terminates only the router whose saved PID, process
+creation time, executable, and command identity all match. A mismatched or
+unverifiable owner is left running and produces a stable failure code; STOP
+does not kill a process based on port ownership alone. The CLI waits up to 180
+seconds for the drain request; on timeout it reports `router_drain_timeout`
+and leaves the verified router process running.
 
 ## WSL Or Linux Server
 
@@ -233,7 +243,11 @@ stored. Use `--force` to refresh an unchanged model.
 2. Re-run `scripts/run_provider.ps1 -InstallDeps` or
    `scripts/run_provider.sh --install-deps` to refresh Python dependencies.
 3. Keep `conf/llama_cpp_servers.yaml` outside automated overwrites if it
-   contains machine-specific host or port settings.
+   contains machine-specific host or port settings. For managed Hermes GPU
+   swapping, also preserve the ignored `conf/hermes_gpu_profiles.yaml`; it is
+   the model-specific source of truth. `conf/hermes_gpu_state.json` stores only
+   the last working profile id and successful load generation and is not proof
+   that a model is currently loaded.
 4. Restart the provider process.
 5. Run the smoke script before pointing clients at the provider.
 
@@ -261,44 +275,79 @@ Recommended operator shape on Windows + NVIDIA:
 3. Enable `A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1`, then
    `POST /fleet/slots/{id}/start` (or the dashboard Start control).
    With `global.auto_restart: true`, Imperium live-probes subprocesses it
-   started and retries crashes up to `global.max_restart_attempts`; an explicit
-   Stop remains stopped. `global.auto_start: false` still requires the first
-   Start action after Imperium launches.
+   started and retries crashes up to `global.max_restart_attempts`. Start,
+   stop, watcher swaps, and auto-restart use the same per-slot coordinator;
+   restart stays suspended throughout a swap, and an explicit Stop remains
+   stopped. `global.auto_start: false` still requires the first Start action
+   after Imperium launches.
 4. Keep `A0_LMM_ROUTER_ENABLED_UPSTREAMS` empty for local-only, or set
    `ollama_cloud` when cloud models are needed. Do not enable local `ollama`
    just to serve a GGUF that llama.cpp can load.
 
-### High-VRAM single-model slot (pattern)
+### Hermes single-GPU profile swapping
 
-Pin one strong chat model with an absolute or models-dir-relative `model_path`,
-`model_id` matching `conf/harnesses.yaml` / `conf/apps.yaml`, and flags that
-favor GPU fill without starving KV cache:
+For the managed Hermes path, keep `slot_chat` infrastructure-only in
+`conf/llama_cpp_servers.yaml`:
 
 ```yaml
 - id: slot_chat
   port: 8080
+  host: 127.0.0.1
   role: chat
-  model_id: chat_primary   # harness pin must match this id or the slot id
-  model_path: your-model.gguf
-  context_size: 32768
-  gpu_layers: -1
-  batch_size: 2048
-  threads: 16
-  parallel_slots: 1
-  flash_attention: true
-  fit: true
-  fit_target_mib: 1024
-  jinja: true
-  reasoning_format: deepseek   # thinking models: final answer in content
+  hermes_gpu_profile: ornith
+  enabled: true
   router_mode: false
-  extra_args: [--cache-type-k, q8_0, --cache-type-v, q8_0, -ub, "512", --cont-batching]
 ```
 
-Thinking / MoE models often need a large `max_tokens` budget so reasoning does
-not consume the entire completion window (`finish_reason=length` with empty
-`content`). The dashboard Chat path sends `max_tokens: 1024`; harness clients
-should send enough tokens (commonly ≥2048) or rely on server-side floors when
-present.
+Copy `conf/hermes_gpu_profiles.example.yaml` to the ignored local
+`conf/hermes_gpu_profiles.yaml` and replace its paths. That file owns GGUF and
+chat-template paths, llama.cpp load flags, capabilities, configured context,
+and output defaults. Keeping those fields out of the slot prevents two copies
+of `extra_args` from drifting. The one-time migration may retain one backup of
+the old local fleet config; normal swaps update only process memory and the
+small atomic state file, not YAML or per-swap backups.
+
+The watcher reads Hermes SQLite in read-only mode and considers at most 32
+open, non-archived sessions whose `COALESCE(last_activity_at, started_at)` is
+within 15 minutes. The newest recognized selection wins. With no recent
+selection, a healthy model stays loaded; a cold slot uses `default_profile`.
+A read error is a warning and does not evict a healthy model.
+
+Before stopping, Imperium validates the target GGUF and template, closes the
+slot to new requests, and drains accepted non-streaming and streaming work.
+New requests receive an OpenAI-compatible 503 error with code
+`gpu_swap_in_progress` and `Retry-After`. After 60 seconds the phase becomes
+`waiting_for_requests`, but the active response is not cancelled. Stop, port
+release, process health, process identity, and loaded model identity must all
+be verified before the connection pin changes.
+
+A target receives at most three start attempts with 15- and 60-second
+backoff. MTP is an optimistic first attempt for configured profiles, not a
+compatibility guarantee: when that load fails, the next attempt uses the same
+GGUF without speculative flags. Path, port-ownership, and process-ownership
+failures do not justify an MTP retry. After target failure, Imperium tries once
+to reload the previous working profile; it still returns the requested target
+as failed and never silently answers with the restored model. Exhaustion leaves
+the watcher in a stable failed state until the target/profile changes or an
+explicit Start resets the budget. Between swaps, a valid change to the profile
+file is reloaded and resets that budget; unchanged polling does not.
+
+The dashboard combines the `/ui/status` GPU state with the `/harnesses`
+connection pin. It shows `desired`, pin, `loaded`, phase, elapsed time,
+attempt, next-attempt time, retry delay, and failure code. `loaded` comes from
+live process, health, and model-identity checks; the state file is not loading
+evidence. After a load, Imperium tries to read effective context from
+llama.cpp `/props`, then falls back to positive live `/v1/models` metadata.
+The `/props` field is an Imperium probe, not a promised llama.cpp schema. If
+neither probe supplies a value, `effective_n_ctx` remains `Unknown` while
+`configured_n_ctx` remains separately visible.
+
+An explicit client `max_tokens` or `max_completion_tokens` is preserved.
+When neither is present, the selected profile may supply a default; Ornith is
+configured for 16,384. A `finish_reason=length` remains intact and the
+dashboard warns that the answer may be incomplete. The OBLITERATED profile
+keeps reasoning disabled. Current profiles declare `supports_vision: false`
+because no mmproj is loaded.
 
 Unload any other GPU-resident copy of the same weights (for example a local
 Ollama load) before starting the subprocess slot, or VRAM fit will fail.

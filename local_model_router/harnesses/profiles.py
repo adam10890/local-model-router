@@ -255,3 +255,29 @@ class HarnessProfiles:
                 for name, item in profile.connections.items()
             },
         })
+
+    def with_connection_model(
+        self, harness_id: str, connection_name: str, model: str
+    ) -> "HarnessProfiles":
+        """Return an in-memory pin update without rewriting operator YAML."""
+        profile = self.get(harness_id)
+        connection = self.resolve(harness_id, connection_name)
+        pinned = str(model or "").strip()
+        if not pinned:
+            raise HarnessConfigError("connection requires a model")
+        replacement = HarnessProfile(
+            harness_id=profile.harness_id,
+            display_name=profile.display_name,
+            kind=profile.kind,
+            protocol=profile.protocol,
+            location=profile.location,
+            connections={
+                name: HarnessConnection(name, pinned if name == connection.name else item.model)
+                for name, item in profile.connections.items()
+            },
+        )
+        return HarnessProfiles(
+            {**self._profiles, profile.harness_id: replacement},
+            path=self.path,
+            source=self.source,
+        )

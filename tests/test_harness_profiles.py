@@ -170,6 +170,24 @@ def test_set_connection_model_rejects_empty_or_unknown_connection(tmp_path):
         profiles.set_connection_model("hermes", "missing", "new-model")
 
 
+def test_in_memory_connection_pin_does_not_rewrite_yaml_or_create_backup(tmp_path):
+    path = _write(tmp_path / "harnesses.yaml", """
+        harnesses:
+          hermes:
+            connections:
+              default: {model: ornith}
+    """)
+    before = path.read_bytes()
+    profiles = HarnessProfiles.load(path)
+
+    updated = profiles.with_connection_model("hermes", "default", "qwen38_27b")
+
+    assert updated.resolve("hermes").model == "qwen38_27b"
+    assert profiles.resolve("hermes").model == "ornith"
+    assert path.read_bytes() == before
+    assert list(tmp_path.glob("*.bak-*")) == []
+
+
 def test_committed_profiles_cover_current_harnesses_and_claude_adapter():
     path = Path(__file__).resolve().parents[1] / "conf" / "harnesses.yaml"
     profiles = HarnessProfiles.load(path)

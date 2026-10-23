@@ -22,6 +22,9 @@ from typing import Any, Optional
 from local_model_router.diagnostics import collect_doctor_checks, probe_url
 
 
+_SHUTDOWN_DRAIN_TIMEOUT_SECONDS = 180
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="local-model-router",
@@ -30,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("serve", help="start the router HTTP service (default)")
+    sub.add_parser("shutdown", help="drain managed requests and stop the verified local router")
     sub.add_parser("mcp", help="start the MCP server (Streamable HTTP, requires the 'mcp' extra)")
     doctor = sub.add_parser("doctor", help="check python, config, dependencies, and slot reachability")
     doctor.add_argument("--json", action="store_true", help="print structured checks as JSON")
@@ -104,6 +108,120 @@ def cmd_mcp(_args: argparse.Namespace) -> int:
         return 1
     mcp_main()
     return 0
+
+
+def _verified_router_process(state: dict[str, Any]):
+    import psutil
+    from pathlib import Path
+
+    pid = int(state.get("pid") or 0)
+    expected_executable = str(state.get("process_executable") or "")
+    expected_created = state.get("process_created_at")
+    if pid <= 0 or not expected_executable or not isinstance(expected_created, (int, float)):
+        raise RuntimeError("router_ownership_unverified")
+    try:
+        process = psutil.Process(pid)
+        actual_executable = str(Path(process.exe()).resolve(strict=False)).casefold()
+        recorded_executable = str(Path(expected_executable).resolve(strict=False)).casefold()
+        command = [str(part).casefold() for part in process.cmdline()]
+        try:
+            module_index = command.index("-m")
+            module = command[module_index + 1]
+            module_args = command[module_index + 2 :]
+        except (ValueError, IndexError):
+            module = ""
+            module_args = []
+        console_args = command[1:]
+        console_stem = Path(command[0]).stem if command else ""
+        console_command = (
+            console_stem in {"imperium", "local-model-router"}
+            and (not console_args or console_args[0] == "serve")
+        )
+        router_command = (
+            module in {"local_model_router.service", "local_model_router.service.__main__"}
+            or (
+                module == "local_model_router"
+                and (not module_args or module_args[0] == "serve")
+            )
+            or console_command
+        )
+        if (
+            actual_executable != recorded_executable
+            or abs(process.create_time() - float(expected_created)) > 0.001
+            or not router_command
+        ):
+            raise RuntimeError("router_ownership_unverified")
+        return process
+    except psutil.NoSuchProcess:
+        return None
+    except (psutil.Error, OSError, ValueError, TypeError) as exc:
+        raise RuntimeError("router_ownership_unverified") from exc
+
+
+def cmd_shutdown(_args: argparse.Namespace) -> int:
+    import psutil
+
+    from local_model_router.service.__main__ import router_process_state_path
+
+    state_path = router_process_state_path()
+    port = int(os.environ.get("OBSERVER_PORT", "9000"))
+    if not state_path.is_file():
+        if _probe(f"http://127.0.0.1:{port}/health"):
+            print(json.dumps({"ok": False, "error": "router_ownership_unverified"}))
+            return 1
+        print(json.dumps({"ok": True, "already_stopped": True}))
+        return 0
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        process = _verified_router_process(state)
+        if process is None:
+            state_path.unlink(missing_ok=True)
+            print(json.dumps({"ok": True, "already_stopped": True}))
+            return 0
+        process_pid = process.pid
+
+        port = int(state.get("port") or port)
+        headers = {"Content-Type": "application/json"}
+        api_key = os.environ.get("A0_LMM_ROUTER_API_KEY", "").strip()
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/fleet/prepare-shutdown",
+            data=b"{}",
+            headers=headers,
+            method="POST",
+        )
+        with urllib.request.urlopen(
+            request, timeout=_SHUTDOWN_DRAIN_TIMEOUT_SECONDS
+        ) as response:
+            if response.status != 200:
+                raise RuntimeError("router_drain_failed")
+            payload = json.loads(response.read().decode("utf-8") or "{}")
+            if not isinstance(payload, dict) or not payload.get("ok"):
+                raise RuntimeError("router_drain_failed")
+
+        try:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except psutil.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+        except psutil.NoSuchProcess:
+            pass
+        state_path.unlink(missing_ok=True)
+        print(json.dumps({"ok": True, "stopped": True, "pid": process_pid}))
+        return 0
+    except urllib.error.HTTPError as exc:
+        print(json.dumps({"ok": False, "error": "router_drain_failed", "status": exc.code}))
+        return 1
+    except TimeoutError:
+        print(json.dumps({"ok": False, "error": "router_drain_timeout"}))
+        return 1
+    except (OSError, ValueError, TypeError, json.JSONDecodeError, RuntimeError) as exc:
+        code = str(exc) if str(exc) in {"router_ownership_unverified", "router_drain_failed"} else "router_shutdown_failed"
+        print(json.dumps({"ok": False, "error": code}))
+        return 1
 
 
 def cmd_config_check(_args: argparse.Namespace) -> int:
@@ -486,6 +604,7 @@ def cmd_rollback(_args: argparse.Namespace) -> int:
 
 _COMMANDS = {
     "serve": cmd_serve,
+    "shutdown": cmd_shutdown,
     "mcp": cmd_mcp,
     "doctor": cmd_doctor,
     "list-models": cmd_list_models,

@@ -168,7 +168,18 @@ class Dashboard:
             "setup_complete": complete,
             "recommended_backend": "cpu",
             "platform_support": {"status": "supported"},
-            "recommendation": models[0] if complete else None,
+            "recommendation": {
+                "id": "merged-local",
+                "name": "Merged",
+                "local": True,
+                "installed": True,
+                "size_gb": 18.43,
+                "quant": "Q4_K_M",
+                "fit_reason": "Recommended for tests",
+                "capabilities": ["chat"],
+            }
+            if complete
+            else None,
             "models": models if complete else [],
             "discovery": {
                 "runtime_installed": complete,
@@ -189,7 +200,28 @@ class Dashboard:
             "overall": "ready",
             "setup_api_active": False,
             "setup": self._setup(),
-            "active": {"model": "model-chat"},
+            "active": {"model": "qwen-chat", "source": "process", "slot_id": "slot_chat", "backend": "remote"},
+            "hermes_gpu": {
+                "desired": "ornith",
+                "loaded": "ornith",
+                "last_working": "ornith",
+                "swapping": False,
+                "phase": "idle",
+                "duration_ms": 0,
+                "attempt": 0,
+                "max_attempts": 3,
+                "next_attempt_at": None,
+                "retry_after_seconds": None,
+                "error": None,
+                "failure_code": None,
+                "warning": None,
+                "slot_id": "slot_chat",
+                "configured_n_ctx": 131072,
+                "effective_n_ctx": 65536,
+                "context_source": "props",
+                "load_generation": 2,
+                "supports_vision": False,
+            },
             "stages": [
                 {"code": "system", "complete": True, "label": {"en": "System checked", "he": "המערכת נבדקה"}},
                 {"code": "runtime", "complete": True, "label": {"en": "Runtime", "he": "Runtime"}},
@@ -218,6 +250,27 @@ class Dashboard:
                         {"id": "chat", "meta": {"kind": "alias", "maps_to_role": "chat"}},
                         {"id": "fast", "meta": {"kind": "alias", "maps_to_role": "utility"}},
                         {"id": "coder", "meta": {"kind": "alias", "maps_to_role": "coder"}},
+                        {
+                            "id": "ornith",
+                            "context_size": 65536,
+                            "meta": {
+                                "kind": "alias",
+                                "maps_to_role": "chat",
+                                "hermes_gpu": True,
+                                "hermes_profile": "ornith",
+                                "effective_n_ctx": 65536,
+                            },
+                        },
+                        {
+                            "id": "uncensored",
+                            "context_size": None,
+                            "meta": {
+                                "kind": "alias",
+                                "maps_to_role": "chat",
+                                "hermes_gpu": True,
+                                "hermes_profile": "qwen38_27b",
+                            },
+                        },
                     ]
                 },
             ),
@@ -322,6 +375,11 @@ class Dashboard:
                 "setup_api_active": True,
                 "setup": self._setup(complete=False),
                 "active": {},
+                "hermes_gpu": {
+                    **status["hermes_gpu"],
+                    "loaded": None,
+                    "phase": "stopped",
+                },
                 "stages": [
                     {"code": "system", "complete": True, "label": {"en": "System checked", "he": "המערכת נבדקה"}},
                     {"code": "runtime", "complete": False, "label": {"en": "Runtime", "he": "Runtime"}},
@@ -349,6 +407,11 @@ class Dashboard:
         status.update(
             {
                 "overall": "needs_attention",
+                "hermes_gpu": {
+                    **status["hermes_gpu"],
+                    "loaded": None,
+                    "phase": "stopped",
+                },
                 "blocking_issues": [issue],
                 "next_action": issue["action"],
             }

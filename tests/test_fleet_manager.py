@@ -359,3 +359,30 @@ def test_fleet_queue_prioritizes_waiters():
         return order
 
     assert asyncio.run(scenario()) == ["high", "low"]
+
+
+def test_fleet_queue_cancel_after_wakeup_releases_granted_lane():
+    from local_model_router.service.fleet_manager import FleetQueue
+
+    async def scenario():
+        queue = FleetQueue(max_active=1, max_queue=1)
+        await queue.acquire("normal")
+        waiter = asyncio.create_task(queue.acquire("normal"))
+        await asyncio.sleep(0)
+
+        await queue.release()
+        waiter.cancel()
+        try:
+            await waiter
+        except asyncio.CancelledError:
+            pass
+        else:  # pragma: no cover - regression guard
+            raise AssertionError("cancelled waiter unexpectedly completed")
+        return queue.snapshot()
+
+    assert asyncio.run(scenario()) == {
+        "active": 0,
+        "queued": 0,
+        "max_active": 1,
+        "max_queue": 1,
+    }

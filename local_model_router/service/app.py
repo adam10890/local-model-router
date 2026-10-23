@@ -105,7 +105,18 @@ from .prompt_cache import (
     prompt_cache_enabled,
 )
 from .routing_intent import RoutingIntentHandler, RoutingIntentRequest
-from .readiness import build_ui_status
+from .readiness import (
+    active_slot_from_health,
+    build_ui_status,
+    inspect_running_llama_models,
+    is_generic_model_id,
+)
+from .hermes_model_watcher import (
+    HermesModelWatcher,
+    load_hermes_gpu_config,
+    pin_extra_ids,
+    public_hermes_model_ids,
+)
 
 from local_model_router import __version__ as _VERSION
 logger = logging.getLogger(__name__)
@@ -114,6 +125,25 @@ _SERVICE_NAME = "lmm-router-observer"
 _COMPUTE_CACHE_TTL_SECONDS = 5.0
 _FORWARD_TIMEOUT_SECONDS = 120
 _API_KEY_ENV = "A0_LMM_ROUTER_API_KEY"
+
+
+class _ManagedStreamingResponse(StreamingResponse):
+    """Guarantee upstream and request cleanup even when ASGI send disconnects."""
+
+    def __init__(self, *args: Any, on_close: Callable[[], Awaitable[None]], **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self._on_close = on_close
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            close_iterator = getattr(self.body_iterator, "aclose", None)
+            try:
+                if close_iterator is not None:
+                    await close_iterator()
+            finally:
+                await self._on_close()
 
 _ROUTING_ONLY_KEYS = {
     "routing",
@@ -172,6 +202,16 @@ def _upstream_error_text(body: Any) -> str:
             return err[:500]
         return str(body.get("message") or "")[:500]
     return str(body or "")[:500]
+
+
+def _response_was_truncated(body: Any) -> bool:
+    return bool(
+        isinstance(body, dict)
+        and any(
+            isinstance(choice, dict) and choice.get("finish_reason") == "length"
+            for choice in body.get("choices", [])
+        )
+    )
 
 
 def _classify_upstream_failure(
@@ -238,11 +278,13 @@ def _context_for_pinned_model(model: str, slots: list[Dict[str, Any]]) -> Option
     return None
 
 
-def _pin_model_allowed(model: str, slots: list, upstream_list: list) -> bool:
+def _pin_model_allowed(model: str, slots: list, upstream_list: list, extra_ids: Optional[set[str]] = None) -> bool:
     """Accept configured slot models, serving upstream targets, or live aliases."""
     target = str(model or "").strip()
     if not target:
         return False
+    if extra_ids and target in extra_ids:
+        return True
     if match_upstream_model(target, upstream_list) is not None:
         return True
     candidates = build_slot_candidates(slots)
@@ -419,19 +461,36 @@ def _intent_from_chat_body(
     return RoutingIntentRequest.model_validate(payload)
 
 
-def _forward_payload(body: Dict[str, Any], selected_model: Optional[str], *, stream: bool) -> Dict[str, Any]:
+def _forward_payload(
+    body: Dict[str, Any],
+    selected_model: Optional[str],
+    *,
+    stream: bool,
+    default_max_tokens: Optional[int] = None,
+) -> Dict[str, Any]:
     payload = {k: v for k, v in body.items() if k not in _ROUTING_ONLY_KEYS}
     payload["stream"] = stream
     payload["model"] = selected_model or payload.get("model") or "local"
-    # ponytail: thinking MoEs (Carnice) spend tokens on reasoning before content;
-    # Hermes often sends modest max_tokens → empty content + finish=length. Raise
-    # when missing/low; keep explicit large budgets. Upgrade: per-model budgets in YAML.
-    model_l = str(payload.get("model") or "").lower()
-    if "carnice" in model_l:
-        mt = payload.get("max_tokens")
-        if mt is None or (isinstance(mt, (int, float)) and int(mt) < 2048):
-            payload["max_tokens"] = 4096
+    if (
+        default_max_tokens is not None
+        and payload.get("max_tokens") is None
+        and payload.get("max_completion_tokens") is None
+    ):
+        payload.pop("max_tokens", None)
+        payload.pop("max_completion_tokens", None)
+        payload["max_tokens"] = int(default_max_tokens)
     return payload
+
+
+def _slot_id_for_model(slots: list[Dict[str, Any]], model: str) -> Optional[str]:
+    for slot in slots:
+        if model in {
+            str(slot.get("id") or ""),
+            str(slot.get("model_id") or ""),
+            str(slot.get("router_default_model") or ""),
+        }:
+            return str(slot.get("id") or "") or None
+    return None
 
 
 def _app_id_from(headers: Any, body: Dict[str, Any], agent: Optional[AgentIdentity]) -> str:
@@ -583,6 +642,32 @@ def create_app(
     }
 
     conf_dir = Path(observer.config_path).resolve().parent
+    gpu_cfg = load_hermes_gpu_config(conf_dir / "hermes_gpu_profiles.yaml", observer.config_path)
+    gpu_pin_ids = pin_extra_ids(gpu_cfg.profiles) if gpu_cfg else set()
+    watcher_disabled = os.environ.get("A0_LMM_ROUTER_HERMES_WATCHER", "1").strip().lower() in {
+        "0", "false", "no", "off",
+    }
+    control_enabled = fleet_control_enabled()
+    fleet_backend = configured_backend(observer.config_path)
+    supports_start_stop = fleet_backend in {"auto", "docker", "subprocess"}
+    shared_manager = None
+    if control_enabled and supports_start_stop:
+        from local_model_router.helpers.llama_cpp_manager import BackendManager
+
+        try:
+            shared_manager = BackendManager.get_instance(observer.config_path)
+        except ImportError:
+            # Keep the HTTP service available so fleet actions can return the
+            # established dependency_missing response instead of failing boot.
+            shared_manager = None
+        if shared_manager is not None:
+            fleet_backend = shared_manager.backend_type
+            supports_start_stop = fleet_backend in {"docker", "subprocess"}
+            if shared_manager.backend_type == "subprocess":
+                shared_manager.configure_process_ownership(setup_engine.process_path)
+                if gpu_cfg is not None:
+                    shared_manager.adopt_slot(gpu_cfg.slot_id)
+    fleet_control = FleetControlHandler(observer.config_path, manager=shared_manager)
     upstreams = load_upstreams(upstreams_path or conf_dir / "upstreams.yaml")
     try:
         disclosure_policy = load_disclosure_policy(conf_dir / DISCLOSURE_CONFIG_FILENAME)
@@ -614,6 +699,7 @@ def create_app(
         upstream_rows_fn=lambda: [upstream.describe() for upstream in upstreams],
         budget_status_fn=_upstream_budget_status,
         evaluation_snapshot_fn=lambda: store.latest_model_snapshot("model_evaluation"),
+        manager_factory=(lambda: shared_manager) if shared_manager is not None else None,
     )
     app_profiles = AppProfiles.load(apps_path or conf_dir / "apps.yaml")
     external_agents_path = conf_dir / "agents.yaml"
@@ -630,16 +716,58 @@ def create_app(
         or conf_dir / "harnesses.yaml",
         legacy_path=apps_path or conf_dir / "apps.yaml",
     )
+
+    def _pin_hermes_gpu(model: str) -> None:
+        nonlocal harness_profiles
+        try:
+            harness_profiles = harness_profiles.with_connection_model("hermes", "default", model)
+        except HarnessConfigError as exc:
+            logger.warning("Hermes GPU pin failed (%s)", type(exc).__name__)
+
+    hermes_watcher: Optional[HermesModelWatcher] = None
+
+    def _publish_hermes_gpu(profile: str, model: str, effective_n_ctx: Optional[int]) -> None:
+        profile_cfg = (gpu_cfg.profiles.get(profile) or {}) if gpu_cfg is not None else {}
+        observer.set_runtime_slot(
+            gpu_cfg.slot_id,
+            model_id=model,
+            effective_n_ctx=effective_n_ctx,
+            configured_n_ctx=profile_cfg.get("context_size"),
+            context_source=hermes_watcher.context_source if hermes_watcher is not None else None,
+            supports_tools=profile_cfg.get("supports_tools"),
+            supports_vision=False,
+            supports_json_mode=profile_cfg.get("supports_json_mode"),
+            trust_tier=profile_cfg.get("trust_tier"),
+        )
+
+    def _clear_hermes_gpu(slot_id: str) -> None:
+        observer.clear_runtime_slot(slot_id)
+
+    hermes_watcher = (
+        HermesModelWatcher(
+            cfg=gpu_cfg,
+            pin=_pin_hermes_gpu,
+            publish_fn=_publish_hermes_gpu,
+            clear_fn=_clear_hermes_gpu,
+            manager_factory=lambda: shared_manager,
+        )
+        if (
+            gpu_cfg is not None
+            and shared_manager is not None
+            and shared_manager.backend_type == "subprocess"
+            and not watcher_disabled
+        )
+        else None
+    )
+    if hermes_watcher is not None and not hermes_watcher.prepare_manager():
+        logger.warning("Hermes GPU watcher disabled (managed slot unavailable)")
+        hermes_watcher = None
+    watcher_task_ref: Dict[str, Optional[asyncio.Task]] = {"task": None}
     harness_activity: Dict[str, Dict[str, Any]] = {}
     agent_orchestrator = orchestrator or AgentOrchestrator(
         repo_root=str(Path(__file__).resolve().parents[2]),
         bundles_path=str(conf_dir / "agent_orchestrator.yaml"),
     )
-
-    control_enabled = fleet_control_enabled()
-    fleet_control = FleetControlHandler(observer.config_path)
-    fleet_backend = configured_backend(observer.config_path)
-    supports_start_stop = fleet_backend in {"auto", "docker", "subprocess"}
 
     async def compute_status() -> tuple[dict[str, Any], dict[str, Any]]:
         nonlocal compute_cache
@@ -800,11 +928,40 @@ def create_app(
             _vram, compute = compute_result
             if compute.get("available") is not True:
                 collection_errors.append("hardware_unavailable")
+        process_models: dict[int, str] = {}
+        try:
+            process_models = await asyncio.to_thread(inspect_running_llama_models)
+        except Exception as exc:
+            logger.warning("llama.cpp process inspect failed (%s)", type(exc).__name__)
+            collection_errors.append("process_inspect_unavailable")
+        active_slot = active_slot_from_health(slot_rows)
+        try:
+            active_port = int(active_slot.get("port") or 0)
+        except (TypeError, ValueError):
+            active_port = 0
+        live_ids: list[str] = []
+        if (
+            not process_models.get(active_port)
+            and is_generic_model_id(str(active_slot.get("model_id") or ""))
+            and active_slot.get("base_url")
+        ):
+            fetch_fn = models_fetch or _models_default_fetch
+            try:
+                rows = await fetch_fn(str(active_slot["base_url"]))
+            except Exception:
+                rows = None
+            live_ids = [
+                str(row.get("id"))
+                for row in (rows or [])
+                if isinstance(row, dict) and row.get("id")
+            ]
         payload = build_ui_status(
             setup_state=setup_state_payload,
             slots_health=slot_rows,
             compute=compute,
             base_url=base_url,
+            process_models=process_models,
+            live_ids=live_ids,
         )
         return payload, setup_state_payload, slot_rows, compute, collection_errors
 
@@ -814,6 +971,8 @@ def create_app(
         )
         payload["setup"] = setup_state_payload
         payload["setup_api_active"] = setup_api_active["value"]
+        if hermes_watcher is not None:
+            payload["hermes_gpu"] = hermes_watcher.snapshot()
         return JSONResponse(payload)
 
     async def diagnostics_report(request: Request) -> JSONResponse:
@@ -1033,18 +1192,23 @@ def create_app(
         slot_id = request.path_params.get("slot_id", "")
         try:
             if action == "start":
+                if hermes_watcher is not None and slot_id == hermes_watcher.cfg.slot_id:
+                    hermes_watcher.reset_retry_budget()
                 payload = await fleet_control.start_slot(slot_id)
             elif action == "stop":
                 payload = await fleet_control.stop_slot(slot_id)
             elif action == "start_all":
+                if hermes_watcher is not None:
+                    hermes_watcher.reset_retry_budget()
                 payload = await fleet_control.start_all()
             else:
                 payload = await fleet_control.stop_all()
         except FleetControlError as exc:
             return _openai_error(exc.message, exc.code, exc.status_code, error_type="server_error")
         except Exception as exc:  # pragma: no cover - defensive
+            logger.error("Fleet control action=%s failed (%s)", action, type(exc).__name__)
             return _openai_error(
-                f"fleet control action failed: {exc}",
+                "fleet control action failed",
                 "fleet_control_failed",
                 502,
                 error_type="server_error",
@@ -1114,6 +1278,20 @@ def create_app(
     async def fleet_stop_all(request: Request) -> Response:
         return await _run_control(request, "stop_all")
 
+    async def fleet_prepare_shutdown(request: Request) -> Response:
+        watcher_task = watcher_task_ref.get("task")
+        if watcher_task is not None and not watcher_task.done():
+            watcher_task.cancel()
+            await asyncio.gather(watcher_task, return_exceptions=True)
+        watcher_task_ref["task"] = None
+        if hermes_watcher is not None:
+            await hermes_watcher.stop()
+        if not control_enabled or not supports_start_stop:
+            return JSONResponse(
+                {"ok": True, "action": "prepare_shutdown", "results": {}}
+            )
+        return await _run_control(request, "stop_all")
+
     async def fleet_agents(request: Request) -> JSONResponse:
         return JSONResponse({"ok": True, "agents": store.list_agents()})
 
@@ -1177,6 +1355,43 @@ def create_app(
                         "capabilities": capabilities,
                     },
                 })
+        if gpu_cfg is not None:
+            gpu_status = hermes_watcher.snapshot() if hermes_watcher is not None else {}
+            for model_id in public_hermes_model_ids():
+                profile_id = gpu_cfg.profile_for_model(model_id)
+                profile_cfg = gpu_cfg.profiles.get(profile_id or "") or {}
+                configured_n_ctx = profile_cfg.get("context_size")
+                effective_n_ctx = (
+                    gpu_status.get("effective_n_ctx")
+                    if profile_id and gpu_status.get("loaded") == profile_id
+                    else None
+                )
+                existing = next((row for row in listing["data"] if row.get("id") == model_id), None)
+                entry = existing or {
+                    "id": model_id,
+                    "object": "model",
+                    "created": 0,
+                    "owned_by": "local-model-router",
+                    "meta": {"kind": "alias", "maps_to_role": "chat"},
+                }
+                entry["capabilities"] = {
+                    "tools": bool(profile_cfg.get("supports_tools")),
+                    "vision": False,
+                    "json_mode": bool(profile_cfg.get("supports_json_mode")),
+                }
+                entry["context_size"] = effective_n_ctx
+                entry.setdefault("meta", {}).update({
+                    "hermes_gpu": True,
+                    "hermes_profile": profile_id,
+                    "configured_n_ctx": configured_n_ctx,
+                    "effective_n_ctx": effective_n_ctx,
+                    "context_source": gpu_status.get("context_source") if effective_n_ctx else None,
+                    "supports_vision": False,
+                    "vision_note": "No mmproj is loaded in this profile",
+                })
+                if existing is None:
+                    existing_ids.add(model_id)
+                    listing["data"].append(entry)
         return JSONResponse(listing)
 
     async def backends(request: Request) -> JSONResponse:
@@ -1321,7 +1536,7 @@ def create_app(
                 },
                 status_code=404,
             )
-        if not _pin_model_allowed(model, observer.get_slots(), upstreams):
+        if not _pin_model_allowed(model, observer.get_slots(), upstreams, extra_ids=gpu_pin_ids):
             return JSONResponse(
                 {
                     "error": "unknown_pin_target",
@@ -1361,21 +1576,42 @@ def create_app(
         capabilities = _capabilities_for_pinned_model(
             connection.model, observer.get_slots(), upstreams
         )
+        gpu_status = hermes_watcher.snapshot() if hermes_watcher is not None else {}
+        model_ids = ["local"]
+        if gpu_cfg is not None:
+            for extra in ("ornith", "uncensored"):
+                if extra not in model_ids:
+                    model_ids.append(extra)
         return JSONResponse({
             "object": "list",
-            "data": [{
-                "id": "local",
-                "object": "model",
-                "created": 0,
-                "owned_by": profile.harness_id,
-                "capabilities": capabilities,
-                "meta": {
-                    "harness_id": profile.harness_id,
-                    "connection": connection.name,
-                    "pinned_model": connection.model,
+            "data": [
+                {
+                    "id": model_id,
+                    "object": "model",
+                    "created": 0,
+                    "owned_by": profile.harness_id,
                     "capabilities": capabilities,
-                },
-            }],
+                    "context_size": gpu_status.get("effective_n_ctx") if profile.harness_id == "hermes" else None,
+                    "meta": {
+                        "harness_id": profile.harness_id,
+                        "connection": connection.name,
+                        "pinned_model": connection.model,
+                        "capabilities": capabilities,
+                        **(
+                            {
+                                "selected_model": gpu_status.get("desired"),
+                                "loaded_profile": gpu_status.get("loaded"),
+                                "configured_n_ctx": gpu_status.get("configured_n_ctx"),
+                                "effective_n_ctx": gpu_status.get("effective_n_ctx"),
+                                "context_source": gpu_status.get("context_source"),
+                            }
+                            if profile.harness_id == "hermes"
+                            else {}
+                        ),
+                    },
+                }
+                for model_id in model_ids
+            ],
         })
 
     async def harness_chat(request: Request) -> Response:
@@ -2071,6 +2307,7 @@ def create_app(
             return _openai_error("missing required field: messages", "missing_messages", 400, param="messages")
 
         dedicated = getattr(request.state, "harness_connection", None)
+        hermes_request = bool(dedicated and dedicated.get("harness_id") == "hermes")
         pinned_slot_id: Optional[str] = None
         try:
             agent = identity_from_headers(request.headers, body)
@@ -2078,18 +2315,14 @@ def create_app(
             if dedicated:
                 app_id = dedicated["harness_id"]
                 effective_model = dedicated["model"]
-                for slot in observer.get_slots():
-                    if effective_model in {
-                        str(slot.get("id") or ""),
-                        str(slot.get("model_id") or ""),
-                        str(slot.get("router_default_model") or ""),
-                    }:
-                        pinned_slot_id = str(slot.get("id") or "")
-                        body["routing"] = {
-                            "preferred_slot": pinned_slot_id,
-                            "role": str(slot.get("role") or "chat"),
-                        }
-                        break
+                slots = observer.get_slots()
+                pinned_slot_id = _slot_id_for_model(slots, effective_model)
+                if pinned_slot_id:
+                    slot = next(row for row in slots if row.get("id") == pinned_slot_id)
+                    body["routing"] = {
+                        "preferred_slot": pinned_slot_id,
+                        "role": str(slot.get("role") or "chat"),
+                    }
             else:
                 app_id = _app_id_from(request.headers, body, agent)
                 effective_model, policy_error = app_profiles.apply(app_id, body.get("model"))
@@ -2131,6 +2364,9 @@ def create_app(
         acquired_queue: Optional[FleetQueue] = None
         admission_lane = "unresolved"
         upstream_name: Optional[str] = None
+        tracked_slot_id: Optional[str] = None
+        pre_route_slot_id: Optional[str] = None
+        pre_route_epoch: Optional[int] = None
         finished = False
         route_reason_codes: list[str] = []
 
@@ -2159,7 +2395,7 @@ def create_app(
             cache_status: Optional[str] = None,
             usage: Optional[Dict[str, Any]] = None,
         ) -> None:
-            nonlocal finished
+            nonlocal finished, tracked_slot_id
             if finished:
                 return
             finished = True
@@ -2188,7 +2424,15 @@ def create_app(
                     prompt_tokens=usage.get("prompt_tokens"),
                     completion_tokens=usage.get("completion_tokens"),
                 )
+            except Exception as exc:
+                logger.warning(
+                    "Fleet request finalization telemetry failed (%s)",
+                    type(exc).__name__,
+                )
             finally:
+                if tracked_slot_id is not None and shared_manager is not None:
+                    shared_manager.finish_slot_request(tracked_slot_id)
+                    tracked_slot_id = None
                 if acquired_queue is not None:
                     await acquired_queue.release()
 
@@ -2196,11 +2440,14 @@ def create_app(
             nonlocal admission_lane, admission, acquired_queue
             admission_lane = lane
             target_queue = admission_queues.get(lane)
-            if target_queue is None:
+            try:
+                if target_queue is not None:
+                    admission = await target_queue.acquire(agent.priority)
+                    acquired_queue = target_queue
                 store.update_request(
                     request_id,
                     status="admitted",
-                    queued_ms=0,
+                    queued_ms=admission.queued_ms if admission is not None else 0,
                     app_id=app_id,
                     requested_model=requested_model,
                     routing_strategy=intent.routing_strategy,
@@ -2211,14 +2458,11 @@ def create_app(
                     request_id=request_id,
                     agent=agent,
                     event_type="admitted",
-                    queue_depth=0,
-                    active_count=0,
+                    queue_depth=admission.queue_depth_at_admit if admission is not None else 0,
+                    active_count=admission.active_at_admit if admission is not None else 0,
                     admission_lane=lane,
                 )
                 return None
-            try:
-                admission = await target_queue.acquire(agent.priority)
-                acquired_queue = target_queue
             except QueueFull as exc:
                 await finish("rejected", error_code="queue_full", cache_status="BYPASS")
                 store.record_queue_event(
@@ -2244,27 +2488,156 @@ def create_app(
                     },
                     headers=fleet_headers(),
                 )
-            store.update_request(
-                request_id,
-                status="admitted",
-                queued_ms=admission.queued_ms,
-                app_id=app_id,
-                requested_model=requested_model,
-                routing_strategy=intent.routing_strategy,
-                upstream_name=upstream_name,
-                admission_lane=lane,
-            )
-            store.record_queue_event(
-                request_id=request_id,
-                agent=agent,
-                event_type="admitted",
-                queue_depth=admission.queue_depth_at_admit,
-                active_count=admission.active_at_admit,
-                admission_lane=lane,
-            )
-            return None
+            except asyncio.CancelledError:
+                await finish(
+                    "failed",
+                    error_code="client_disconnected",
+                    cache_status="BYPASS",
+                )
+                raise
+            except Exception:
+                await finish(
+                    "failed",
+                    error_code="request_admission_failed",
+                    cache_status="BYPASS",
+                )
+                return _openai_error(
+                    "The request could not be admitted",
+                    "request_admission_failed",
+                    500,
+                    error_type="server_error",
+                    headers=fleet_headers(),
+                )
 
+        async def refresh_hermes_ingress(*, decision: Any = None) -> Optional[Response]:
+            if not hermes_request or hermes_watcher is None:
+                return None
+            try:
+                await hermes_watcher.refresh_desired(probe_loaded=False)
+            except Exception as exc:
+                logger.warning(
+                    "Hermes GPU ingress refresh failed (%s); keeping the verified runtime state",
+                    type(exc).__name__,
+                )
+            retry = hermes_watcher.retry_response()
+            if retry is None:
+                return None
+            code, retry_after = retry
+            await finish(
+                "rejected",
+                error_code=code,
+                model=effective_model,
+                decision=decision,
+                cache_status="BYPASS",
+            )
+            retry_headers = {"Retry-After": str(retry_after)} if retry_after > 0 else {}
+            error_messages = {
+                "gpu_swap_in_progress": "The selected GPU model is still loading; retry this request",
+                "gpu_slot_stopped": "The managed GPU slot is stopped; start it before retrying",
+            }
+            return _openai_error(
+                error_messages.get(
+                    code,
+                    "The selected GPU model failed to load and requires operator action",
+                ),
+                code,
+                503,
+                error_type="server_error",
+                extra={"hermes_gpu": hermes_watcher.snapshot()},
+                headers=fleet_headers(retry_headers),
+            )
+
+        if hermes_request and hermes_watcher is not None:
+            retry_response = await refresh_hermes_ingress()
+            if retry_response is not None:
+                return retry_response
+
+            # A verified load updates only the in-memory Hermes connection. Re-read
+            # it here so a request arriving after /model uses the current identity.
+            try:
+                current_connection = harness_profiles.resolve(
+                    dedicated["harness_id"], dedicated["connection"]
+                )
+            except (HarnessConfigError, KeyError):
+                current_connection = None
+            if current_connection is not None and current_connection.model != effective_model:
+                effective_model = current_connection.model
+                dedicated = {**dedicated, "model": effective_model}
+                request.state.harness_connection = dedicated
+                body["model"] = effective_model
+                slots = observer.get_slots()
+                pinned_slot_id = _slot_id_for_model(slots, effective_model)
+                if pinned_slot_id:
+                    slot = next(row for row in slots if row.get("id") == pinned_slot_id)
+                    body["routing"] = {
+                        "preferred_slot": pinned_slot_id,
+                        "role": str(slot.get("role") or "chat"),
+                    }
+                intent = _intent_from_chat_body(
+                    body,
+                    agent=agent,
+                    app_id=app_id,
+                    requested_model=requested_model,
+                )
+
+        slots = observer.get_slots()
         upstream_match = match_upstream_model(effective_model, upstreams)
+        pre_route_slot_id = pinned_slot_id or _slot_id_for_model(slots, effective_model)
+        if pre_route_slot_id is None and gpu_cfg is not None:
+            if gpu_cfg.profile_for_model(effective_model) is not None:
+                pre_route_slot_id = gpu_cfg.slot_id
+        if pre_route_slot_id is None:
+            preferred = body.get("routing") if isinstance(body.get("routing"), dict) else {}
+            candidate = str(preferred.get("preferred_slot") or "")
+            if candidate:
+                pre_route_slot_id = candidate
+        if (
+            pre_route_slot_id is None
+            and upstream_match is None
+            and shared_manager is not None
+            and intent.role
+        ):
+            role_slots = [
+                str(slot.get("id") or "")
+                for slot in slots
+                if slot.get("enabled")
+                and slot.get("role") == intent.role
+                and str(slot.get("id") or "")
+                in getattr(shared_manager, "_slot_configs", {})
+            ]
+            if len(role_slots) == 1:
+                pre_route_slot_id = role_slots[0]
+        if (
+            shared_manager is not None
+            and pre_route_slot_id in getattr(shared_manager, "_slot_configs", {})
+        ):
+            operation = shared_manager.slot_operation_snapshot(pre_route_slot_id)
+            pre_route_epoch = int(operation["epoch"])
+            if operation["phase"] != "idle":
+                admission_lane = "local"
+                await finish(
+                    "rejected",
+                    error_code="gpu_swap_in_progress",
+                    cache_status="BYPASS",
+                )
+                retry_after = 5
+                if (
+                    hermes_watcher is not None
+                    and gpu_cfg is not None
+                    and pre_route_slot_id == gpu_cfg.slot_id
+                ):
+                    retry_after = max(
+                        1,
+                        hermes_watcher.snapshot().get("retry_after_seconds") or 5,
+                    )
+                return _openai_error(
+                    "The selected GPU model is being changed; retry this request",
+                    "gpu_swap_in_progress",
+                    503,
+                    error_type="server_error",
+                    headers=fleet_headers({"Retry-After": str(retry_after)}),
+                )
+
         if upstream_match is not None:
             upstream_name = upstream_match[0].name
             route_reason_codes.append("pinned_harness" if dedicated else "explicit_upstream")
@@ -2309,15 +2682,46 @@ def create_app(
         try:
             decision = await intent_handler.handle(intent)
         except Exception as exc:
+            logger.error("Routing decision failed (%s)", type(exc).__name__)
             await finish("failed", error_code="routing_error")
             return _openai_error(
-                f"routing decision failed: {type(exc).__name__}: {exc}",
+                "routing decision failed",
                 "routing_error",
                 500,
                 error_type="server_error",
                 headers=fleet_headers(),
             )
         decision_body = decision.model_dump()
+        gpu_operation = None
+        if shared_manager is not None and gpu_cfg is not None:
+            gpu_operation = shared_manager.slot_operation_snapshot(gpu_cfg.slot_id)
+        if (
+            (decision.no_slot_available or not decision.selected_url)
+            and gpu_operation is not None
+            and gpu_operation.get("phase") != "idle"
+            and pre_route_slot_id == gpu_cfg.slot_id
+        ):
+            admission_lane = "local"
+            await finish(
+                "rejected",
+                error_code="gpu_swap_in_progress",
+                decision=decision,
+                cache_status="BYPASS",
+            )
+            retry_after = 5
+            if hermes_watcher is not None:
+                retry_after = max(1, hermes_watcher.snapshot().get("retry_after_seconds") or 5)
+            return _openai_error(
+                "The GPU model is being changed; retry this request",
+                "gpu_swap_in_progress",
+                503,
+                error_type="server_error",
+                extra={
+                    "routing": decision_body,
+                    "hermes_gpu": hermes_watcher.snapshot() if hermes_watcher is not None else {},
+                },
+                headers=fleet_headers({"Retry-After": str(retry_after)}),
+            )
         if decision.no_slot_available or not decision.selected_url:
             admission_lane = "local"
             await finish("failed", error_code="no_slot_available", decision=decision, cache_status="BYPASS")
@@ -2410,61 +2814,176 @@ def create_app(
                 ),
             )
 
+        slot_epoch: Optional[int] = None
+        coordinated_slot = (
+            decision.selected_slot_id
+            if shared_manager is not None
+            and decision.selected_slot_id in getattr(shared_manager, "_slot_configs", {})
+            else None
+        )
+        if coordinated_slot is not None:
+            operation = shared_manager.slot_operation_snapshot(coordinated_slot)
+            slot_epoch = (
+                pre_route_epoch
+                if coordinated_slot == pre_route_slot_id and pre_route_epoch is not None
+                else int(operation["epoch"])
+            )
+            if operation["phase"] != "idle":
+                await finish(
+                    "rejected",
+                    error_code="gpu_swap_in_progress",
+                    decision=decision,
+                    cache_status="BYPASS",
+                )
+                retry_after = 5
+                if hermes_watcher is not None and gpu_cfg is not None and coordinated_slot == gpu_cfg.slot_id:
+                    retry_after = max(1, hermes_watcher.snapshot().get("retry_after_seconds") or 5)
+                return _openai_error(
+                    "The selected GPU model is being changed; retry this request",
+                    "gpu_swap_in_progress",
+                    503,
+                    error_type="server_error",
+                    extra={"routing": decision_body},
+                    headers=fleet_headers({"Retry-After": str(retry_after)}),
+                )
+
         admission_error = await admit("local")
         if admission_error is not None:
             return admission_error
-        url = decision.selected_url.rstrip("/") + "/chat/completions"
-        wants_stream = body.get("stream") is True
-        forward_model = _forward_model_for(body, intent.task_type, decision.selected_model)
-        payload = _forward_payload(body, forward_model, stream=wants_stream)
-        selected_context = _context_for_slot(
-            observer.get_slots(),
-            decision.selected_slot_id,
-            decision.selected_model,
-        )
-        context_extra_headers = _context_headers(
-            selected_context,
-            _estimate_prompt_tokens(body),
-            decision.selected_model,
-        )
-
-        def router_response_headers(cache_status: str, extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-            headers = {
-                "x-a0-router-slot-id": decision.selected_slot_id or "",
-                "x-a0-router-backend": decision.selected_backend_type or "",
-                "x-a0-router-requested-model": requested_model,
-                "x-a0-router-resolved-model": decision.selected_model or "",
-                "x-a0-router-strategy": decision.routing_strategy,
-                "x-a0-router-cache": cache_status,
-            }
-            if decision.selected_model:
-                headers["x-a0-router-model"] = decision.selected_model
-            headers.update(context_extra_headers)
-            if extra:
-                headers.update(extra)
-            return fleet_headers(headers)
-
-        cache_status = "BYPASS"
-        cache_lookup_key: Optional[str] = None
-        if prompt_cache is not None and not wants_stream and prompt_is_cacheable(payload):
-            cache_lookup_key = prompt_cache_key(payload, resolved_model=forward_model or decision.selected_model or "")
-            cached = prompt_cache.get(cache_lookup_key)
-            if cached is not None:
-                cache_status = "HIT"
-                await finish(
-                    "completed",
-                    slot_id=decision.selected_slot_id,
-                    model=decision.selected_model,
-                    decision=decision,
-                    cache_status=cache_status,
-                    usage=_dict_or_empty(cached.get("usage")),
+        try:
+            if (
+                hermes_request
+                and hermes_watcher is not None
+                and gpu_cfg is not None
+                and coordinated_slot == gpu_cfg.slot_id
+            ):
+                retry_response = await refresh_hermes_ingress(decision=decision)
+                if retry_response is not None:
+                    return retry_response
+            if coordinated_slot is not None:
+                lease_result = shared_manager.try_begin_slot_request(
+                    coordinated_slot, expected_epoch=slot_epoch
                 )
-                return JSONResponse(
-                    cached,
-                    status_code=200,
-                    headers=router_response_headers(cache_status),
+                if lease_result != "ok":
+                    await finish(
+                        "rejected",
+                        error_code=lease_result,
+                        decision=decision,
+                        cache_status="BYPASS",
+                    )
+                    return _openai_error(
+                        (
+                            "The selected GPU model is being changed; retry this request"
+                            if lease_result == "gpu_swap_in_progress"
+                            else "The selected GPU model changed while this request was waiting; retry it"
+                        ),
+                        lease_result,
+                        503,
+                        error_type="server_error",
+                        extra={"routing": decision_body},
+                        headers=fleet_headers(
+                            {
+                                "Retry-After": "5"
+                                if lease_result == "gpu_swap_in_progress"
+                                else "1"
+                            }
+                        ),
+                    )
+                tracked_slot_id = coordinated_slot
+            url = decision.selected_url.rstrip("/") + "/chat/completions"
+            wants_stream = body.get("stream") is True
+            forward_model = _forward_model_for(body, intent.task_type, decision.selected_model)
+            default_max_tokens = (
+                gpu_cfg.default_max_tokens(forward_model or decision.selected_model)
+                if gpu_cfg is not None and decision.selected_slot_id == gpu_cfg.slot_id
+                else None
+            )
+            payload = _forward_payload(
+                body,
+                forward_model,
+                stream=wants_stream,
+                default_max_tokens=default_max_tokens,
+            )
+            selected_context = _context_for_slot(
+                observer.get_slots(),
+                decision.selected_slot_id,
+                decision.selected_model,
+            )
+            context_extra_headers = _context_headers(
+                selected_context,
+                _estimate_prompt_tokens(body),
+                decision.selected_model,
+            )
+
+            def router_response_headers(cache_status: str, extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+                headers = {
+                    "x-a0-router-slot-id": decision.selected_slot_id or "",
+                    "x-a0-router-backend": decision.selected_backend_type or "",
+                    "x-a0-router-requested-model": requested_model,
+                    "x-a0-router-resolved-model": decision.selected_model or "",
+                    "x-a0-router-strategy": decision.routing_strategy,
+                    "x-a0-router-cache": cache_status,
+                }
+                if decision.selected_model:
+                    headers["x-a0-router-model"] = decision.selected_model
+                headers.update(context_extra_headers)
+                if extra:
+                    headers.update(extra)
+                return fleet_headers(headers)
+
+            cache_status = "BYPASS"
+            cache_lookup_key: Optional[str] = None
+            if prompt_cache is not None and not wants_stream and prompt_is_cacheable(payload):
+                cache_lookup_key = prompt_cache_key(
+                    payload, resolved_model=forward_model or decision.selected_model or ""
                 )
-            cache_status = "MISS"
+                cached = prompt_cache.get(cache_lookup_key)
+                if cached is not None:
+                    cache_status = "HIT"
+                    cached_headers = router_response_headers(cache_status)
+                    if _response_was_truncated(cached):
+                        cached_headers["x-a0-router-output-truncated"] = "true"
+                    await finish(
+                        "completed",
+                        slot_id=decision.selected_slot_id,
+                        model=decision.selected_model,
+                        decision=decision,
+                        cache_status=cache_status,
+                        usage=_dict_or_empty(cached.get("usage")),
+                    )
+                    return JSONResponse(
+                        cached,
+                        status_code=200,
+                        headers=cached_headers,
+                    )
+                cache_status = "MISS"
+        except asyncio.CancelledError:
+            await finish(
+                "failed",
+                error_code="client_disconnected",
+                slot_id=decision.selected_slot_id,
+                model=decision.selected_model,
+                decision=decision,
+                cache_status="BYPASS",
+            )
+            raise
+        except Exception:
+            await finish(
+                "failed",
+                error_code="request_preparation_failed",
+                slot_id=decision.selected_slot_id,
+                model=decision.selected_model,
+                decision=decision,
+                cache_status="BYPASS",
+            )
+            return _openai_error(
+                "The selected local request could not be prepared",
+                "request_preparation_failed",
+                500,
+                error_type="server_error",
+                extra={"routing": decision_body},
+                headers=fleet_headers(),
+            )
 
         try:
             if wants_stream:
@@ -2569,12 +3088,41 @@ def create_app(
                                 decision=decision,
                                 cache_status="BYPASS",
                             )
+                    finally:
+                        if not finished:
+                            await finish(
+                                "failed",
+                                error_code="client_disconnected",
+                                slot_id=decision.selected_slot_id,
+                                model=decision.selected_model,
+                                decision=decision,
+                                cache_status="BYPASS",
+                            )
 
-                return StreamingResponse(
+                async def close_managed_stream() -> None:
+                    try:
+                        resp.release()
+                    except Exception:
+                        pass
+                    try:
+                        await session.close()
+                    finally:
+                        if not finished:
+                            await finish(
+                                "failed",
+                                error_code="client_disconnected",
+                                slot_id=decision.selected_slot_id,
+                                model=decision.selected_model,
+                                decision=decision,
+                                cache_status="BYPASS",
+                            )
+
+                return _ManagedStreamingResponse(
                     managed_stream(),
                     status_code=resp.status,
                     media_type="text/event-stream",
                     headers=headers,
+                    on_close=close_managed_stream,
                 )
 
             async with aiohttp.ClientSession() as session:
@@ -2644,6 +3192,8 @@ def create_app(
                             headers=fleet_headers(),
                         )
 
+                    if _response_was_truncated(upstream_json):
+                        headers["x-a0-router-output-truncated"] = "true"
                     await finish(
                         "completed",
                         slot_id=decision.selected_slot_id,
@@ -2738,6 +3288,11 @@ def create_app(
         Route("/fleet/agents/register", protected(fleet_agents_register), methods=["POST"]),
         Route("/fleet/start", protected(control_gated(fleet_start_all)), methods=["POST"]),
         Route("/fleet/stop", protected(control_gated(fleet_stop_all)), methods=["POST"]),
+        Route(
+            "/fleet/prepare-shutdown",
+            protected(fleet_prepare_shutdown),
+            methods=["POST"],
+        ),
         Route("/fleet/slots/{slot_id}/start", protected(control_gated(fleet_slot_start)), methods=["POST"]),
         Route("/fleet/slots/{slot_id}/stop", protected(control_gated(fleet_slot_stop)), methods=["POST"]),
         Route("/routing/request", protected(routing_request), methods=["POST"]),
@@ -2802,6 +3357,10 @@ def create_app(
         swarm_sweep = None
         if swarm_policy.enabled:
             swarm_sweep = asyncio.create_task(swarm_registry.sweep_forever())
+        task = None
+        if hermes_watcher is not None:
+            task = asyncio.create_task(hermes_watcher.run())
+            watcher_task_ref["task"] = task
         try:
             yield
         finally:
@@ -2811,8 +3370,20 @@ def create_app(
                     await swarm_sweep
                 except asyncio.CancelledError:
                     pass
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                watcher_task_ref["task"] = None
+            if hermes_watcher is not None:
+                await hermes_watcher.stop()
 
     app = Starlette(routes=routes, lifespan=lifespan)
     app.state.setup_token = setup_token
     app.state.setup_engine = setup_engine
+    app.state.observer = observer
+    app.state.hermes_watcher = hermes_watcher
+    app.state.backend_manager = shared_manager
     return app

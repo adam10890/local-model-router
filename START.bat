@@ -22,10 +22,12 @@ if not defined A0_LMM_ROUTER_CONFIG (
         set "A0_LMM_ROUTER_CONFIG=%IMPERIUM_HOME%\conf\llama_cpp_servers.yaml"
     )
 )
+for %%F in ("%A0_LMM_ROUTER_CONFIG%") do set "IMPERIUM_CONFIG_DIR=%%~dpF"
 if not defined OBSERVER_HOST set "OBSERVER_HOST=127.0.0.1"
 if not defined OBSERVER_PORT set "OBSERVER_PORT=9000"
 set "BASE_URL=http://%OBSERVER_HOST%:%OBSERVER_PORT%"
 if not defined A0_LMM_ROUTER_AGENT_BASE_URL set "A0_LMM_ROUTER_AGENT_BASE_URL=%BASE_URL%/v1"
+if exist "%IMPERIUM_CONFIG_DIR%hermes_gpu_profiles.yaml" if not defined A0_LMM_ROUTER_ENABLE_FLEET_CONTROL set "A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1"
 
 set "PYTHON=.venv\Scripts\python.exe"
 if exist "runtime\python\python.exe" set "PYTHON=runtime\python\python.exe"
@@ -50,7 +52,7 @@ if not exist "%A0_LMM_ROUTER_CONFIG%" (
     exit /b 0
 )
 
-if exist "%IMPERIUM_HOME%\state\installation-manifest.json" (
+if not exist "%IMPERIUM_CONFIG_DIR%hermes_gpu_profiles.yaml" if exist "%IMPERIUM_HOME%\state\installation-manifest.json" (
     "%PYTHON%" -m local_model_router setup --start-runtime >nul 2>nul
 )
 

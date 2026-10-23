@@ -62,10 +62,13 @@ class FleetControlError(Exception):
 class FleetControlHandler:
     """Thin async facade over ``BackendManager`` lifecycle operations."""
 
-    def __init__(self, config_path: Optional[str] = None) -> None:
+    def __init__(self, config_path: Optional[str] = None, *, manager: Any = None) -> None:
         self._config_path = config_path
+        self._injected_manager = manager
 
     def _manager(self):
+        if self._injected_manager is not None:
+            return self._injected_manager
         from local_model_router.helpers.llama_cpp_manager import BackendManager
 
         return BackendManager.get_instance(self._config_path)
@@ -91,6 +94,19 @@ class FleetControlHandler:
             raise FleetControlError(text, "unknown_slot", 404)
         if "No backend initialized" in text:
             raise FleetControlError(text, "backend_unavailable", 503)
+        if result.get("failure_code") == "slot_operation_in_progress":
+            raise FleetControlError(text, "slot_operation_in_progress", 409)
+        code = str(result.get("failure_code") or "slot_start_failed")
+        status = 409 if code in {
+            "port_in_use",
+            "process_identity_changed",
+            "process_ownership_unverified",
+        } else 503
+        raise FleetControlError(
+            f"Slot '{slot_id}' could not be started",
+            code,
+            status,
+        )
 
     async def start_slot(self, slot_id: str) -> Dict[str, Any]:
         manager = self._manager_or_dependency_error()
@@ -109,14 +125,40 @@ class FleetControlHandler:
         if slot_id not in manager._slot_configs:
             raise FleetControlError(f"Slot '{slot_id}' not found in config", "unknown_slot", 404)
         stopped = await manager.stop_slot(slot_id)
+        if not stopped and manager.slot_operation_snapshot(slot_id)["phase"] != "idle":
+            raise FleetControlError(
+                f"Slot '{slot_id}' already has an operation in progress",
+                "slot_operation_in_progress",
+                409,
+            )
+        if not stopped:
+            failure_code = "slot_stop_failed"
+            candidate = str(
+                getattr(manager, "last_slot_failure_code", lambda _name: "")(
+                    slot_id
+                )
+                or ""
+            )
+            if candidate in {
+                "process_identity_changed",
+                "process_ownership_unverified",
+            }:
+                failure_code = candidate
+            raise FleetControlError(
+                f"Slot '{slot_id}' could not be stopped safely",
+                failure_code,
+                409,
+            )
         return {
-            "ok": bool(stopped),
+            "ok": True,
             "action": "stop",
             "slot": slot_id,
             "backend": manager.backend_type,
         }
 
     async def status(self) -> Dict[str, Dict[str, Any]]:
+        if self._injected_manager is not None:
+            return await self._injected_manager.status()
         from local_model_router.helpers.llama_cpp_manager import BackendManager
 
         return await BackendManager._instance.status() if BackendManager._instance else {}
@@ -124,14 +166,38 @@ class FleetControlHandler:
     async def start_all(self) -> Dict[str, Any]:
         manager = self._manager_or_dependency_error()
         results = await manager.start_all()
+        failures = {
+            slot_id: str(result.get("failure_code") or "slot_start_failed")
+            for slot_id, result in results.items()
+            if isinstance(result, dict) and result.get("error")
+        }
         return {
-            "ok": all(not (r or {}).get("error") for r in results.values()) if results else False,
+            "ok": bool(results) and not failures,
             "action": "start_all",
             "backend": manager.backend_type,
             "results": results,
+            "failures": failures,
         }
 
     async def stop_all(self) -> Dict[str, Any]:
         manager = self._manager_or_dependency_error()
-        await manager.stop_all()
-        return {"ok": True, "action": "stop_all", "backend": manager.backend_type}
+        results = await manager.stop_all()
+        failed = [name for name, stopped in results.items() if not stopped]
+        failures = {
+            name: (
+                "slot_operation_in_progress"
+                if manager.slot_operation_snapshot(name)["phase"] != "idle"
+                else str(
+                    getattr(manager, "last_slot_failure_code", lambda _name: "")(name)
+                    or "fleet_stop_incomplete"
+                )
+            )
+            for name in failed
+        }
+        return {
+            "ok": not failures,
+            "action": "stop_all",
+            "backend": manager.backend_type,
+            "results": results,
+            "failures": failures,
+        }

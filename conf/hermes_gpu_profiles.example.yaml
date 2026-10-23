@@ -1,0 +1,107 @@
+# Copy to conf/hermes_gpu_profiles.yaml and replace the local paths.
+# This file is the model-specific source of truth for the managed slot below.
+# No profile declares mmproj, so vision is deliberately unavailable.
+slot_id: slot_chat
+default_profile: ornith
+poll_seconds: 3
+active_window_seconds: 900
+session_limit: 32
+drain_notice_seconds: 60
+max_start_attempts: 3
+retry_backoff_seconds: [15, 60]
+
+profiles:
+  ornith:
+    model_id: ornith
+    model_path: C:\path\to\Ornith-1.5-35B-Q4_K_M.gguf
+    chat_template_path: C:\path\to\ornith-chat-template.jinja
+    context_size: 131072
+    default_max_tokens: 16384
+    gpu_layers: -1
+    batch_size: 2048
+    threads: 8
+    parallel_slots: 1
+    flash_attention: true
+    fit: true
+    fit_target_mib: 1024
+    fit_ctx_min: 65536
+    jinja: true
+    trust_tier: local_aligned
+    supports_tools: true
+    supports_vision: false
+    supports_json_mode: true
+    # Experimental first attempt only. If startup fails, the watcher retries
+    # this same GGUF without speculative flags; this is not a support claim.
+    extra_args:
+      - --cache-type-k
+      - q8_0
+      - --cache-type-v
+      - q8_0
+      - -ub
+      - "512"
+      - --fit-ctx
+      - "65536"
+      - --cont-batching
+      - --kv-unified
+      - --cache-reuse
+      - "256"
+      - --load-mode
+      - mmap+mlock
+      - --spec-default
+      - --spec-type
+      - draft-mtp
+      - --spec-draft-n-max
+      - "2"
+      - --temp
+      - "0.6"
+      - --top-p
+      - "0.95"
+      - --top-k
+      - "20"
+
+  qwen38_27b:
+    model_id: qwen38_27b
+    model_path: C:\path\to\Qwen3.8-27B-OBLITERATED-Q4_K_M.gguf
+    chat_template_path: C:\path\to\qwen38-chat-template.jinja
+    context_size: 131072
+    gpu_layers: -1
+    batch_size: 2048
+    threads: 8
+    parallel_slots: 1
+    flash_attention: true
+    fit: true
+    fit_target_mib: 1024
+    fit_ctx_min: 65536
+    jinja: true
+    trust_tier: local_uncensored
+    supports_tools: true
+    supports_vision: false
+    supports_json_mode: true
+    # Experimental first attempt only; the next bounded attempt removes these
+    # speculative flags before starting the same GGUF again.
+    extra_args:
+      - --cache-type-k
+      - q8_0
+      - --cache-type-v
+      - q8_0
+      - -ub
+      - "512"
+      - --fit-ctx
+      - "65536"
+      - --cont-batching
+      - --kv-unified
+      - --cache-reuse
+      - "256"
+      - --load-mode
+      - mmap+mlock
+      - --spec-default
+      - --spec-type
+      - draft-mtp
+      - --spec-draft-n-max
+      - "2"
+      - --reasoning
+      - "off"
+      - --repeat-penalty
+      - "1.15"
+      - --temp
+      - "0.2"

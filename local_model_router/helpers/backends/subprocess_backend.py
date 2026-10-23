@@ -12,15 +12,46 @@ Suitable when:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+from pathlib import Path
 import shlex
 import signal
+import socket
 import subprocess
 import sys
 import time
 from typing import Any, Dict, List, Optional
 
+import psutil
+
 from .base import BackendType, InferenceBackend, SlotStatus
+
+
+class _OwnedProcess:
+    """Small psutil adapter for a process adopted from persisted ownership state."""
+
+    def __init__(self, process: Any):
+        self._process = process
+        self.pid = process.pid
+
+    def poll(self):
+        try:
+            return None if self._process.is_running() else 0
+        except Exception:
+            return 0
+
+    def send_signal(self, sig):
+        self._process.send_signal(sig)
+
+    def terminate(self):
+        self._process.terminate()
+
+    def kill(self):
+        self._process.kill()
+
+    def wait(self, timeout=None):
+        return self._process.wait(timeout=timeout)
 
 
 class SubprocessBackend(InferenceBackend):
@@ -37,6 +68,8 @@ class SubprocessBackend(InferenceBackend):
         self._slots: Dict[str, SlotStatus] = {}
         self._started_at: Dict[str, float] = {}
         self._process_identities: Dict[str, float] = {}
+        self._process_executables: Dict[str, str] = {}
+        self._process_state_path: Optional[Path] = None
 
     @property
     def backend_type(self) -> BackendType:
@@ -78,6 +111,12 @@ class SubprocessBackend(InferenceBackend):
             status.error = "Model file not found"
             status.extra["failure_code"] = "model_missing"
             self.logger.error(status.error)
+            self._slots[name] = status
+            return status
+
+        if self._port_open("127.0.0.1", port):
+            status.error = "Port is already in use by another or unverifiable process"
+            status.extra["failure_code"] = "port_in_use"
             self._slots[name] = status
             return status
 
@@ -129,9 +168,33 @@ class SubprocessBackend(InferenceBackend):
             self._processes[name] = proc
             self._started_at[name] = time.monotonic()
             identity = self._process_create_time(proc.pid)
+            executable = self._process_executable(proc.pid)
             if identity is not None:
                 self._process_identities[name] = identity
+            if executable:
+                self._process_executables[name] = executable
             status.pid = proc.pid
+
+            if identity is None or not executable:
+                status.running = proc.poll() is None
+                status.error = "Could not verify ownership of the started process"
+                status.extra["failure_code"] = "process_ownership_unverified"
+                self._slots[name] = status
+                await self._stop_known_process(name, proc)
+                return status
+            self._process_identities[name] = identity
+            self._process_executables[name] = executable
+            try:
+                # Persist ownership before the potentially long model load so a
+                # restarted router can still adopt and stop this exact process.
+                self._write_process_state(name, config, proc.pid, identity, executable)
+            except OSError:
+                await self._stop_known_process(name, proc)
+                status.running = False
+                status.healthy = False
+                status.error = "Could not persist process ownership"
+                status.extra["failure_code"] = "state_write_failed"
+                return status
 
             timeout = self._get_startup_timeout()
             if await self._wait_healthy(port, timeout, proc):
@@ -148,6 +211,7 @@ class SubprocessBackend(InferenceBackend):
                 else:
                     status.error = f"Process exited during startup (exit code {exit_code})"
                     status.extra.update(failure_code="process_exited", exit_code=exit_code)
+                    self._remove_process_state(proc.pid)
                 self.logger.error(f"Slot '{name}' failed health check")
 
         except Exception as e:
@@ -170,16 +234,34 @@ class SubprocessBackend(InferenceBackend):
             return False
 
         expected_identity = self._process_identities.get(name)
+        expected_executable = self._process_executables.get(name)
         current_identity = self._process_create_time(proc.pid)
-        if (
+        current_executable = self._process_executable(proc.pid)
+        identity_changed = (
             expected_identity is not None
             and current_identity is not None
-            and current_identity != expected_identity
-        ):
+            and abs(current_identity - expected_identity) > 0.001
+        )
+        ownership_unverified = (
+            expected_identity is None
+            or current_identity is None
+            or not expected_executable
+            or not current_executable
+            or (
+                not identity_changed
+                and os.path.normcase(os.path.realpath(current_executable))
+                != os.path.normcase(os.path.realpath(expected_executable))
+            )
+        )
+        if identity_changed or ownership_unverified:
             status = self._slots.get(name)
             if status:
-                status.error = "Process identity changed; refusing to stop"
-                status.extra["failure_code"] = "process_identity_changed"
+                if identity_changed:
+                    status.error = "Process identity changed; refusing to stop"
+                    status.extra["failure_code"] = "process_identity_changed"
+                else:
+                    status.error = "Process ownership could not be verified; refusing to stop"
+                    status.extra["failure_code"] = "process_ownership_unverified"
             return False
 
         try:
@@ -190,19 +272,21 @@ class SubprocessBackend(InferenceBackend):
                     proc.terminate()
 
                 try:
-                    proc.wait(timeout=10)
-                except subprocess.TimeoutExpired:
+                    await asyncio.to_thread(proc.wait, 10)
+                except (subprocess.TimeoutExpired, psutil.TimeoutExpired, TimeoutError):
                     proc.kill()
-                    proc.wait(timeout=10)
+                    await asyncio.to_thread(proc.wait, 10)
 
             self._processes.pop(name, None)
             self._slots.pop(name, None)
             self._started_at.pop(name, None)
             self._process_identities.pop(name, None)
+            self._process_executables.pop(name, None)
+            self._remove_process_state(proc.pid)
             self.logger.info(f"Stopped slot '{name}'")
             return True
         except Exception as e:
-            self.logger.warning(f"Error stopping slot '{name}': {e}")
+            self.logger.warning("Error stopping slot '%s' (%s)", name, type(e).__name__)
             return False
 
     async def health_check(self, name: str) -> SlotStatus:
@@ -257,6 +341,74 @@ class SubprocessBackend(InferenceBackend):
             await self.stop_slot(name)
         self.logger.info(f"Cleaned up {len(names)} process(es)")
 
+    def configure_process_state(self, path: str | os.PathLike[str]) -> None:
+        self._process_state_path = Path(path).resolve(strict=False)
+
+    def owns_slot(self, name: str) -> bool:
+        proc = self._processes.get(name)
+        return bool(proc is not None and proc.poll() is None)
+
+    def adopt_slot(self, name: str, config: Dict[str, Any]) -> bool:
+        """Adopt only a process whose persisted PID, start time, executable and model all match."""
+        path = self._process_state_path
+        if path is None or not path.is_file() or name in self._processes:
+            return False
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+            pid = int(state.get("pid") or 0)
+            port = int(config.get("port") or 8080)
+            expected_created = float(state["process_created_at"])
+            expected_executable = str(state["process_executable"])
+            expected_model = str(state.get("model") or "")
+            if (
+                pid <= 0
+                or str(state.get("slot_id") or "") != name
+                or int(state.get("port") or 0) != port
+            ):
+                return False
+            process = psutil.Process(pid)
+            actual_executable = str(Path(process.exe()).resolve(strict=False))
+            command = {
+                str(Path(arg).resolve(strict=False)).casefold()
+                for arg in process.cmdline()
+                if arg
+            }
+            recorded_model = (
+                str(Path(expected_model).resolve(strict=False)).casefold()
+                if expected_model
+                else ""
+            )
+            if (
+                abs(process.create_time() - expected_created) >= 2.0
+                or os.path.normcase(os.path.realpath(actual_executable))
+                != os.path.normcase(os.path.realpath(expected_executable))
+                or not recorded_model
+                or recorded_model not in command
+            ):
+                return False
+            configured_model = str(config.get("model_path") or "")
+            if configured_model and (
+                os.path.normcase(os.path.realpath(configured_model))
+                != os.path.normcase(os.path.realpath(expected_model))
+            ):
+                return False
+            self._processes[name] = _OwnedProcess(process)
+            self._process_identities[name] = expected_created
+            self._process_executables[name] = actual_executable
+            self._started_at[name] = time.monotonic()
+            self._slots[name] = SlotStatus(
+                name=name,
+                port=port,
+                host="localhost",
+                model_id=str(config.get("model_id") or ""),
+                pid=pid,
+                running=True,
+            )
+            self.logger.info("Adopted verified managed slot '%s' (pid=%s)", name, pid)
+            return True
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError, psutil.Error):
+            return False
+
     # ── Private helpers ─────────────────────────────────────────────
 
     def _get_binary(self) -> str:
@@ -285,11 +437,86 @@ class SubprocessBackend(InferenceBackend):
     @staticmethod
     def _process_create_time(pid: int) -> Optional[float]:
         try:
-            import psutil
-
             return float(psutil.Process(pid).create_time())
         except (psutil.Error, OSError, ValueError):
             return None
+
+    @staticmethod
+    def _process_executable(pid: int) -> Optional[str]:
+        try:
+            return str(Path(psutil.Process(pid).exe()).resolve(strict=False))
+        except (psutil.Error, OSError, ValueError):
+            return None
+
+    @staticmethod
+    def _port_open(host: str, port: int) -> bool:
+        try:
+            with socket.create_connection((host, port), timeout=0.2):
+                return True
+        except OSError:
+            return False
+
+    async def _stop_known_process(self, name: str, proc: Any) -> None:
+        """Stop the exact Popen object created by this backend after an ownership-read failure."""
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    await asyncio.to_thread(proc.wait, 10)
+                except (subprocess.TimeoutExpired, TimeoutError):
+                    proc.kill()
+                    await asyncio.to_thread(proc.wait, 10)
+        except Exception:
+            pass
+        finally:
+            self._processes.pop(name, None)
+            self._slots.pop(name, None)
+            self._started_at.pop(name, None)
+            self._process_identities.pop(name, None)
+            self._process_executables.pop(name, None)
+
+    def _write_process_state(
+        self,
+        name: str,
+        config: Dict[str, Any],
+        pid: int,
+        created_at: float,
+        executable: str,
+    ) -> None:
+        path = self._process_state_path
+        if path is None:
+            return
+        payload = {
+            "schema_version": 2,
+            "slot_id": name,
+            "pid": pid,
+            "binary": executable,
+            "process_executable": executable,
+            "process_created_at": created_at,
+            "model": str(config.get("model_path") or ""),
+            "port": int(config.get("port") or 8080),
+            "visible_terminal": bool(config.get("visible_terminal")),
+            "started_at": time.time(),
+            "log": str(Path(str(self.global_config.get("log_dir") or "logs/llama_cpp")) / f"{name}.log"),
+        }
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _remove_process_state(self, pid: int) -> None:
+        path = self._process_state_path
+        if path is None or not path.is_file():
+            return
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+            if int(state.get("pid") or 0) == pid:
+                path.unlink(missing_ok=True)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return
 
     def _convert_wsl_path(self, win_path: str) -> str:
         if not win_path:

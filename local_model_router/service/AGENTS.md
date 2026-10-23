@@ -51,7 +51,9 @@ control (`fleet_control.py`). Agent ticket coordination lives in
 - `/setup/*` is loopback-only, protected by an ephemeral setup token, and may
   download or write only after explicit reviewed consent. `GET /ui/status`
   uses `configuration`/`system` issue categories and stable issue/action codes
-  instead of asking the UI to infer remedies.
+  instead of asking the UI to infer remedies. `active.model` is the GGUF
+  identity from the live llama.cpp process (or the slot's `/v1/models`); it
+  must not be a Hermes pin name such as `local`.
 - OpenAI-compatible endpoints reuse the routing decision path and forward to
   the selected llama.cpp slot; no duplicate routing policy.
 - `POST /v1/embeddings` selects the local `embed` lane through that same

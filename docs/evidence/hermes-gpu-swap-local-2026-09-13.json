@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "kind": "hermes_gpu_swap_smoke",
+  "date": "2026-09-13",
+  "scope": "local_source_single_gpu",
+  "result": "partial",
+  "checks": {
+    "ornith_to_obliterated": "pass",
+    "obliterated_to_ornith": "pass",
+    "health": "pass",
+    "model_identity": "pass",
+    "managed_process_ownership": "pass",
+    "completion": "pass",
+    "stream": "pass",
+    "tools": "pass",
+    "swap_503_code": "pass",
+    "retry_after": "pass",
+    "effective_context": "pass",
+    "start_stop": "pass",
+    "hermes_wait_until_ready": "partial"
+  },
+  "observations": {
+    "effective_n_ctx": 131072,
+    "retry_after_seconds": 5,
+    "hermes_version": "0.21.1",
+    "hermes_retry_attempts": 3,
+    "hermes_result": "retry_budget_exhausted_before_ready",
+    "manual_resend_after_ready": "pass"
+  },
+  "privacy": {
+    "prompt_bodies_recorded": false,
+    "response_bodies_recorded": false,
+    "api_keys_recorded": false,
+    "session_ids_recorded": false,
+    "local_paths_recorded": false,
+    "process_ids_recorded": false
+  },
+  "limitation": "Hermes retries the retryable 503 three times, which is shorter than a full cold model load."
+}

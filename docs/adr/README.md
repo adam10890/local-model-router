@@ -18,6 +18,7 @@ Short product and engineering decisions for Imperium.
 | [0012](0012-hot-cold-policy-doc.md) | Hot/cold policy doc started | Accepted |
 | [0013](0013-executor-trust-ladder.md) | Executor trust ladder | Accepted |
 | [0014](0014-cloud-task-disclosure.md) | Cloud models get requirements, not purpose | Accepted |
+| [0015](0015-hermes-gpu-session-swap.md) | Hermes session chooses the single GPU GGUF | Accepted |
 
 Product outcomes stay in [`GOALS.md`](../../GOALS.md). Sequencing stays in
 [`1.0-beta-roadmap.html`](../1.0-beta-roadmap.html).

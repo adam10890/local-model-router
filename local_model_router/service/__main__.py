@@ -7,10 +7,12 @@ Entry point for the lmm-router standalone observer service.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
 
+import psutil
 import uvicorn
 
 from .app import create_app
@@ -54,6 +56,46 @@ def _validate_bind_auth(host: str) -> None:
     )
 
 
+def router_process_state_path() -> Path:
+    home = os.environ.get("IMPERIUM_HOME", "").strip()
+    if home:
+        return Path(home).expanduser().resolve(strict=False) / "state" / "router-process.json"
+    local = os.environ.get("LOCALAPPDATA", "").strip()
+    base = Path(local) / "Imperium" if os.name == "nt" and local else Path.home() / ".imperium"
+    return base / "state" / "router-process.json"
+
+
+def _write_router_process_state(host: str, port: int, config_path: str) -> Path:
+    process = psutil.Process(os.getpid())
+    path = router_process_state_path()
+    payload = {
+        "schema_version": 1,
+        "pid": process.pid,
+        "process_executable": process.exe(),
+        "process_created_at": process.create_time(),
+        "host": host,
+        "port": port,
+        "config_path": str(Path(config_path).resolve(strict=False)),
+    }
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return path
+
+
+def _remove_router_process_state(path: Path) -> None:
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+        if int(state.get("pid") or 0) == os.getpid():
+            path.unlink(missing_ok=True)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return
+
+
 def main() -> None:
     host = os.environ.get("OBSERVER_HOST", "127.0.0.1")
     port = int(os.environ.get("OBSERVER_PORT", "9000"))
@@ -61,7 +103,11 @@ def main() -> None:
 
     _validate_bind_auth(host)
     app = create_app(config_path)
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    state_path = _write_router_process_state(host, port, config_path)
+    try:
+        uvicorn.run(app, host=host, port=port, log_level="info")
+    finally:
+        _remove_router_process_state(state_path)
 
 
 if __name__ == "__main__":

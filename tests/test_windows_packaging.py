@@ -13,8 +13,11 @@ def test_launchers_persist_settings_and_identify_the_router():
     assert '%IMPERIUM_HOME%\\.env' in start
     assert '%IMPERIUM_HOME%\\.env' in stop
     assert "$health.service -eq 'lmm-router-observer'" in start
-    assert "Get-NetTCPConnection -LocalPort %OBSERVER_PORT%" in stop
-    assert "local_model_router\\s+serve" in stop
+    assert '"%PYTHON%" -m local_model_router shutdown' in stop
+    assert "Get-NetTCPConnection" not in stop
+    assert "router_ownership_unverified" in (ROOT / "local_model_router" / "cli.py").read_text(
+        encoding="utf-8"
+    )
     assert "timeout /t" not in stop.lower()
     assert "exit /b %errorlevel%" not in start
     assert "if errorlevel 1 exit /b 1" in start

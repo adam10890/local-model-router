@@ -378,7 +378,17 @@ def context_status_from_slot(slot: Mapping[str, Any], env: Mapping[str, str] | N
     """Return Fleet Manager context telemetry for a configured slot."""
     env = env or os.environ
     role = normalize_role(str(slot.get("role") or "chat"))
-    hard_ctx = int(slot.get("context_size") or min_ctx_for_role(role, env))
+    requires_live_measurement = (
+        "configured_context_size" in slot and "effective_context_size" in slot
+    )
+    raw_context = slot.get("context_size")
+    hard_ctx = (
+        int(raw_context)
+        if raw_context
+        else None
+        if requires_live_measurement
+        else min_ctx_for_role(role, env)
+    )
     ratio = effective_ratio_for_role(role, env)
     reserve = response_reserve_for_role(role, env)
     return {
@@ -387,7 +397,7 @@ def context_status_from_slot(slot: Mapping[str, Any], env: Mapping[str, str] | N
         "model_id": slot.get("model_id"),
         "min_ctx": min_ctx_for_role(role, env),
         "hard_ctx": hard_ctx,
-        "effective_ctx": int(hard_ctx * ratio),
+        "effective_ctx": int(hard_ctx * ratio) if hard_ctx else None,
         "response_reserve": reserve,
         "effective_ratio": ratio,
         "occupancy": None,
