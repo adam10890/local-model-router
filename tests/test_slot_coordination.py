@@ -237,4 +237,3 @@ def test_auto_restart_waits_for_active_request_before_starting():
     assert backend.starts == 1
     assert manager._restart_attempts["slot_chat"] == 1
     assert manager.slot_operation_snapshot("slot_chat")["phase"] == "idle"
-

@@ -1172,4 +1172,3 @@ def test_default_probe_reads_props_and_falls_back_to_v1_models(monkeypatch):
         "context_source": "v1_models",
     }
     assert calls == ["/health", "/props", "/health", "/props", "/v1/models"]
-
