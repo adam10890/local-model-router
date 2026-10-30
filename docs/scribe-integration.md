@@ -105,3 +105,9 @@ one of the two Scribe evaluation cases passed, and one worker summary omitted
 its failure count. Daily activation is blocked. Installed Agent Zero/Pen & Paper
 hooks and the live-chat p95 comparison remain Unknown. Do not promote this
 candidate from an inference/connectivity pass alone.
+
+A separate read-only code review found no additional code blockers in router
+`7c4122d` and client `cd658af`. It covered admission cleanup, privacy enforcement,
+evaluation invalidation, HTTP/circuit behavior, worker config and redaction.
+This review did not rerun the tests or verify installed hooks; direct concurrent
+client calls are outside the current single-worker runtime evidence.
