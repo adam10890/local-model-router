@@ -43,3 +43,13 @@ harnesses:
     connections:
       default:
         model: dmr/huggingface.co/deepreinforce-ai/ornith-1.0-9b-gguf:Q8_0
+
+  a0_scribe:
+    display_name: A0 Scribe
+    kind: a0_scribe
+    protocol: openai
+    location: docker
+    connections:
+      default:
+        # Dedicated local slot; unavailable means skip, never use chat/cloud.
+        model: scribe

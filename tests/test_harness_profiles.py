@@ -192,12 +192,13 @@ def test_committed_profiles_cover_current_harnesses_and_claude_adapter():
     path = Path(__file__).resolve().parents[1] / "conf" / "harnesses.yaml"
     profiles = HarnessProfiles.load(path)
     assert {item.harness_id for item in profiles.list_profiles()} == {
-        "agent_zero", "claude_code_local", "hermes", "pi",
+        "a0_scribe", "agent_zero", "claude_code_local", "hermes", "pi",
     }
     hermes_model = profiles.resolve("hermes").model
     assert hermes_model, "hermes must pin a concrete model"
     assert not hermes_model.startswith("ollama/"), "Hermes pin should be local fleet or explicit upstream, not local Ollama GGUF serving"
     assert profiles.resolve("agent_zero", "utility").model.startswith("dmr/")
+    assert profiles.resolve("a0_scribe").model == "scribe"
     agent_zero = setup_manifest(profiles.get("agent_zero"), auth_required=False)
     assert agent_zero["setup"]["target"] == "Agent Zero v2.7 Model Presets"
     setup = agent_zero["setup"]["content"]

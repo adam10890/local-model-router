@@ -16,6 +16,7 @@ from typing import Any, Callable, Optional
 from local_model_router.service.fleet_manager import FleetStore
 
 RequestFn = Callable[[str, str, Optional[dict[str, Any]]], Any]
+EVALUATION_SUITE_VERSION = 2
 
 
 def http_requester(base_url: str, api_key: str = "") -> RequestFn:
@@ -80,6 +81,22 @@ def _valid_scribe(data: dict[str, Any]) -> bool:
     return all(fact in content for fact in ("Orion", "17", "blue")) and len(content.split()) <= 30
 
 
+def _valid_scribe_fidelity(data: dict[str, Any]) -> bool:
+    content = _message(data).get("content")
+    if not isinstance(content, str):
+        return False
+    try:
+        facts = json.loads(content)
+    except (TypeError, ValueError):
+        return False
+    return (
+        isinstance(facts, dict)
+        and facts == {"command": "pytest -q", "failed": 2, "fix_applied": False}
+        and type(facts["failed"]) is int
+        and facts["fix_applied"] is False
+    )
+
+
 def _valid_code(data: dict[str, Any]) -> bool:
     normalized = " ".join(_content(data).replace("\n", " ").split())
     return "def add(a, b):" in normalized and "return a + b" in normalized
@@ -138,6 +155,10 @@ def _cases(model_id: str, embedding_only: bool) -> list[tuple[str, str, str, dic
         ("tool", "utility", "/v1/chat/completions", tool_payload, _valid_tool),
         ("coding", "utility", "/v1/chat/completions", _chat_payload(model_id, "Write only a Python function add(a, b) that returns their sum.", "utility"), _valid_code),
         ("scribe", "scribe", "/v1/chat/completions", _chat_payload(model_id, "In at most 30 words preserve these facts: project Orion, 17 tasks, color blue.", "scribe"), _valid_scribe),
+        ("scribe_fidelity", "scribe", "/v1/chat/completions", _chat_payload(model_id,
+            "Log: command pytest -q; result: 2 failed; no fix was applied. "
+            "Report only these observed facts as a JSON object with exactly the keys "
+            "command (string), failed (integer), and fix_applied (boolean).", "scribe"), _valid_scribe_fidelity),
     ]
 
 
@@ -153,6 +174,7 @@ def _fingerprint(model: dict[str, Any], local: dict[str, Any], status: dict[str,
     discovery = setup.get("discovery") if isinstance(setup.get("discovery"), dict) else {}
     hardware = status.get("hardware") if isinstance(status.get("hardware"), dict) else {}
     material = {
+        "suite_version": EVALUATION_SUITE_VERSION,
         "model_id": model.get("model_id"),
         "slot_id": model.get("slot_id"),
         "file": file_state,
@@ -303,6 +325,7 @@ def evaluate_models(request: RequestFn, store: FleetStore, *, force: bool = Fals
 
     payload = {
         "schema_version": 1,
+        "suite_version": EVALUATION_SUITE_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "models": evaluated,
     }

@@ -6,6 +6,12 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Dedicated `local:scribe` admission for resolved local Scribe slots, with
+  configurable capacity, a pinned `a0_scribe` harness, and a structured
+  factuality evaluation whose suite version invalidates old cached results.
+- Explicit local-only privacy intent now rejects direct or pinned upstream
+  targets before forwarding or admission, rather than bypassing that policy.
+
 - Opt-in swarm terminal heartbeat, plus a dry-run `POST /v1/execution/plan`
   that filters lanes and picks a route with a local heuristic. The planner
   does not call Jev and does not spawn a terminal.

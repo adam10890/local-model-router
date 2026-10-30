@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "daily_activation": false,
+  "installed_agent_zero_hooks": "Unknown",
+  "cpu_only_flags": [
+    "--device",
+    "none",
+    "--gpu-layers",
+    "0",
+    "--fit",
+    "off",
+    "--no-kv-offload",
+    "--no-op-offload"
+  ],
+  "cpu_only_log_verified": false,
+  "gpu_process_absent": true,
+  "ping": true,
+  "evaluation": {
+    "schema_version": 1,
+    "suite_version": 2,
+    "generated_at": "2026-10-30T18:51:25.335958+00:00",
+    "models": [
+      {
+        "model_id": "scribe",
+        "slot_id": "scribe_cpu",
+        "fingerprint": "94274181aafa89f7ca76f03e5368807afdd7c6e18aa5132ee3052f00e041ed7b",
+        "roles": {
+          "chat": {
+            "pass_rate": 1.0,
+            "reliability": 1.0,
+            "median_latency_ms": 367.0,
+            "tokens_per_second": 16.54,
+            "resource_cost_hint": 0.5,
+            "cases": 2
+          },
+          "scribe": {
+            "pass_rate": 0.5,
+            "reliability": 1.0,
+            "median_latency_ms": 1000.0,
+            "tokens_per_second": 21.49,
+            "resource_cost_hint": 0.5,
+            "cases": 2
+          },
+          "utility": {
+            "pass_rate": 1.0,
+            "reliability": 1.0,
+            "median_latency_ms": 836.0,
+            "tokens_per_second": 18.28,
+            "resource_cost_hint": 0.5,
+            "cases": 2
+          }
+        },
+        "skipped_reason": null
+      }
+    ]
+  },
+  "scribe_evaluation_pass": false,
+  "worker_scenarios": [
+    {
+      "id": "synthetic_0",
+      "event_recorded": true,
+      "note_written": true,
+      "expected_failure_count_present": false,
+      "latency_seconds": 2.703,
+      "invented_success": false
+    },
+    {
+      "id": "synthetic_1",
+      "event_recorded": true,
+      "note_written": true,
+      "expected_failure_count_present": true,
+      "latency_seconds": 1.797,
+      "invented_success": false
+    },
+    {
+      "id": "synthetic_2",
+      "event_recorded": true,
+      "note_written": true,
+      "expected_failure_count_present": true,
+      "latency_seconds": 1.781,
+      "invented_success": false
+    },
+    {
+      "id": "synthetic_3",
+      "event_recorded": true,
+      "note_written": true,
+      "expected_failure_count_present": true,
+      "latency_seconds": 1.797,
+      "invented_success": false
+    },
+    {
+      "id": "synthetic_4",
+      "event_recorded": true,
+      "note_written": true,
+      "expected_failure_count_present": true,
+      "latency_seconds": 1.828,
+      "invented_success": false
+    },
+    {
+      "id": "synthetic_5",
+      "event_recorded": true,
+      "note_written": true,
+      "expected_failure_count_present": true,
+      "latency_seconds": 1.828,
+      "invented_success": false
+    },
+    {
+      "id": "synthetic_6",
+      "event_recorded": true,
+      "note_written": true,
+      "expected_failure_count_present": true,
+      "latency_seconds": 1.813,
+      "invented_success": false
+    },
+    {
+      "id": "synthetic_7",
+      "event_recorded": true,
+      "note_written": true,
+      "expected_failure_count_present": true,
+      "latency_seconds": 1.875,
+      "invented_success": false
+    },
+    {
+      "id": "silent_0",
+      "event_recorded": true,
+      "safe_silence": true,
+      "inference": "simulated_failure"
+    },
+    {
+      "id": "silent_1",
+      "event_recorded": true,
+      "safe_silence": true,
+      "inference": "simulated_failure"
+    }
+  ],
+  "worker_scenarios_pass": false,
+  "health_counters": {
+    "ok": 8,
+    "busy": 0,
+    "unavailable": 0,
+    "timeout": 0,
+    "auth": 0,
+    "invalid_response": 0,
+    "error": 0,
+    "circuit_open_skips": 0
+  },
+  "admission_lane": "local:scribe",
+  "privacy_canary_absent": true,
+  "chat_comparison": "pending",
+  "verdict": "Fail",
+  "owned_processes_stopped": true,
+  "run_date": "2026-10-30",
+  "candidate": "local",
+  "pilot_storage": "isolated test adapter; installed Pen & Paper and Agent Zero hooks not verified",
+  "router_hermetic_tests": 868,
+  "client_hermetic_tests": 69,
+  "coverage_gates": "passed",
+  "candidate_sha256": "691ccf0953a983ea04e285d2feaf7f8ce52596e704021fcb4dff8c4d2e36ee6a"
+}
