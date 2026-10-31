@@ -74,7 +74,7 @@ RC evidence automatically.
 | Hermes | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) | 0.21.0, Documented 2026-09-01 | 0.21.1, Observed 2026-09-13 | Basic client canary Pass; unattended cold-swap wait Partial because the client exhausts three retries before readiness | `/harnesses/hermes/v1` |
 | Pi | [earendil-works/pi](https://github.com/earendil-works/pi) (`badlogic/pi-mono`) | 0.84.4, Documented 2026-09-01 | 0.80.6, Observed 2026-09-01 | Client canary **Unknown**; upgrade gap | `/harnesses/pi/v1` |
 | Claude Code (local) | Anthropic Claude Code + LiteLLM bridge | 2.1.257, Documented 2026-09-01 | 2.1.220, Observed 2026-09-01 | Client canary **Unknown**; upgrade gap | `/harnesses/claude_code_local/v1` |
-| A0 Scribe | [adam10890/a0_scribe](https://github.com/adam10890/a0_scribe) | 0.1.0, Documented 2026-10-30; client PR adds 0.2.0 | Existing installation not upgraded | Isolated source pilot recorded separately; installed hooks Unknown | `/harnesses/a0_scribe/v1` |
+| A0 Scribe | [adam10890/a0_scribe](https://github.com/adam10890/a0_scribe) | 0.1.0, Documented 2026-10-30; client PR adds 0.2.0 | Existing installation not upgraded | Isolated CPU source pilot Pass 2026-10-31 for bounded probes; installed hooks Unknown | `/harnesses/a0_scribe/v1` |
 
 "Checked against docs" means the Imperium setup snippet was reviewed against
 that release's OpenAI-compatible / provider settings. It is not a substitute

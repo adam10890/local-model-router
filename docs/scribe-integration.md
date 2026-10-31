@@ -60,7 +60,7 @@ Use a separate checkout, loopback ports, configuration/log directory,
 still share the live telemetry database or router ownership state. Disable the
 Hermes watcher. Use synthetic events and an isolated Pen & Paper sink.
 
-For a CPU pilot, start with 8192 context, four threads, one parallel sequence,
+For a CPU pilot, start with 8192 context, one compute thread, one parallel sequence,
 and a small existing model selected by the operator. With the installed engine,
 `gpu_layers: 0` alone is insufficient because the backend can omit the flag.
 Verify runtime support with `llama-server --help`, set `fit: false`, and use:
@@ -102,12 +102,45 @@ The [2026-10-30 isolated CPU pilot](evidence/scribe-cpu-pilot-2026-10-30.json)
 proved connectivity, Scribe attribution/lane selection, content-free telemetry,
 and cleanup of its owned processes. The candidate **failed** the quality gate:
 one of the two Scribe evaluation cases passed, and one worker summary omitted
-its failure count. Daily activation is blocked. Installed Agent Zero/Pen & Paper
-hooks and the live-chat p95 comparison remain Unknown. Do not promote this
-candidate from an inference/connectivity pass alone.
+its failure count. At that checkpoint daily activation was blocked, and installed
+hooks and live-chat p95 evidence were Unknown. The follow-up below supersedes
+the source-pilot/chat evidence; do not promote the initial candidate from an
+inference/connectivity pass alone.
 
 A separate read-only code review found no additional code blockers in router
 `7c4122d` and client `cd658af`. It covered admission cleanup, privacy enforcement,
 evaluation invalidation, HTTP/circuit behavior, worker config and redaction.
 This review did not rerun the tests or verify installed hooks; direct concurrent
 client calls are outside the current single-worker runtime evidence.
+
+## Larger CPU candidate follow-up (2026-10-31)
+
+Adam approved a second, already-installed candidate on CPU. The
+[four-thread normal-priority run](evidence/scribe-cpu-larger-normal-2026-10-31.json)
+passed both Scribe regressions but failed the unchanged 20-percent chat p95 gate:
+141 ms alone versus 203 ms with background Scribe (ratio 1.4397).
+
+The [one-thread Windows idle-priority run](evidence/scribe-cpu-larger-idle-2026-10-31.json)
+passed the same gates. Native process priority and explicit no-offload argv were
+verified; the process was absent from NVIDIA's compute-process list. Both Scribe
+regressions passed. Eight real worker notes preserved counts/fix status within
+60 seconds; two additional safe-silence cases simulated inference failure.
+Chat p95 was 141 ms alone and 125 ms with Scribe, with three warmups and twenty
+samples per condition. This short cached-completion microprobe establishes no
+measured regression for this run, not a speedup or a general latency guarantee.
+All owned pilot processes stopped; neither installed runtime was reconfigured.
+
+Use the reviewed weight fingerprint in the evidence and revalidate after model,
+engine, hardware, flags or workload changes. The pilot disabled thinking with
+`--chat-template-kwargs '{"enable_thinking":false}'`. Windows idle process
+priority is a **native launcher setting**, not `X-Priority: low` and not an
+automatic property of Imperium's current fleet start. Check `Process.nice()`
+(or Windows process properties) on the owned engine before measuring. A normal
+priority/four-thread launch did not meet this run's gate.
+
+Independent review of the synthetic notes found wording broader than the input:
+"quick pytest run" and "no corrective actions were taken". The count/fix-status
+rubric does not detect these qualifiers; do not describe it as general factuality
+proof. Installed Agent Zero/Pen & Paper hooks and daily activation remain
+unverified and are separate operator gates. This evidence completes the approved
+isolated source pilot, not a deployment.

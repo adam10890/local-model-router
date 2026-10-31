@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "daily_activation": false,
+  "installed_agent_zero_hooks": "Unknown",
+  "cpu_only_flags": [
+    "--device",
+    "none",
+    "--gpu-layers",
+    "0",
+    "--fit",
+    "off",
+    "--no-kv-offload",
+    "--no-op-offload"
+  ],
+  "cpu_only_argv_verified": true,
+  "thinking_disabled": true,
+  "ram_after_load_gib": 11.16,
+  "gpu_process_absent": true,
+  "ping": true,
+  "evaluation": {
+    "schema_version": 1,
+    "suite_version": 2,
+    "generated_at": "2026-10-31T09:54:57.092778+00:00",
+    "models": [
+      {
+        "model_id": "scribe",
+        "slot_id": "scribe_cpu",
+        "fingerprint": "0327b38a81889f9cbf470b784ae46ba5fd6c90e8a4b73a2df55be65e726bfa1a",
+        "roles": {
+          "chat": {
+            "pass_rate": 1.0,
+            "reliability": 1.0,
+            "median_latency_ms": 1148.5,
+            "tokens_per_second": 5.22,
+            "resource_cost_hint": 0.5,
+            "cases": 2
+          },
+          "scribe": {
+            "pass_rate": 1.0,
+            "reliability": 1.0,
+            "median_latency_ms": 3632.5,
+            "tokens_per_second": 6.45,
+            "resource_cost_hint": 0.5,
+            "cases": 2
+          },
+          "utility": {
+            "pass_rate": 1.0,
+            "reliability": 1.0,
+            "median_latency_ms": 6211.0,
+            "tokens_per_second": 4.57,
+            "resource_cost_hint": 0.5,
+            "cases": 2
+          }
+        },
+        "skipped_reason": null
+      }
+    ]
+  },
+  "scribe_evaluation_pass": true,
+  "worker_scenarios": [
+    {
+      "id": "synthetic_0",
+      "event_recorded": true,
+      "note_written": true,
+      "expected_failure_count_present": true,
+      "latency_seconds": 9.203,
+      "invented_success": false
+    },
+    {
+      "id": "synthetic_1",
+      "event_recorded": true,
+      "note_written": true,
+      "expected_failure_count_present": true,
+      "latency_seconds": 4.609,
+      "invented_success": false
+    },
+    {
+      "id": "synthetic_2",
+      "event_recorded": true,
+      "note_written": true,
+      "expected_failure_count_present": true,
+      "latency_seconds": 4.813,
+      "invented_success": false
+    },
+    {
+      "id": "synthetic_3",
+      "event_recorded": true,
+      "note_written": true,
+      "expected_failure_count_present": true,
+      "latency_seconds": 4.734,
+      "invented_success": false
+    },
+    {
+      "id": "synthetic_4",
+      "event_recorded": true,
+      "note_written": true,
+      "expected_failure_count_present": true,
+      "latency_seconds": 4.563,
+      "invented_success": false
+    },
+    {
+      "id": "synthetic_5",
+      "event_recorded": true,
+      "note_written": true,
+      "expected_failure_count_present": true,
+      "latency_seconds": 4.672,
+      "invented_success": false
+    },
+    {
+      "id": "synthetic_6",
+      "event_recorded": true,
+      "note_written": true,
+      "expected_failure_count_present": true,
+      "latency_seconds": 4.562,
+      "invented_success": false
+    },
+    {
+      "id": "synthetic_7",
+      "event_recorded": true,
+      "note_written": true,
+      "expected_failure_count_present": true,
+      "latency_seconds": 4.531,
+      "invented_success": false
+    },
+    {
+      "id": "silent_0",
+      "event_recorded": true,
+      "safe_silence": true,
+      "inference": "simulated_failure"
+    },
+    {
+      "id": "silent_1",
+      "event_recorded": true,
+      "safe_silence": true,
+      "inference": "simulated_failure"
+    }
+  ],
+  "worker_scenarios_pass": true,
+  "health_counters": {
+    "ok": 8,
+    "busy": 0,
+    "unavailable": 0,
+    "timeout": 0,
+    "auth": 0,
+    "invalid_response": 0,
+    "error": 0,
+    "circuit_open_skips": 0
+  },
+  "admission_lane": "local:scribe",
+  "privacy_canary_absent": true,
+  "chat_comparison": {
+    "samples_per_condition": 20,
+    "warmups_per_condition": 3,
+    "baseline_ms": [
+      141.0,
+      140.0,
+      110.0,
+      140.0,
+      141.0,
+      109.0,
+      125.0,
+      125.0,
+      141.0,
+      109.0,
+      172.0,
+      141.0,
+      140.0,
+      125.0,
+      125.0,
+      141.0,
+      109.0,
+      125.0,
+      125.0,
+      125.0
+    ],
+    "with_scribe_ms": [
+      156.0,
+      172.0,
+      141.0,
+      156.0,
+      156.0,
+      188.0,
+      187.0,
+      172.0,
+      188.0,
+      156.0,
+      172.0,
+      203.0,
+      156.0,
+      188.0,
+      187.0,
+      203.0,
+      188.0,
+      156.0,
+      219.0,
+      156.0
+    ],
+    "baseline_p95_ms": 141.0,
+    "with_scribe_p95_ms": 203.0,
+    "p95_ratio": 1.4397,
+    "background_completions": 1,
+    "background_successes": 1,
+    "passed": false,
+    "scope": "synthetic short completion microprobe; not general latency proof"
+  },
+  "verdict": "Fail",
+  "owned_processes_stopped": true,
+  "run_date": "2026-10-31",
+  "candidate": "local",
+  "candidate_sha256": "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
+  "cpu_threads": 4,
+  "engine_priority": "normal",
+  "pilot_storage": "isolated test adapter; installed hooks unverified",
+  "health_counters_scope": "snapshot after eight real worker notes; excludes subsequent probes",
+  "independent_note_review": {
+    "counts_and_fix_status": "pass",
+    "unsupported_qualifiers": [
+      "quick pytest run",
+      "no corrective actions were taken"
+    ],
+    "limitation": "Narrow count/fix-status probes do not establish general summary faithfulness.",
+    "real_notes_identical_between_thread_configs": true
+  }
+}
