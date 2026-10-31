@@ -209,7 +209,7 @@
   "candidate": "local",
   "candidate_sha256": "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
   "cpu_threads": 4,
-  "engine_priority": "normal",
+  "engine_priority": "inherited default; not read back",
   "pilot_storage": "isolated test adapter; installed hooks unverified",
   "health_counters_scope": "snapshot after eight real worker notes; excludes subsequent probes",
   "independent_note_review": {
@@ -220,5 +220,6 @@
     ],
     "limitation": "Narrow count/fix-status probes do not establish general summary faithfulness.",
     "real_notes_identical_between_thread_configs": true
-  }
+  },
+  "priority_verified": false
 }

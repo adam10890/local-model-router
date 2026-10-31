@@ -116,7 +116,7 @@ client calls are outside the current single-worker runtime evidence.
 ## Larger CPU candidate follow-up (2026-10-31)
 
 Adam approved a second, already-installed candidate on CPU. The
-[four-thread normal-priority run](evidence/scribe-cpu-larger-normal-2026-10-31.json)
+[four-thread inherited-priority run](evidence/scribe-cpu-larger-normal-2026-10-31.json)
 passed both Scribe regressions but failed the unchanged 20-percent chat p95 gate:
 141 ms alone versus 203 ms with background Scribe (ratio 1.4397).
 
@@ -126,7 +126,7 @@ verified; the process was absent from NVIDIA's compute-process list. Both Scribe
 regressions passed. Eight real worker notes preserved counts/fix status within
 60 seconds; two additional safe-silence cases simulated inference failure.
 Chat p95 was 141 ms alone and 125 ms with Scribe, with three warmups and twenty
-samples per condition. This short cached-completion microprobe establishes no
+samples per condition. This short repeated-prompt microprobe establishes no
 measured regression for this run, not a speedup or a general latency guarantee.
 All owned pilot processes stopped; neither installed runtime was reconfigured.
 
@@ -135,8 +135,8 @@ engine, hardware, flags or workload changes. The pilot disabled thinking with
 `--chat-template-kwargs '{"enable_thinking":false}'`. Windows idle process
 priority is a **native launcher setting**, not `X-Priority: low` and not an
 automatic property of Imperium's current fleet start. Check `Process.nice()`
-(or Windows process properties) on the owned engine before measuring. A normal
-priority/four-thread launch did not meet this run's gate.
+(or Windows process properties) on the owned engine before measuring. The inherited-priority/four-thread launch did not meet this run's gate; its
+priority was not read back, unlike the verified idle setting.
 
 Independent review of the synthetic notes found wording broader than the input:
 "quick pytest run" and "no corrective actions were taken". The count/fix-status
