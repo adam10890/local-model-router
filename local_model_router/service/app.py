@@ -88,6 +88,7 @@ from .fleet_manager import (
     FleetQueue,
     FleetStore,
     QueueFull,
+    _int_from_env,
     context_windows_from_slots,
     fleet_config_from_env,
     identity_from_headers,
@@ -614,6 +615,7 @@ def create_app(
     *,
     fleet_store: Optional[FleetStore] = None,
     fleet_queue: Optional[FleetQueue] = None,
+    scribe_queue: Optional[FleetQueue] = None,
     models_fetch: Optional[FetchFn] = None,
     upstreams_path: Optional[str] = None,
     apps_path: Optional[str] = None,
@@ -688,7 +690,13 @@ def create_app(
         except Exception:
             return {}
 
-    admission_queues = {"local": queue}
+    admission_queues = {
+        "local": queue,
+        "local:scribe": scribe_queue or FleetQueue(
+            _int_from_env("A0_FLEET_SCRIBE_MAX_ACTIVE", 1, minimum=1),
+            _int_from_env("A0_FLEET_SCRIBE_MAX_QUEUE", 4, minimum=0),
+        ),
+    }
     admission_queues.update({
         f"upstream:{upstream.name}": FleetQueue(upstream.max_active, upstream.max_queue)
         for upstream in upstreams
@@ -1133,6 +1141,7 @@ def create_app(
                 "queue": queue.snapshot(),
                 "queues": {
                     "local": {"mode": "bounded", **queue.snapshot()},
+                    "local:scribe": {"mode": "bounded", **admission_queues["local:scribe"].snapshot()},
                     **{
                         f"upstream:{upstream.name}": (
                             {"mode": "bounded", **admission_queues[f"upstream:{upstream.name}"].snapshot()}
@@ -2320,6 +2329,10 @@ def create_app(
                 if pinned_slot_id:
                     slot = next(row for row in slots if row.get("id") == pinned_slot_id)
                     body["routing"] = {
+                        **{
+                            key: value for key, value in _dict_or_empty(body.get("routing")).items()
+                            if key in {"local_only", "privacy_mode"}
+                        },
                         "preferred_slot": pinned_slot_id,
                         "role": str(slot.get("role") or "chat"),
                     }
@@ -2570,6 +2583,10 @@ def create_app(
                 if pinned_slot_id:
                     slot = next(row for row in slots if row.get("id") == pinned_slot_id)
                     body["routing"] = {
+                        **{
+                            key: value for key, value in _dict_or_empty(body.get("routing")).items()
+                            if key in {"local_only", "privacy_mode"}
+                        },
                         "preferred_slot": pinned_slot_id,
                         "role": str(slot.get("role") or "chat"),
                     }
@@ -2641,6 +2658,16 @@ def create_app(
         if upstream_match is not None:
             upstream_name = upstream_match[0].name
             route_reason_codes.append("pinned_harness" if dedicated else "explicit_upstream")
+            if intent.local_only or intent.privacy_mode == "local_only":
+                admission_lane = f"upstream:{upstream_name}"
+                route_reason_codes.append("local_only_enforced")
+                await finish("rejected", error_code="local_only_violation", cache_status="BYPASS")
+                return _openai_error(
+                    "local-only requests cannot use a declared upstream",
+                    "local_only_violation",
+                    403,
+                    headers=fleet_headers(),
+                )
             pinned_harness = None
             if dedicated:
                 pinned_harness = {
@@ -2847,7 +2874,11 @@ def create_app(
                     headers=fleet_headers({"Retry-After": str(retry_after)}),
                 )
 
-        admission_error = await admit("local")
+        selected_role = next(
+            (slot.get("role") for slot in slots if slot.get("id") == decision.selected_slot_id),
+            None,
+        )
+        admission_error = await admit("local:scribe" if selected_role == "scribe" else "local")
         if admission_error is not None:
             return admission_error
         try:

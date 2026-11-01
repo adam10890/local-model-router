@@ -82,6 +82,14 @@ control (`fleet_control.py`). Agent ticket coordination lives in
   They never consume the local lane. A bounded upstream uses its independent
   `upstream:<name>` lane; an unbounded upstream delegates admission to the
   provider.
+- Local-only privacy intent survives harness pinning. Explicit upstream targets,
+  including upstream-pinned harnesses, return `403 local_only_violation` before
+  admission when `local_only` or `privacy_mode: local_only` is requested.
+- Requests resolved to a local slot with role `scribe` use `local:scribe`, with
+  independent `A0_FLEET_SCRIBE_MAX_ACTIVE` / `A0_FLEET_SCRIBE_MAX_QUEUE` limits
+  (defaults 1 / 4). Other local targets use `local`; client identity and requested
+  role cannot select a lane. Queue isolation does not reserve CPU/GPU resources
+  or preempt running work. `/fleet/status` exposes both queues.
 - Chat lifecycle is `Normalize -> Resolve Target -> Admission -> Forward ->
   Finalize`. New request records finish once as `completed`, `failed`, or
   `rejected`, and only the lane actually acquired may be released. Streaming

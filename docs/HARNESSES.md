@@ -74,6 +74,7 @@ RC evidence automatically.
 | Hermes | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) | 0.21.0, Documented 2026-09-01 | 0.21.1, Observed 2026-09-13 | Basic client canary Pass; unattended cold-swap wait Partial because the client exhausts three retries before readiness | `/harnesses/hermes/v1` |
 | Pi | [earendil-works/pi](https://github.com/earendil-works/pi) (`badlogic/pi-mono`) | 0.84.4, Documented 2026-09-01 | 0.80.6, Observed 2026-09-01 | Client canary **Unknown**; upgrade gap | `/harnesses/pi/v1` |
 | Claude Code (local) | Anthropic Claude Code + LiteLLM bridge | 2.1.257, Documented 2026-09-01 | 2.1.220, Observed 2026-09-01 | Client canary **Unknown**; upgrade gap | `/harnesses/claude_code_local/v1` |
+| A0 Scribe | [adam10890/a0_scribe](https://github.com/adam10890/a0_scribe) | 0.1.0, Documented 2026-10-30; client PR adds 0.2.0 | Existing installation not upgraded | Isolated CPU source pilot Pass 2026-10-31 for bounded probes; installed hooks Unknown | `/harnesses/a0_scribe/v1` |
 
 "Checked against docs" means the Imperium setup snippet was reviewed against
 that release's OpenAI-compatible / provider settings. It is not a substitute
@@ -110,7 +111,7 @@ mismatches such as missing mmproj / unsupported image input return
 An intentional manual stop returns HTTP 503 with `gpu_slot_stopped` and no
 retry delay until the operator starts the slot explicitly.
 Generic `/v1` routing is unchanged.
-Pinned requests use the target's admission lane: `local` for a local model or
+Pinned requests use the target's admission lane: `local:scribe` for a resolved local Scribe slot, `local` for other local models, or
 `upstream:<name>` for a capacity-managed upstream. The response includes
 `X-A0-Request-ID` and `X-A0-Admission-Lane`; a full lane returns HTTP 429
 without changing the pinned model.
@@ -225,3 +226,10 @@ http://127.0.0.1:9000/harnesses/claude_code_local/v1
 ```
 
 The dashboard emits the LiteLLM model mapping and isolated PowerShell launcher.
+
+## Background Scribe
+
+A0 Scribe is a client of standalone Imperium. It uses one pinned local
+connection, with no fallback to chat or a provider. See
+[the integration runbook](scribe-integration.md) for queue limits, client
+migration, model evaluation, CPU-only verification, and rollback.
