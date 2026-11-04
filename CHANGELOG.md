@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- The managed-runtime release lookup retries transient failures with a bounded
+  backoff, and authenticates when `IMPERIUM_GITHUB_TOKEN` is set. An
+  unauthenticated GitHub API is capped at 60 requests/hour per IP, which
+  CI runners share — it failed the nightly Windows lifecycle job twice on
+  unchanged code. Settled answers (401, 404, malformed body) are still reported
+  on the first attempt. The conventional `GITHUB_TOKEN` is deliberately not
+  read, so an operator's personal credential is never attached to a request
+  they did not ask for.
+- The Windows cleanroom lifecycle prints each failing command's payload before
+  throwing, so a CI log names the cause instead of only the generic message.
+
 ### Added
 
 - Dedicated `local:scribe` admission for resolved local Scribe slots, with

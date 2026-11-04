@@ -20,6 +20,16 @@ function Test-StrictChildPath([string]$Parent, [string]$Child) {
         $Relative -ne ".." -and -not $Relative.StartsWith("..$([IO.Path]::DirectorySeparatorChar)")
 }
 
+function Write-FailurePayload($Payload, [string]$Label) {
+    # The lifecycle commands emit their SetupError payload on stdout, which the
+    # caller captures into a variable. Without echoing it first, a CI log shows
+    # only the generic throw and the real cause (release_lookup_failed, a
+    # checksum mismatch, a port conflict) has to be guessed from the source.
+    if ($null -ne $Payload) {
+        Write-Host "$Label payload: $($Payload | ConvertTo-Json -Compress -Depth 6)"
+    }
+}
+
 function Get-VerifiedBundleHash([string]$Archive) {
     if (-not (Test-Path -LiteralPath $Archive)) { throw "The requested Windows bundle is missing." }
     $Sidecar = "$Archive.sha256"
@@ -134,21 +144,28 @@ if ($FullOfflineSetup) {
         Remove-Item Env:IMPERIUM_OFFLINE -ErrorAction SilentlyContinue
         try {
             $Update = (& $Python -m local_model_router update --check | ConvertFrom-Json)
-            if ($LASTEXITCODE -ne 0) { throw "The managed runtime update check failed." }
+            if ($LASTEXITCODE -ne 0) {
+                Write-FailurePayload $Update "update --check"
+                throw "The managed runtime update check failed."
+            }
             $UpdateChecked = $true
             if (-not $Update.update_available) {
+                Write-FailurePayload $Update "update --check"
                 throw "Runtime rollback evidence requires an available verified update."
             }
             $Updated = (& $Python -m local_model_router update --yes | ConvertFrom-Json)
             if ($LASTEXITCODE -ne 0 -or $Updated.runtime.tag -ne $Update.latest) {
+                Write-FailurePayload $Updated "update --yes"
                 throw "The managed runtime update failed."
             }
             $RolledBack = (& $Python -m local_model_router rollback | ConvertFrom-Json)
             if ($LASTEXITCODE -ne 0 -or $RolledBack.runtime.tag -ne $Update.installed) {
+                Write-FailurePayload $RolledBack "rollback"
                 throw "The managed runtime rollback failed."
             }
             $Reupdated = (& $Python -m local_model_router update --yes | ConvertFrom-Json)
             if ($LASTEXITCODE -ne 0 -or $Reupdated.runtime.tag -ne $Update.latest) {
+                Write-FailurePayload $Reupdated "update --yes (re-apply)"
                 throw "The managed runtime could not return to the candidate update."
             }
             $RuntimeTransition = [ordered]@{

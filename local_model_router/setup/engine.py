@@ -34,6 +34,16 @@ from local_model_router.cookbook.gguf import (
 
 # ponytail: setup state is low-throughput; use per-path locks if writes ever contend.
 _JSON_WRITE_LOCK = threading.Lock()
+
+# Managed-runtime release lookup. Set RELEASE_TOKEN_ENV to raise the GitHub API
+# rate limit from 60/hour per IP to 1000/hour per repository; CI sets it, an
+# operator normally does not.
+RELEASE_TOKEN_ENV = "IMPERIUM_GITHUB_TOKEN"
+RELEASE_LOOKUP_ATTEMPTS = 3
+RELEASE_LOOKUP_BACKOFF_SECONDS = 1.0
+RELEASE_LOOKUP_MAX_BACKOFF_SECONDS = 8.0
+# 403 is how GitHub reports a rate limit; 429 is the explicit form.
+RELEASE_RETRYABLE_STATUSES = frozenset({403, 429})
 _EMBED_NAME_HINTS = ("embed", "bge-", "nomic", "minilm", "gte-", "e5-")
 _PARAMS_FROM_NAME = re.compile(r"(?i)(\d+(?:\.\d+)?)\s*b\b")
 
@@ -729,13 +739,85 @@ class SetupEngine:
         }
 
     @staticmethod
-    def _github_releases(api_url: str) -> list[dict[str, Any]]:
-        request = urllib.request.Request(api_url, headers={"Accept": "application/vnd.github+json", "User-Agent": "Imperium-Setup"})
+    def _release_request(api_url: str) -> urllib.request.Request:
+        """Build the releases request, authenticating only when asked to.
+
+        Deliberately not the conventional ``GITHUB_TOKEN``: that variable is
+        commonly exported in a developer's shell for unrelated work, and
+        attaching someone's personal token to an outbound request they never
+        asked for would break the local-first posture. CI sets the dedicated
+        name explicitly; an operator who sets nothing is unauthenticated, as
+        before.
+        """
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": "Imperium-Setup"}
+        token = os.environ.get(RELEASE_TOKEN_ENV, "").strip()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return urllib.request.Request(api_url, headers=headers)
+
+    @staticmethod
+    def _release_retry_delay(exc: Exception, attempt: int) -> float:
+        """Backoff before the next lookup attempt.
+
+        Honors ``Retry-After`` when the server asks for a short pause, but
+        never waits out a full rate-limit window: a nightly job has to fail in
+        minutes and say so, not hang for an hour.
+        """
+        delay = RELEASE_LOOKUP_BACKOFF_SECONDS * (2 ** (attempt - 1))
+        headers = getattr(exc, "headers", None)
+        raw = headers.get("Retry-After") if headers is not None else None
         try:
-            with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310
-                payload = json.load(response)
-        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-            raise SetupError("release_lookup_failed", f"Could not read the official llama.cpp release: {exc}") from exc
+            requested = float(str(raw).strip())
+        except (TypeError, ValueError):
+            requested = 0.0
+        if 0 < requested <= RELEASE_LOOKUP_MAX_BACKOFF_SECONDS:
+            delay = max(delay, requested)
+        return min(delay, RELEASE_LOOKUP_MAX_BACKOFF_SECONDS)
+
+    @staticmethod
+    def _github_releases(api_url: str) -> list[dict[str, Any]]:
+        """Read the official llama.cpp releases, retrying transient failures.
+
+        This is the only online call the managed-runtime update path makes.
+        Anonymous api.github.com allows 60 requests/hour per IP and CI runners
+        share address pools, so a single-shot call fails intermittently with
+        nothing wrong locally. A settled answer (404, 401, a malformed body)
+        is never retried -- repeating it only delays the report.
+        """
+        last_exc: Exception | None = None
+        last_error = ""
+        for attempt in range(1, RELEASE_LOOKUP_ATTEMPTS + 1):
+            try:
+                with urllib.request.urlopen(  # noqa: S310
+                    SetupEngine._release_request(api_url), timeout=20
+                ) as response:
+                    payload = json.load(response)
+            except json.JSONDecodeError as exc:
+                raise SetupError(
+                    "release_lookup_failed", f"Could not read the official llama.cpp release: {exc}"
+                ) from exc
+            except urllib.error.HTTPError as exc:
+                # HTTPError subclasses both URLError and OSError, so it has to
+                # be caught first for .code to be readable at all.
+                if exc.code < 500 and exc.code not in RELEASE_RETRYABLE_STATUSES:
+                    raise SetupError(
+                        "release_lookup_failed",
+                        f"Could not read the official llama.cpp release: HTTP {exc.code}",
+                    ) from exc
+                last_exc, last_error = exc, f"HTTP {exc.code}"
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                last_exc, last_error = exc, str(exc)
+            else:
+                break
+
+            if attempt < RELEASE_LOOKUP_ATTEMPTS:
+                time.sleep(SetupEngine._release_retry_delay(last_exc, attempt))
+        else:
+            raise SetupError(
+                "release_lookup_failed",
+                "Could not read the official llama.cpp release after "
+                f"{RELEASE_LOOKUP_ATTEMPTS} attempts: {last_error}",
+            ) from last_exc
         if isinstance(payload, dict):
             payload = [payload]
         if not isinstance(payload, list) or not payload:
