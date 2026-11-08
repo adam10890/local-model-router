@@ -45,3 +45,8 @@ codex-clipboard-*.png
 Screenshot*.png
 screenshots/
 output/playwright/
+
+# Coverage artifacts from local gate runs
+.coverage
+.coverage.*
+htmlcov/

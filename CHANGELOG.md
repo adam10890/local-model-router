@@ -6,6 +6,17 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Structured-output checking. When a request carries `response_format`, the
+  reply is parsed before it is returned or cached, and the verdict rides in
+  `x-a0-router-structured-output` and telemetry. A model that ignored the
+  field and answered with prose previously produced a 200 with a body the
+  client could not load. Default is observe — the body is returned unchanged;
+  `A0_LMM_ROUTER_STRUCTURED_OUTPUT=1` repairs once and then returns 422.
+  Validation is JSON well-formedness, not schema conformance, and adds no
+  dependency. A reply that fails validation is never cached.
+
+### Added
+
 - Dedicated `local:scribe` admission for resolved local Scribe slots, with
   configurable capacity, a pinned `a0_scribe` harness, and a structured
   factuality evaluation whose suite version invalidates old cached results.

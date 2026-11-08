@@ -39,6 +39,7 @@ from local_model_router.routing.catalog import (
     required_capabilities_from_chat_body,
     role_from_chat_body,
 )
+from local_model_router import structured_output
 from local_model_router.disclosure import (
     CONFIG_FILENAME as DISCLOSURE_CONFIG_FILENAME,
     DisclosureConfigError,
@@ -362,6 +363,22 @@ def _record_upstream_usage(upstream_name: Optional[str], usage: Optional[Dict[st
 
 
 DISCLOSURE_ENFORCE_ENV = "A0_LMM_ROUTER_DISCLOSURE_ENFORCE"
+
+
+def _structured_output_enforced() -> bool:
+    """Whether a reply that is not valid JSON is repaired and then refused.
+
+    Default is observe: the verdict rides in a header and telemetry, and the
+    body is returned exactly as the model sent it. Enforcement changes a
+    client-visible contract -- a 422 where a harness expects 200 -- so it is
+    an explicit, reversible opt-in, read per request like the disclosure gate.
+    """
+    return os.environ.get(structured_output.ENFORCE_ENV, "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _disclosure_enforced() -> bool:
@@ -1945,6 +1962,43 @@ def create_app(
             logger.debug("Disclosure evaluation skipped for upstream %s", upstream.name)
             return None
 
+    async def check_structured_output(
+        forward_payload: Dict[str, Any],
+        reply: Any,
+        resend: Optional[Callable[[Dict[str, Any]], Awaitable[Any]]] = None,
+        *,
+        streamed: bool = False,
+    ) -> tuple[Any, str]:
+        """Check a reply the client asked for as JSON; repair once if enforcing.
+
+        Returns the reply to use and a reason code (empty when JSON was never
+        requested, so the common path is untouched). Never raises: if the
+        repair attempt fails for any reason the original reply stands, because
+        a validation feature must not turn a served answer into an outage.
+        """
+        if not structured_output.json_output_requested(forward_payload):
+            return reply, ""
+        if streamed:
+            # The stream is never buffered, so there is nothing to parse.
+            return reply, structured_output.UNSUPPORTED
+
+        result = structured_output.validate_reply(reply)
+        if result.ok:
+            return reply, structured_output.VALID
+        if resend is None or not _structured_output_enforced():
+            return reply, structured_output.FAILED
+
+        try:
+            repaired = await resend(structured_output.repair_body(forward_payload, result))
+        except Exception:
+            logger.debug("Structured-output repair attempt failed; keeping the original reply")
+            return reply, structured_output.FAILED
+        if repaired is None:
+            return reply, structured_output.FAILED
+        if structured_output.validate_reply(repaired).ok:
+            return repaired, structured_output.REPAIRED
+        return repaired, structured_output.FAILED
+
     async def forward_to_upstream(
         upstream: UpstreamConfig,
         bare_model: str,
@@ -2109,6 +2163,31 @@ def create_app(
                             else {},
                         )
                     if resp.status < 400:
+                        async def resend_upstream(repair_payload: Dict[str, Any]) -> Any:
+                            async with session.post(
+                                url,
+                                json=repair_payload,
+                                headers=upstream.headers(),
+                                timeout=aiohttp.ClientTimeout(total=_FORWARD_TIMEOUT_SECONDS),
+                            ) as retry_resp:
+                                if retry_resp.status >= 400:
+                                    return None
+                                return await retry_resp.json(content_type=None)
+
+                        upstream_json, structured_code = await check_structured_output(
+                            payload, upstream_json, resend_upstream
+                        )
+                        if structured_code:
+                            out_headers["x-a0-router-structured-output"] = structured_code
+                        if structured_code == structured_output.FAILED and _structured_output_enforced():
+                            if finalize is not None:
+                                await finalize("failed", error_code=structured_output.FAILED)
+                            return _openai_error(
+                                "the model did not return valid JSON for a response_format request",
+                                structured_output.FAILED,
+                                422,
+                                headers=out_headers,
+                            )
                         _record_upstream_usage(upstream.name, _dict_or_empty(upstream_json).get("usage"), bare_model)
                     return JSONResponse(upstream_json, status_code=resp.status, headers=out_headers)
         except asyncio.CancelledError:
@@ -3032,6 +3111,10 @@ def create_app(
                     "x-accel-buffering": "no",
                     },
                 )
+                # A stream is never buffered, so a JSON request cannot be
+                # checked. Say so rather than let silence imply it was.
+                if structured_output.json_output_requested(payload):
+                    headers["x-a0-router-structured-output"] = structured_output.UNSUPPORTED
 
                 if resp.status >= 400:
                     try:
@@ -3223,6 +3306,45 @@ def create_app(
                             headers=fleet_headers(),
                         )
 
+                    async def resend_local(repair_payload: Dict[str, Any]) -> Any:
+                        # Rides the admission lease this request already holds:
+                        # a second acquire would deadlock at max_active=1.
+                        async with session.post(
+                            url,
+                            json=repair_payload,
+                            headers={"Content-Type": "application/json"},
+                            timeout=aiohttp.ClientTimeout(total=_FORWARD_TIMEOUT_SECONDS),
+                        ) as retry_resp:
+                            if retry_resp.status >= 400:
+                                return None
+                            return await retry_resp.json(content_type=None)
+
+                    upstream_json, structured_code = await check_structured_output(
+                        payload, upstream_json, resend_local
+                    )
+                    if structured_code:
+                        headers["x-a0-router-structured-output"] = structured_code
+
+                    if structured_code == structured_output.FAILED and _structured_output_enforced():
+                        await finish(
+                            "failed",
+                            error_code=structured_output.FAILED,
+                            slot_id=decision.selected_slot_id,
+                            model=decision.selected_model,
+                            decision=decision,
+                            cache_status="BYPASS",
+                            usage=_dict_or_empty(upstream_json.get("usage"))
+                            if isinstance(upstream_json, dict)
+                            else {},
+                        )
+                        return _openai_error(
+                            "the model did not return valid JSON for a response_format request",
+                            structured_output.FAILED,
+                            422,
+                            extra={"routing": decision_body},
+                            headers=headers,
+                        )
+
                     if _response_was_truncated(upstream_json):
                         headers["x-a0-router-output-truncated"] = "true"
                     await finish(
@@ -3233,7 +3355,15 @@ def create_app(
                         cache_status=cache_status,
                         usage=_dict_or_empty(upstream_json.get("usage")),
                     )
-                    if cache_status == "MISS" and cache_lookup_key is not None and prompt_cache is not None:
+                    # A reply that failed validation is never cached: caching it
+                    # would serve the same bad body again as a hit, skipping this
+                    # check entirely.
+                    if (
+                        cache_status == "MISS"
+                        and cache_lookup_key is not None
+                        and prompt_cache is not None
+                        and structured_code != structured_output.FAILED
+                    ):
                         prompt_cache.set(cache_lookup_key, upstream_json)
                     return JSONResponse(upstream_json, status_code=resp.status, headers=headers)
         except asyncio.CancelledError:
