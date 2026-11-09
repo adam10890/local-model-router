@@ -6,6 +6,18 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- `scripts/branch_guard.py` and a single authoritative one-branch rule in
+  `docs/development/git-workflow.md`. The rule was already written in four
+  places and `origin` still carried ten stale branches, nine merged and one
+  squash-merged that git reported as open, so the check is the enforcement and
+  the prose now has one home. It classifies a branch by whether any file it
+  changed exists only on it, which is what separates a squash-merged leftover
+  from work to merge. Not a CI job, by design.
+- `docs/future-improvements.md` is now the single FIFO idea queue: `Q<n>`
+  entries that are never renumbered, a fold-in rule so an idea that advances a
+  queued idea joins that entry instead of queueing behind it, and `Shipped` /
+  `Declined` as the only ways out. Other planning docs keep their detail and no
+  longer imply an order.
 - Structured-output checking. When a request carries `response_format`, the
   reply is parsed before it is returned or cached, and the verdict rides in
   `x-a0-router-structured-output` and telemetry. A model that ignored the

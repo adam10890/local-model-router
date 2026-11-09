@@ -29,7 +29,11 @@ merge hygiene, and human/agent handoff conventions.
 - Keep workflow rules explicit enough that Codex, Claude Code, and a human can
   follow the same branch lifecycle.
 - Complete verification, merge, push confirmation, and cleanup before opening
-  the next default task branch.
+  the next default task branch. `git-workflow.md` owns that rule under
+  "Starting a task: the one-branch gate", including the `scripts/branch_guard.py`
+  check; do not restate it elsewhere.
+- While a branch is open, a new idea goes into the FIFO queue in
+  `../future-improvements.md`, not into a branch.
 - Avoid duplicating the full policy in many files; link back to
   `git-workflow.md` from higher-level docs.
 - Update the branch catalog section when long-lived active branches are

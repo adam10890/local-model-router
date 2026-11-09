@@ -30,10 +30,18 @@ the current session.
   merge candidates, and `spike/<slug>` for throwaway experiments. Claude's own
   `claude/<slug>` branches are allowed as short-lived scratch branches, but
   classify or merge them into `dev/` or `ready/` before handoff.
-- Keep one task branch by default. Promote `dev/` to `ready/` by renaming the
-  same ref, then verify, merge, confirm GitHub's `main` SHA, and delete the
-  temporary branch before starting another task. Do not re-merge a stale
-  squash-merged branch.
+- Keep one task branch. The rule and its reasoning live in
+  `docs/development/git-workflow.md` under "Starting a task: the one-branch
+  gate"; that is the only copy. In short: run `python scripts/branch_guard.py`
+  before opening a branch and it must exit 0; promote `dev/` to `ready/` by
+  renaming the same ref, then verify, merge, confirm GitHub's `main` SHA, and
+  delete the branch locally and remotely before starting another task; do not
+  re-merge a stale squash-merged branch.
+- **While a branch is open, do not start new development.** A new idea goes
+  into the queue in `docs/future-improvements.md` — never into a new branch,
+  and never into the open branch unless it is that branch's own queue entry.
+  Ideas are worked FIFO, and an idea that advances one already queued is folded
+  into that entry rather than queued behind it.
 
 ## Verification
 

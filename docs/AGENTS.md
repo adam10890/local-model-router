@@ -32,8 +32,13 @@ Durable documentation for operators, contributors, and coding agents.
 - `task-disclosure.md` owns the executor trust ladder, the content-class map,
   and the rules for writing task briefs. Keep it aligned with
   `local_model_router/disclosure/disclosure.yaml`; the two are one contract.
-- `future-improvements.md` owns the deferred improvement-ideas backlog
-  (candidate directions only; labeled deferred until selected).
+- `future-improvements.md` owns **order**: it is the single FIFO idea queue,
+  with `Q<n>` entries that are never renumbered, the fold-in rule for a new
+  idea that advances one already queued, and the `Shipped` / `Declined`
+  sections an entry leaves through. Every other planning document here owns
+  *detail*; none of them owns order. If a plan doc and the queue disagree about
+  what comes next, the queue wins. It also carries the open questions that
+  block an entry.
 - `local-llm-landscape.md` owns the ecosystem gap review against
   `awesome-local-llm`: what Imperium already covers, what it does not, and why
   each unselected gap was deferred. A backlog, not a plan of record.
@@ -53,6 +58,9 @@ Durable documentation for operators, contributors, and coding agents.
 - `herdr-todo.md` owns package/checklist state and evidence for those proposals.
 - `herdr-work-plan.md` owns proposed effort/value/dependency sequencing for that
   checklist; accepted beta ordering and execution gates keep their existing owners.
+  Its sequencing is detail behind one queue entry, not a second queue.
+- `spynel-adoption-plan.md` owns the bounded Spynel patterns Imperium may
+  adopt and the G2 harness-evidence phase. Spynel is not a dependency.
 - `development/` owns Git workflow, branch catalog rules, and collaboration
   process.
 
