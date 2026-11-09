@@ -1214,7 +1214,7 @@ def create_app(
 
         return wrapper
 
-    async def _run_control(request: Request, action: str) -> Response:
+    async def _run_control(request: Request, action: str, *, reason: str | None = None) -> Response:
         slot_id = request.path_params.get("slot_id", "")
         try:
             if action == "start":
@@ -1222,7 +1222,7 @@ def create_app(
                     hermes_watcher.reset_retry_budget()
                 payload = await fleet_control.start_slot(slot_id)
             elif action == "stop":
-                payload = await fleet_control.stop_slot(slot_id)
+                payload = await fleet_control.stop_slot(slot_id, reason=reason)
             elif action == "start_all":
                 if hermes_watcher is not None:
                     hermes_watcher.reset_retry_budget()
@@ -1296,7 +1296,31 @@ def create_app(
         return await _run_control(request, "start")
 
     async def fleet_slot_stop(request: Request) -> Response:
-        return await _run_control(request, "stop")
+        reason = None
+        if "application/json" in request.headers.get("content-type", ""):
+            try:
+                body = await request.json()
+            except Exception:
+                return _openai_error(
+                    "request body is not valid JSON",
+                    "invalid_json",
+                    400,
+                )
+            if not isinstance(body, dict):
+                return _openai_error(
+                    "request body must be a JSON object",
+                    "invalid_request_body",
+                    400,
+                )
+            raw = body.get("reason")
+            if raw is not None and not isinstance(raw, str):
+                return _openai_error(
+                    "reason must be a string",
+                    "invalid_request_body",
+                    400,
+                )
+            reason = raw or None
+        return await _run_control(request, "stop", reason=reason)
 
     async def fleet_start_all(request: Request) -> Response:
         return await _run_control(request, "start_all")
@@ -2626,6 +2650,10 @@ def create_app(
             error_messages = {
                 "gpu_swap_in_progress": "The selected GPU model is still loading; retry this request",
                 "gpu_slot_stopped": "The managed GPU slot is stopped; start it before retrying",
+                "gpu_leased_by_studio": (
+                    "The chat model is borrowed by Imperium Studio and returns when the job finishes. "
+                    "Retry after the given delay. Do not start the slot."
+                ),
             }
             return _openai_error(
                 error_messages.get(
