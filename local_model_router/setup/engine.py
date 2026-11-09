@@ -827,51 +827,67 @@ class SetupEngine:
             raise SetupError("invalid_release", "The official release response was not valid")
         return releases
 
-    def _latest_runtime_release(self, backend: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-        hardware = self.hardware()
-        platform_entry = self._platform_entry(hardware)
+    def _verified_release_assets(self, backend: str, release: dict[str, Any]) -> list[dict[str, Any]] | None:
+        platform_entry = self._platform_entry(self.hardware())
         backend_entry = ((platform_entry or {}).get("backends") or {}).get(backend) or {}
         pinned_assets = [dict(asset) for asset in backend_entry.get("assets", [])]
         if not pinned_assets:
             raise SetupError("runtime_asset_missing", f"No runtime assets are defined for {backend}")
+        tag = str(release.get("tag_name") or "")
+        if release.get("draft") or not re.fullmatch(r"b\d+", tag):
+            return None
         recommended_tag = str(self.runtime_catalog["recommended"]["tag"])
+        released = {
+            str(row.get("name")): row
+            for row in release.get("assets", [])
+            if isinstance(row, dict)
+        }
+        assets: list[dict[str, Any]] = []
+        for pinned in pinned_assets:
+            name = str(pinned["name"]).replace(recommended_tag, tag)
+            row = released.get(name)
+            digest = str((row or {}).get("digest") or "")
+            checksum = digest.split(":", 1)[1] if digest.startswith("sha256:") else ""
+            if (
+                not row
+                or not re.fullmatch(r"[0-9a-fA-F]{64}", checksum)
+                or not row.get("browser_download_url")
+            ):
+                return None
+            assets.append(
+                {
+                    "name": name,
+                    "url": row["browser_download_url"],
+                    "sha256": checksum.lower(),
+                    "size_bytes": row.get("size"),
+                }
+            )
+        return assets
+
+    def _latest_runtime_release(self, backend: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         releases = self._github_releases(self.runtime_catalog["releases_api"])
         for release in releases:
-            tag = str(release.get("tag_name") or "")
-            if release.get("draft") or not re.fullmatch(r"b\d+", tag):
-                continue
-            released = {
-                str(row.get("name")): row
-                for row in release.get("assets", [])
-                if isinstance(row, dict)
-            }
-            assets = []
-            for pinned in pinned_assets:
-                name = str(pinned["name"]).replace(recommended_tag, tag)
-                row = released.get(name)
-                digest = str((row or {}).get("digest") or "")
-                checksum = digest.split(":", 1)[1] if digest.startswith("sha256:") else ""
-                if (
-                    not row
-                    or not re.fullmatch(r"[0-9a-fA-F]{64}", checksum)
-                    or not row.get("browser_download_url")
-                ):
-                    assets = []
-                    break
-                assets.append(
-                    {
-                        "name": name,
-                        "url": row["browser_download_url"],
-                        "sha256": checksum.lower(),
-                        "size_bytes": row.get("size"),
-                    }
-                )
-            if len(assets) == len(pinned_assets):
+            assets = self._verified_release_assets(backend, release)
+            if assets:
                 return release, assets
         raise SetupError(
             "runtime_asset_missing",
             f"No recent llama.cpp rolling release provides verified {backend} assets",
         )
+
+    def _tagged_runtime_release(self, backend: str, tag: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        if not re.fullmatch(r"b\d+", tag):
+            raise SetupError("invalid_release", "A pinned runtime tag must be a rolling build id")
+        root = str(self.runtime_catalog["releases_api"]).split("?", 1)[0].rstrip("/")
+        releases = self._github_releases(f"{root}/tags/{tag}")
+        release = next((row for row in releases if str(row.get("tag_name") or "") == tag), None)
+        assets = self._verified_release_assets(backend, release) if release else None
+        if release is None or not assets:
+            raise SetupError(
+                "runtime_asset_missing",
+                f"Rolling release {tag} does not provide verified {backend} assets",
+            )
+        return release, assets
 
     @staticmethod
     def _safe_extract(bundle: zipfile.ZipFile, destination: Path) -> None:
@@ -957,8 +973,16 @@ class SetupEngine:
         os.replace(partial, destination)
         self._emit(stage, "complete", f"Downloaded and verified {destination.name}", 1.0)
 
-    def install_runtime(self, backend: str, *, channel: str = "recommended") -> dict[str, Any]:
-        if channel not in {"recommended", "latest"}:
+    def install_runtime(
+        self,
+        backend: str,
+        *,
+        channel: str = "recommended",
+        tag: str | None = None,
+    ) -> dict[str, Any]:
+        if tag:
+            channel = "pinned"
+        if channel not in {"recommended", "latest", "pinned"}:
             raise SetupError("unknown_channel", f"Unknown llama.cpp channel: {channel}")
         hardware = self.hardware()
         platform_entry = self._platform_entry(hardware)
@@ -966,12 +990,16 @@ class SetupEngine:
         if platform_entry is None or platform_entry.get("status") != "supported" or backend_entry.get("status") != "supported":
             raise SetupError("backend_unavailable", f"Managed {backend} installation is not supported on this platform")
         recommended = self.runtime_catalog["recommended"]
-        tag = str(recommended["tag"])
+        selected_tag = str(recommended["tag"])
         source = str(recommended["source"])
         assets = [dict(asset) for asset in backend_entry.get("assets", [])]
-        if channel == "latest":
+        if channel == "pinned":
+            release, assets = self._tagged_runtime_release(backend, str(tag or ""))
+            selected_tag = str(release.get("tag_name") or "")
+            source = str(release.get("html_url") or "")
+        elif channel == "latest":
             release, assets = self._latest_runtime_release(backend)
-            tag = str(release.get("tag_name") or "")
+            selected_tag = str(release.get("tag_name") or "")
             source = str(release.get("html_url") or "")
         if not assets:
             raise SetupError("runtime_asset_missing", f"No runtime assets are defined for {backend}")
@@ -981,7 +1009,7 @@ class SetupEngine:
             self._fetch_asset(asset, archive, stage="runtime")
             archives.append(archive)
 
-        target = self.runtime_dir / "versions" / f"{tag}-{backend}"
+        target = self.runtime_dir / "versions" / f"{selected_tag}-{backend}"
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         staging = Path(tempfile.mkdtemp(prefix="imperium-llama-", dir=str(self.runtime_dir)))
         try:
@@ -1013,7 +1041,7 @@ class SetupEngine:
                 "updated_at": time.time(),
                 "previous_runtime": previous,
                 "runtime": {
-                    "tag": tag,
+                    "tag": selected_tag,
                     "backend": backend,
                     "binary": str(binary),
                     "source": source,
@@ -1054,16 +1082,25 @@ class SetupEngine:
         if not self.config_path.is_file():
             return
         try:
-            payload = yaml.safe_load(self.config_path.read_text(encoding="utf-8")) or {}
-            if not isinstance(payload, dict):
-                raise TypeError("configuration root is not a mapping")
-            global_config = payload.setdefault("global", {})
-            if not isinstance(global_config, dict):
+            path = str(Path(str(runtime["binary"])).parent)
+            text = self.config_path.read_text(encoding="utf-8")
+            payload = yaml.safe_load(text) or {}
+            if not isinstance(payload, dict) or not isinstance(payload.get("global"), dict):
                 raise TypeError("global configuration is not a mapping")
-            global_config["llama_cpp_path"] = str(Path(str(runtime["binary"])).parent)
+            scalar = "'" + path.replace("'", "''") + "'"
+            pattern = re.compile(r"(?m)^([ \t]*llama_cpp_path:[ \t]*).*$")
+            if pattern.search(text):
+                updated = pattern.sub(lambda match: match.group(1) + scalar, text, count=1)
+            else:
+                global_line = re.search(r"(?m)^global:[ \t]*$", text)
+                if global_line is None:
+                    raise TypeError("global configuration is not a mapping")
+                updated = text[: global_line.end()] + f"\n  llama_cpp_path: {scalar}" + text[global_line.end() :]
             temporary = self.config_path.with_suffix(self.config_path.suffix + ".tmp")
-            temporary.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+            temporary.write_text(updated, encoding="utf-8")
             os.replace(temporary, self.config_path)
+        except SetupError:
+            raise
         except (OSError, KeyError, TypeError, yaml.YAMLError) as exc:
             raise SetupError("configuration_invalid", "Could not point the managed configuration at the selected runtime") from exc
 

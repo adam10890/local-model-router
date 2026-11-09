@@ -19,6 +19,9 @@ import yaml
 
 logger = logging.getLogger("uvicorn.error").getChild("imperium.hermes_gpu")
 
+STUDIO_LEASE_REASON = "studio_lease"
+STUDIO_LEASE_RETRY_AFTER = 120
+
 _HERMES_TO_PROFILE = {
     "ornith": "ornith",
     "local": "ornith",
@@ -412,6 +415,8 @@ class HermesModelWatcher:
     def retry_response(self) -> Optional[tuple[str, int]]:
         coordination = self._manager().slot_operation_snapshot(self.cfg.slot_id)
         if coordination.get("manual_stop"):
+            if coordination.get("lease_reason") == STUDIO_LEASE_REASON:
+                return "gpu_leased_by_studio", STUDIO_LEASE_RETRY_AFTER
             return "gpu_slot_stopped", 0
         if self.swapping:
             return "gpu_swap_in_progress", max(1, self.snapshot()["retry_after_seconds"] or 5)
