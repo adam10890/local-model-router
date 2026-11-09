@@ -4,20 +4,16 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
-### Fixed
-
-- The managed-runtime release lookup retries transient failures with a bounded
-  backoff, and authenticates when `IMPERIUM_GITHUB_TOKEN` is set. An
-  unauthenticated GitHub API is capped at 60 requests/hour per IP, which
-  CI runners share — it failed the nightly Windows lifecycle job twice on
-  unchanged code. Settled answers (401, 404, malformed body) are still reported
-  on the first attempt. The conventional `GITHUB_TOKEN` is deliberately not
-  read, so an operator's personal credential is never attached to a request
-  they did not ask for.
-- The Windows cleanroom lifecycle prints each failing command's payload before
-  throwing, so a CI log names the cause instead of only the generic message.
-
 ### Added
+
+- Structured-output checking. When a request carries `response_format`, the
+  reply is parsed before it is returned or cached, and the verdict rides in
+  `x-a0-router-structured-output` and telemetry. A model that ignored the
+  field and answered with prose previously produced a 200 with a body the
+  client could not load. Default is observe — the body is returned unchanged;
+  `A0_LMM_ROUTER_STRUCTURED_OUTPUT=1` repairs once and then returns 422.
+  Validation is JSON well-formedness, not schema conformance, and adds no
+  dependency. A reply that fails validation is never cached.
 
 - Dedicated `local:scribe` admission for resolved local Scribe slots, with
   configurable capacity, a pinned `a0_scribe` harness, and a structured
@@ -108,6 +104,17 @@ All notable changes to this project are documented here.
   truncation is preserved and surfaced to clients and the dashboard.
 
 ### Fixed
+
+- The managed-runtime release lookup retries transient failures with a bounded
+  backoff, and authenticates when `IMPERIUM_GITHUB_TOKEN` is set. An
+  unauthenticated GitHub API is capped at 60 requests/hour per IP, which
+  CI runners share — it failed the nightly Windows lifecycle job twice on
+  unchanged code. Settled answers (401, 404, malformed body) are still reported
+  on the first attempt. The conventional `GITHUB_TOKEN` is deliberately not
+  read, so an operator's personal credential is never attached to a request
+  they did not ask for.
+- The Windows cleanroom lifecycle prints each failing command's payload before
+  throwing, so a CI log names the cause instead of only the generic message.
 
 - Requests targeting a slot during drain, load, backoff, or recovery now get
   an OpenAI-compatible `503 gpu_swap_in_progress` response with `Retry-After`.

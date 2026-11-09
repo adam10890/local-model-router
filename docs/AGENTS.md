@@ -34,6 +34,13 @@ Durable documentation for operators, contributors, and coding agents.
   `local_model_router/disclosure/disclosure.yaml`; the two are one contract.
 - `future-improvements.md` owns the deferred improvement-ideas backlog
   (candidate directions only; labeled deferred until selected).
+- `local-llm-landscape.md` owns the ecosystem gap review against
+  `awesome-local-llm`: what Imperium already covers, what it does not, and why
+  each unselected gap was deferred. A backlog, not a plan of record.
+- `prd/` owns one product requirements document per selected capability. Each
+  is `Status: Proposed — not shipped behavior` and gated behind the 1.0 beta;
+  none describes current behavior. Promote a PRD by implementing it and moving
+  the behavior into the owning doc, not by editing its status in place.
 - `adr/` owns accepted product/engineering decisions from operator judgment
   (Hermes priority, compute roles, and similar). Vision stays in README;
   outcomes stay in `GOALS.md`.
@@ -80,3 +87,5 @@ Durable documentation for operators, contributors, and coding agents.
 
 - `development/AGENTS.md` - Git workflow, branch catalog, and agent handoff
   rules.
+
+`prd/` and `adr/` have no child contracts; this file owns their rules.

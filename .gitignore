@@ -46,7 +46,7 @@ Screenshot*.png
 screenshots/
 output/playwright/
 
-# Coverage artifacts from the local gate runs
+# Coverage artifacts from local gate runs
 .coverage
 .coverage.*
 htmlcov/
