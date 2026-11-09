@@ -45,6 +45,10 @@ Decision records: [`docs/adr/`](docs/adr/).
 lives in [`docs/1.0-beta-evidence.md`](docs/1.0-beta-evidence.md). Sequence
 of accepted work: [`docs/1.0-beta-roadmap.html`](docs/1.0-beta-roadmap.html).
 
+Herdr-inspired development proposals: [design](docs/herdr-development.md),
+[TODO](docs/herdr-todo.md), and [work plan](docs/herdr-work-plan.md). These are
+planning documents, not shipped features or a replacement beta roadmap.
+
 What works today:
 
 | Surface | Endpoint | Notes |

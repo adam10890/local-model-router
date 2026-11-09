@@ -97,6 +97,12 @@ jobs:
         run: ./scripts/build_windows_bundle.ps1 -IncludeOfflineAssets -OfflineBackends cpu
       - name: Run full CPU cleanroom lifecycle
         shell: pwsh
+        # The lifecycle section drops IMPERIUM_OFFLINE to exercise a real
+        # update/rollback, so it reaches the GitHub releases API. Authenticating
+        # lifts the anonymous 60/hour-per-IP limit that runners share, which is
+        # what intermittently failed this job (runs #52 and #81).
+        env:
+          IMPERIUM_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/test_windows_cleanroom.ps1 -FullOfflineSetup -Backend cpu -Lifecycle
       - name: Upload sanitized CPU evidence
         if: always()

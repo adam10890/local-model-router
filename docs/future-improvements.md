@@ -64,6 +64,17 @@ under "Shipped" for traceability.
 - **Worktree isolation for runner executions** — once a runner exists, each
   execution gets an isolated git worktree to allow safe parallel runs.
 
+## Herdr-inspired development proposals
+
+Adam requested a developed design, TODO and work plan on 2026-11-08. The
+[design and pinned source inventory](herdr-development.md) retain R01-R60;
+the [TODO](herdr-todo.md) groups them into bounded candidate packages, and the
+[work plan](herdr-work-plan.md) records effort, simplicity, urgency, value and
+dependencies. Planning is authorized; implementation remains selected by slice.
+Existing-path reliability fixes, post-beta Chat V2/Workbench proposals and
+post-gate optional execution are explicitly separated. This entry does not
+change GOALS, accepted roadmap ordering or orchestration authority.
+
 ## Selection rules
 
 - Local-first contracts win: loopback default, bearer auth, no prompt bodies
