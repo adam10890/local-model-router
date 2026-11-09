@@ -279,6 +279,55 @@ def test_manual_stop_blocks_hermes_even_when_desired_matches_loaded(
     assert calls == []
 
 
+def test_studio_lease_stop_asks_hermes_to_wait_then_start_clears_it(tmp_path, monkeypatch):
+    from local_model_router.helpers.backends.base import SlotStatus
+
+    app, manager, _watcher = _app(tmp_path, monkeypatch)
+    calls = _patch_forward(monkeypatch)
+    backend = manager._backend
+
+    async def fake_stop(_name):
+        return True
+
+    async def fake_start(name, _config):
+        return SlotStatus(name=name, running=True, healthy=True, port=18888, host="localhost")
+
+    monkeypatch.setattr(backend, "stop_slot", fake_stop)
+    monkeypatch.setattr(backend, "start_slot", fake_start)
+    client = TestClient(app)
+
+    unknown = client.post("/fleet/slots/slot_chat/stop", json={"reason": "operator"})
+    assert unknown.status_code == 200, unknown.text
+    assert manager.slot_operation_snapshot("slot_chat")["lease_reason"] is None
+    held = _chat(client, path="/harnesses/hermes/v1/chat/completions")
+    assert held.status_code == 503
+    assert held.json()["error"]["code"] == "gpu_slot_stopped"
+    assert "retry-after" not in held.headers
+
+    started = client.post("/fleet/slots/slot_chat/start")
+    assert started.status_code == 200, started.text
+    assert manager.slot_operation_snapshot("slot_chat")["manual_stop"] is False
+
+    leased = client.post("/fleet/slots/slot_chat/stop", json={"reason": "studio_lease"})
+    assert leased.status_code == 200, leased.text
+    assert manager.slot_operation_snapshot("slot_chat")["lease_reason"] == "studio_lease"
+    waiting = _chat(client, path="/harnesses/hermes/v1/chat/completions")
+    assert waiting.status_code == 503
+    assert waiting.json()["error"]["code"] == "gpu_leased_by_studio"
+    assert "borrowed by Imperium Studio" in waiting.json()["error"]["message"]
+    assert "Do not start the slot" in waiting.json()["error"]["message"]
+    assert waiting.headers["retry-after"] == "120"
+    assert calls == []
+
+    restored = client.post("/fleet/slots/slot_chat/start")
+    assert restored.status_code == 200, restored.text
+    assert manager.slot_operation_snapshot("slot_chat")["lease_reason"] is None
+    assert manager.slot_operation_snapshot("slot_chat")["manual_stop"] is False
+    response = _chat(client, path="/harnesses/hermes/v1/chat/completions")
+    assert response.status_code == 200
+    assert calls
+
+
 def test_backoff_retry_after_comes_from_watchers_next_attempt_at(
     tmp_path, monkeypatch
 ):

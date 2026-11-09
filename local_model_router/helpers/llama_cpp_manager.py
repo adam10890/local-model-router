@@ -93,6 +93,7 @@ class BackendManager:
                 "active_requests": 0,
                 "epoch": 0,
                 "manual_stop": False,
+                "lease_reason": None,
                 "restart_suppressed": False,
             })
 
@@ -199,6 +200,11 @@ class BackendManager:
         state = self._coordination(name)
         with self._coordination_lock:
             state["manual_stop"] = bool(stopped)
+
+    def set_lease_reason(self, name: str, reason: str | None) -> None:
+        state = self._coordination(name)
+        with self._coordination_lock:
+            state["lease_reason"] = reason or None
 
     def set_auto_restart_suppressed(self, name: str, suppressed: bool) -> None:
         state = self._coordination(name)
@@ -354,6 +360,7 @@ class BackendManager:
             }
         try:
             self.set_manual_stop(name, False)
+            self.set_lease_reason(name, None)
             self.set_auto_restart_suppressed(name, False)
             return await self._start_slot_unlocked(name)
         finally:
@@ -415,7 +422,7 @@ class BackendManager:
     def last_slot_failure_code(self, name: str) -> str:
         return str(getattr(self, "_slot_operation_failures", {}).get(name) or "")
 
-    async def stop_slot(self, name: str) -> bool:
+    async def stop_slot(self, name: str, *, reason: str | None = None) -> bool:
         if not self.begin_slot_operation(name, "draining"):
             return False
         try:
@@ -423,6 +430,9 @@ class BackendManager:
             self.set_slot_phase(name, "stopping")
             stopped = await self._stop_slot_unlocked(name)
             self.set_manual_stop(name, True)
+            self.set_lease_reason(
+                name, "studio_lease" if stopped and reason == "studio_lease" else None
+            )
             return stopped
         finally:
             self.finish_slot_operation(name)

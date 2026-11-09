@@ -120,11 +120,14 @@ class FleetControlHandler:
             "result": result,
         }
 
-    async def stop_slot(self, slot_id: str) -> Dict[str, Any]:
+    async def stop_slot(self, slot_id: str, *, reason: str | None = None) -> Dict[str, Any]:
         manager = self._manager_or_dependency_error()
         if slot_id not in manager._slot_configs:
             raise FleetControlError(f"Slot '{slot_id}' not found in config", "unknown_slot", 404)
-        stopped = await manager.stop_slot(slot_id)
+        if reason:
+            stopped = await manager.stop_slot(slot_id, reason=reason)
+        else:
+            stopped = await manager.stop_slot(slot_id)
         if not stopped and manager.slot_operation_snapshot(slot_id)["phase"] != "idle":
             raise FleetControlError(
                 f"Slot '{slot_id}' already has an operation in progress",

@@ -101,6 +101,28 @@ def test_health_recovery_clears_stale_failure(monkeypatch):
     assert recovered.uptime_s >= 2
 
 
+def test_build_command_reasoning_preserve_is_explicit(tmp_path):
+    model = tmp_path / "model.gguf"
+    model.touch()
+    backend = SubprocessBackend({})
+    base = {
+        "model_path": str(model),
+        "port": 8080,
+        "fit": False,
+    }
+
+    preserved = backend._build_command({**base, "reasoning_preserve": True})
+    overridden = backend._build_command({
+        **base,
+        "extra_args": ["--reasoning-preserve"],
+    })
+
+    assert "--reasoning-preserve" in preserved
+    assert "--no-reasoning-preserve" not in preserved
+    assert overridden.count("--reasoning-preserve") == 1
+    assert "--no-reasoning-preserve" not in overridden
+
+
 def test_build_command_includes_mmproj(tmp_path):
     model = tmp_path / "model.gguf"
     mmproj = tmp_path / "mmproj.gguf"
@@ -159,7 +181,7 @@ def test_build_command_preserves_supported_flags(tmp_path):
     }
     for flag, value in expected_pairs.items():
         assert cmd[cmd.index(flag) + 1] == value
-    for flag in ("--fit", "--embedding", "--no-jinja", "--no-warmup"):
+    for flag in ("--fit", "--embedding", "--no-jinja", "--no-warmup", "--no-reasoning-preserve"):
         assert flag in cmd
 
 
