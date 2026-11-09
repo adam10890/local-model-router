@@ -18,6 +18,46 @@ expectations.
 - Finish verification, merge, push, remote-SHA confirmation, and cleanup before
   starting the next task.
 
+## Starting a task: the one-branch gate
+
+This is the authoritative statement of the rule. `CLAUDE.md`, the root
+`AGENTS.md` and `AGENTS.md` in this directory point here; change it here and
+nowhere else.
+
+**One branch at a time.** Before opening a branch, run:
+
+```powershell
+python scripts/branch_guard.py
+```
+
+It must exit 0. It counts `dev/*`, `ready/*` and `claude/*` on `origin`,
+exempts `spike/*`, and for each branch says whether it still holds work of its
+own or is a merged leftover to delete. `--allow N` covers the owned-parallel
+case above; `--queue` additionally requires each open branch's slug to appear
+in [`../future-improvements.md`](../future-improvements.md).
+
+**While a branch is open, no new development starts.** A new idea is written
+into the idea queue in [`../future-improvements.md`](../future-improvements.md)
+and nothing else happens to it. Not a second branch, and not a quiet addition
+to the open branch unless it is that branch's own queue entry.
+
+**A branch is finished when it is merged and gone, not when the code works.**
+Verified, merged, confirmed against GitHub's `main` SHA, and deleted both
+locally and remotely. Until all five are true the branch is still open and the
+gate is still closed.
+
+**An idea that cannot wait is still not a branch.** It goes to the head of the
+queue and the open branch finishes first. The only exception is a fix for
+something already broken on `main`, which is not new development.
+
+Why this is a script and not only a paragraph: the rule was already written in
+four places and was still broken three times in one session, leaving ten stale
+branches on `origin`. Prose was not the enforcement mechanism.
+
+The guard is deliberately **not** a CI job. A check on `main` that counts open
+branches would fail pull requests for reasons unrelated to their diff. It is a
+pre-task command, run by whoever opens the branch.
+
 ## Branch states
 
 | Prefix | State | Meaning | Merge target | Cleanup |
@@ -40,7 +80,7 @@ Herdr planning entry refreshed on 2026-11-08; the historical `main` row below is
 | Branch | Status | Action |
 | --- | --- | --- |
 | `main` | active trunk | Branch new work from here. Beta gate Phases 0–5 merged (`3b3b006`…`7708717`). Evidence: `docs/1.0-beta-evidence.md`. |
-| `ready/herdr-development-plan` | verified docs-only candidate; owner Codex | Design/TODO/work plan at source base `c0f1865`; documentation checks passed. Commit/push/PR authorized 2026-11-08; pending founder review and merge. Remove this row when merged and cleaned up. |
+| `dev/branch-convergence` | active task branch; owner Claude Code | The one-branch gate, `scripts/branch_guard.py`, and the idea queue. Remove this row when merged and cleaned up. |
 
 Add an inventory row only when a parallel or long-lived branch is explicitly
 approved. Remove the row when the branch is merged and deleted; do not retain
@@ -50,11 +90,15 @@ historical merged rows here because Git is the history.
 
 ```powershell
 git fetch --prune origin
+python scripts/branch_guard.py
 git switch main
 git pull --ff-only origin main
 git status --short --branch
 git switch -c dev/<slug>
 ```
+
+If the guard exits non-zero, stop. Finish or delete what it names first; see
+[the one-branch gate](#starting-a-task-the-one-branch-gate).
 
 Use a short lowercase slug, for example `dev/routing-history` or
 `dev/app-api-keys`. Do not start when `main` contains unrelated uncommitted
