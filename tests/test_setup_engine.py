@@ -973,3 +973,202 @@ def test_repair_requires_confirmation_then_reapplies_verified_inventory(tmp_path
     assert applied["model_id"] == "verified-model"
     assert applied["confirm_download"] is True
     assert applied["confirm_write"] is True
+
+
+# ---------------------------------------------------------------------------
+# Managed-runtime release lookup: retry, and opt-in authentication
+#
+# This is the only online call the update path makes. Unauthenticated
+# api.github.com allows 60 requests/hour per IP and CI runners share address
+# pools, which failed the nightly Windows lifecycle job twice (runs #52, #81)
+# with nothing wrong locally.
+# ---------------------------------------------------------------------------
+
+
+class _ReleaseResponse:
+    def __init__(self, payload):
+        self._body = json.dumps(payload).encode("utf-8")
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+
+@pytest.fixture()
+def no_sleep(monkeypatch):
+    """Record backoff instead of serving it, so the suite stays fast."""
+    slept: list[float] = []
+    monkeypatch.setattr(engine_module.time, "sleep", slept.append)
+    return slept
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_tokens(monkeypatch):
+    monkeypatch.delenv(engine_module.RELEASE_TOKEN_ENV, raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+
+def _http_error(status, headers=None):
+    return engine_module.urllib.error.HTTPError(
+        "https://api.github.test/releases", status, "boom", headers or {}, None
+    )
+
+
+def test_release_lookup_retries_a_transient_failure(monkeypatch, no_sleep):
+    attempts = []
+
+    def flaky(target, *, timeout):
+        attempts.append(target)
+        if len(attempts) < engine_module.RELEASE_LOOKUP_ATTEMPTS:
+            raise engine_module.urllib.error.URLError("temporary name resolution failure")
+        return _ReleaseResponse([{"tag_name": "b9999"}])
+
+    monkeypatch.setattr(engine_module.urllib.request, "urlopen", flaky)
+
+    assert SetupEngine._github_releases("https://api.github.test/releases") == [
+        {"tag_name": "b9999"}
+    ]
+    assert len(attempts) == engine_module.RELEASE_LOOKUP_ATTEMPTS
+    assert no_sleep  # it waited between attempts rather than hammering
+
+
+def test_release_lookup_reports_after_exhausting_retries(monkeypatch, no_sleep):
+    attempts = []
+
+    def always_down(target, *, timeout):
+        attempts.append(target)
+        raise engine_module.urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(engine_module.urllib.request, "urlopen", always_down)
+
+    with pytest.raises(SetupError) as excinfo:
+        SetupEngine._github_releases("https://api.github.test/releases")
+
+    assert excinfo.value.code == "release_lookup_failed"
+    assert str(engine_module.RELEASE_LOOKUP_ATTEMPTS) in excinfo.value.message
+    assert len(attempts) == engine_module.RELEASE_LOOKUP_ATTEMPTS
+
+
+def test_release_lookup_retries_a_rate_limit(monkeypatch, no_sleep):
+    attempts = []
+
+    def rate_limited(target, *, timeout):
+        attempts.append(target)
+        raise _http_error(403, {"Retry-After": "2"})
+
+    monkeypatch.setattr(engine_module.urllib.request, "urlopen", rate_limited)
+
+    with pytest.raises(SetupError):
+        SetupEngine._github_releases("https://api.github.test/releases")
+
+    assert len(attempts) == engine_module.RELEASE_LOOKUP_ATTEMPTS
+
+
+@pytest.mark.parametrize("status", [401, 404])
+def test_release_lookup_does_not_retry_a_settled_answer(monkeypatch, no_sleep, status):
+    """A missing or forbidden-by-auth resource is an answer, not a blip."""
+    attempts = []
+
+    def settled(target, *, timeout):
+        attempts.append(target)
+        raise _http_error(status)
+
+    monkeypatch.setattr(engine_module.urllib.request, "urlopen", settled)
+
+    with pytest.raises(SetupError) as excinfo:
+        SetupEngine._github_releases("https://api.github.test/releases")
+
+    assert excinfo.value.code == "release_lookup_failed"
+    assert len(attempts) == 1
+    assert no_sleep == []
+
+
+def test_release_lookup_does_not_retry_a_malformed_body(monkeypatch, no_sleep):
+    attempts = []
+
+    class Garbage:
+        def read(self):
+            return b"not json {"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def malformed(target, *, timeout):
+        attempts.append(target)
+        return Garbage()
+
+    monkeypatch.setattr(engine_module.urllib.request, "urlopen", malformed)
+
+    with pytest.raises(SetupError) as excinfo:
+        SetupEngine._github_releases("https://api.github.test/releases")
+
+    assert excinfo.value.code == "release_lookup_failed"
+    assert len(attempts) == 1
+    assert no_sleep == []
+
+
+def test_release_backoff_ignores_an_unreasonable_retry_after():
+    """A rate-limit window can be an hour; a nightly job must fail and report."""
+    delay = SetupEngine._release_retry_delay(_http_error(403, {"Retry-After": "3600"}), 1)
+    assert delay <= engine_module.RELEASE_LOOKUP_MAX_BACKOFF_SECONDS
+
+
+def test_release_backoff_honors_a_short_retry_after():
+    delay = SetupEngine._release_retry_delay(_http_error(429, {"Retry-After": "5"}), 1)
+    assert delay == 5
+
+
+def test_release_lookup_is_unauthenticated_by_default(monkeypatch):
+    seen = {}
+
+    def capture(target, *, timeout):
+        seen.update(target.headers)
+        return _ReleaseResponse([{"tag_name": "b1"}])
+
+    monkeypatch.setattr(engine_module.urllib.request, "urlopen", capture)
+    SetupEngine._github_releases("https://api.github.test/releases")
+
+    assert not any(key.lower() == "authorization" for key in seen)
+
+
+def test_release_lookup_authenticates_with_the_dedicated_variable(monkeypatch):
+    seen = {}
+
+    def capture(target, *, timeout):
+        seen.update(target.headers)
+        return _ReleaseResponse([{"tag_name": "b1"}])
+
+    monkeypatch.setattr(engine_module.urllib.request, "urlopen", capture)
+    monkeypatch.setenv(engine_module.RELEASE_TOKEN_ENV, "ci-token")
+    SetupEngine._github_releases("https://api.github.test/releases")
+
+    authorization = next(value for key, value in seen.items() if key.lower() == "authorization")
+    assert authorization == "Bearer ci-token"
+
+
+def test_release_lookup_never_sends_an_ambient_github_token(monkeypatch):
+    """GITHUB_TOKEN is commonly exported for unrelated work.
+
+    Imperium must not attach an operator's personal credential to an outbound
+    request they never asked for; only the dedicated variable opts in.
+    """
+    seen = {}
+
+    def capture(target, *, timeout):
+        seen.update(target.headers)
+        return _ReleaseResponse([{"tag_name": "b1"}])
+
+    monkeypatch.setattr(engine_module.urllib.request, "urlopen", capture)
+    monkeypatch.setenv("GITHUB_TOKEN", "an-operators-personal-token")
+    SetupEngine._github_releases("https://api.github.test/releases")
+
+    assert not any(key.lower() == "authorization" for key in seen)
+    assert "an-operators-personal-token" not in json.dumps(seen)

@@ -34,6 +34,13 @@ Durable documentation for operators, contributors, and coding agents.
   `local_model_router/disclosure/disclosure.yaml`; the two are one contract.
 - `future-improvements.md` owns the deferred improvement-ideas backlog
   (candidate directions only; labeled deferred until selected).
+- `local-llm-landscape.md` owns the ecosystem gap review against
+  `awesome-local-llm`: what Imperium already covers, what it does not, and why
+  each unselected gap was deferred. A backlog, not a plan of record.
+- `prd/` owns one product requirements document per selected capability. Each
+  is `Status: Proposed — not shipped behavior` and gated behind the 1.0 beta;
+  none describes current behavior. Promote a PRD by implementing it and moving
+  the behavior into the owning doc, not by editing its status in place.
 - `adr/` owns accepted product/engineering decisions from operator judgment
   (Hermes priority, compute roles, and similar). Vision stays in README;
   outcomes stay in `GOALS.md`.
@@ -41,6 +48,11 @@ Durable documentation for operators, contributors, and coding agents.
   promote-strong local compute (not shipped behavior until implemented).
 - `needle-bootstrap-evaluation.md` records why Needle remains an Advanced,
   experimental candidate rather than the Windows bootstrap default.
+- `herdr-development.md` owns the explicitly requested Herdr-inspired proposal
+  design and pinned R01-R60 source inventory; it does not describe shipped features.
+- `herdr-todo.md` owns package/checklist state and evidence for those proposals.
+- `herdr-work-plan.md` owns proposed effort/value/dependency sequencing for that
+  checklist; accepted beta ordering and execution gates keep their existing owners.
 - `development/` owns Git workflow, branch catalog rules, and collaboration
   process.
 
@@ -49,6 +61,9 @@ Durable documentation for operators, contributors, and coding agents.
 - Documentation must describe current behavior and stable operating rules, not
   speculative plans. The beta roadmap is the explicit exception: it tracks
   accepted product direction and must label deferred ideas as deferred.
+- The explicitly requested Herdr planning documents are a scoped exception:
+  label proposals and unknowns, keep implementation/evidence separate, and do
+  not override accepted roadmap ordering, product contracts or execution gates.
 - Do not include secrets, API keys, prompt bodies, or machine-local fleet
   config values.
 - Keep `AGENTS.md`, `CONTRIBUTING.md`, `CLAUDE.md`, and development workflow
@@ -72,3 +87,5 @@ Durable documentation for operators, contributors, and coding agents.
 
 - `development/AGENTS.md` - Git workflow, branch catalog, and agent handoff
   rules.
+
+`prd/` and `adr/` have no child contracts; this file owns their rules.
