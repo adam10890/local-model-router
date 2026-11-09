@@ -78,6 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     update = sub.add_parser("update", help="check or install the latest stable managed llama.cpp runtime")
     update.add_argument("--check", action="store_true", help="check without installing")
     update.add_argument("--yes", action="store_true", help="confirm the runtime download and activation")
+    update.add_argument("--tag", help="install one rolling build, for example b12110")
     sub.add_parser("rollback", help="switch back to the previous managed llama.cpp runtime")
 
     return parser
@@ -573,17 +574,24 @@ def cmd_update(args: argparse.Namespace) -> int:
 
     engine = _setup_engine()
     try:
+        tag = str(args.tag or "").strip()
         status = engine.update_status()
-        if args.check or not status["update_available"]:
+        if tag:
+            status = {**status, "requested_tag": tag}
+        if args.check or (not tag and not status["update_available"]):
             print(json.dumps(status, indent=2))
             return 0
         if not args.yes:
-            print(json.dumps({**status, "confirmation_required": True, "next": "imperium update --yes"}, indent=2))
+            nxt = f"imperium update --tag {tag} --yes" if tag else "imperium update --yes"
+            print(json.dumps({**status, "confirmation_required": True, "next": nxt}, indent=2))
             return 2
         runtime = engine._managed_runtime()
         if not runtime:
             raise SetupError("runtime_missing", "Install the recommended runtime before switching to latest")
-        result = engine.install_runtime(str(runtime["backend"]), channel="latest")
+        if tag:
+            result = engine.install_runtime(str(runtime["backend"]), channel="pinned", tag=tag)
+        else:
+            result = engine.install_runtime(str(runtime["backend"]), channel="latest")
         print(json.dumps({"ok": True, "runtime": result}, indent=2))
         return 0
     except SetupError as exc:

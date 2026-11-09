@@ -262,6 +262,7 @@ def test_start_preserves_flags_mount_environment_labels_and_stop_scope(tmp_path,
         "--flash-attn",
         "--fit-target",
         "--no-jinja",
+        "--no-reasoning-preserve",
     ):
         assert flag in call["command"]
     assert status.running is True

@@ -548,6 +548,40 @@ def test_latest_runtime_skips_incompatible_semver_release(tmp_path, monkeypatch)
     }]
 
 
+def test_tagged_runtime_release_uses_the_named_build(tmp_path, monkeypatch):
+    engine = _engine(tmp_path)
+    digest = "b" * 64
+    seen = []
+
+    def fake_releases(url):
+        seen.append(url)
+        return [{
+            "tag_name": "b12110",
+            "assets": [{
+                "name": "llama-b12110-bin-win-cpu-x64.zip",
+                "digest": f"sha256:{digest}",
+                "browser_download_url": "https://example.invalid/b12110.zip",
+                "size": 7,
+            }],
+            "html_url": "https://example.invalid/b12110",
+        }]
+
+    monkeypatch.setattr(engine, "_github_releases", fake_releases)
+
+    release, assets = engine._tagged_runtime_release("cpu", "b12110")
+
+    assert seen == [engine.runtime_catalog["releases_api"].split("?", 1)[0] + "/tags/b12110"]
+    assert release["tag_name"] == "b12110"
+    assert assets[0]["sha256"] == digest
+
+
+def test_tagged_runtime_release_rejects_semver_tag(tmp_path):
+    engine = _engine(tmp_path)
+    with pytest.raises(SetupError) as caught:
+        engine._tagged_runtime_release("cpu", "v0.9.0")
+    assert caught.value.code == "invalid_release"
+
+
 def test_runtime_selection_updates_config_and_rollback_restores_it(tmp_path):
     engine = _engine(tmp_path)
     old_binary = tmp_path / "old" / "llama-server.exe"
@@ -573,6 +607,24 @@ def test_runtime_selection_updates_config_and_rollback_restores_it(tmp_path):
     config = yaml.safe_load(engine.config_path.read_text(encoding="utf-8"))
     assert restored["tag"] == "b9987"
     assert config["global"]["llama_cpp_path"] == str(old_binary.parent)
+
+
+def test_runtime_path_sync_preserves_comments(tmp_path):
+    engine = _engine(tmp_path)
+    binary = tmp_path / "runtime" / "llama-server.exe"
+    binary.parent.mkdir()
+    binary.touch()
+    engine.config_path.write_text(
+        "active_slots: []\n# keep\nglobal:\n  # pin\n  llama_cpp_path: old\n",
+        encoding="utf-8",
+    )
+
+    engine._sync_runtime_config({"binary": str(binary)})
+
+    text = engine.config_path.read_text(encoding="utf-8")
+    assert "# keep" in text
+    assert "# pin" in text
+    assert yaml.safe_load(text)["global"]["llama_cpp_path"] == str(binary.parent)
 
 
 def test_runtime_zip_rejects_path_traversal(tmp_path):

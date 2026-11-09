@@ -410,9 +410,9 @@ class _SetupEngine:
     def _managed_runtime(self):
         return self.runtime
 
-    def install_runtime(self, backend, channel):
-        self.calls.append(("install", backend, channel))
-        return {"backend": backend, "channel": channel}
+    def install_runtime(self, backend, channel="recommended", tag=None):
+        self.calls.append(("install", backend, channel, tag))
+        return {"backend": backend, "channel": channel, "tag": tag}
 
     def rollback(self):
         self.calls.append(("rollback",))
@@ -454,10 +454,16 @@ def test_update_confirmation_install_missing_runtime_and_rollback(monkeypatch, c
     engine.update = {"update_available": True, "latest": "next"}
     assert cli.main(["update"]) == 2
     assert cli.main(["update", "--yes"]) == 0
-    assert ("install", "cpu", "latest") in engine.calls
+    assert ("install", "cpu", "latest", None) in engine.calls
+
+    engine.update = {"update_available": False, "latest": "b12140"}
+    assert cli.main(["update", "--tag", "b12110"]) == 2
+    assert cli.main(["update", "--tag", "b12110", "--yes"]) == 0
+    assert ("install", "cpu", "pinned", "b12110") in engine.calls
 
     capsys.readouterr()
     engine.runtime = None
+    engine.update = {"update_available": True, "latest": "next"}
     assert cli.main(["update", "--yes"]) == 1
     assert json.loads(capsys.readouterr().out)["error"] == "runtime_missing"
 

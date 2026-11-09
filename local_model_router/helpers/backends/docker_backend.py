@@ -448,6 +448,12 @@ class DockerBackend(InferenceBackend):
         if rf:
             cmd.extend(["--reasoning-format", rf])
 
+        # b12110 enables preserve_reasoning when this flag is omitted.
+        if config.get("reasoning_preserve") is True:
+            cmd.append("--reasoning-preserve")
+        else:
+            cmd.append("--no-reasoning-preserve")
+
         # Jinja
         if config.get("jinja") is False:
             cmd.append("--no-jinja")

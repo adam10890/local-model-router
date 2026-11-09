@@ -610,6 +610,15 @@ class SubprocessBackend(InferenceBackend):
         if rf:
             cmd.extend(["--reasoning-format", rf])
 
+        # b12110 enables preserve_reasoning when this flag is omitted.
+        extra = [str(item) for item in config.get("extra_args") or []]
+        if "--reasoning-preserve" not in extra and "--no-reasoning-preserve" not in extra:
+            cmd.append(
+                "--reasoning-preserve"
+                if config.get("reasoning_preserve") is True
+                else "--no-reasoning-preserve"
+            )
+
         if config.get("jinja") is True:
             cmd.append("--jinja")
         elif config.get("jinja") is False:

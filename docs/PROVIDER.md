@@ -253,8 +253,9 @@ stored. Use `--force` to refresh an unchanged model.
 
 Managed Windows runtime updates query recent llama.cpp rolling releases and
 accept only the newest build that supplies every expected backend asset with a
-GitHub SHA-256 digest. `imperium rollback` restores the previous pinned runtime
-and updates the managed configuration path with it.
+GitHub SHA-256 digest. `imperium update --tag bNNNN` installs that rolling
+build after the same digest check. `imperium rollback` restores the previous
+pinned runtime and updates the managed configuration path with it.
 
 ## Local llama.cpp vs upstreams
 
