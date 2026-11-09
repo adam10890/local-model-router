@@ -35,11 +35,12 @@ exists and is merged, delete it. If it is still active, reclassify it to
 
 ## Current branch inventory
 
-As of 2026-08-15:
+Herdr planning entry refreshed on 2026-11-08; the historical `main` row below is not a new audit of its beta evidence.
 
 | Branch | Status | Action |
 | --- | --- | --- |
 | `main` | active trunk | Branch new work from here. Beta gate Phases 0–5 merged (`3b3b006`…`7708717`). Evidence: `docs/1.0-beta-evidence.md`. |
+| `ready/herdr-development-plan` | verified docs-only candidate; owner Codex | Design/TODO/work plan at source base `c0f1865`; documentation checks passed. Commit/push/PR authorized 2026-11-08; pending founder review and merge. Remove this row when merged and cleaned up. |
 
 Add an inventory row only when a parallel or long-lived branch is explicitly
 approved. Remove the row when the branch is merged and deleted; do not retain
