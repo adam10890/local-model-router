@@ -8,9 +8,9 @@ Run it before opening a branch:
 
     python scripts/branch_guard.py
 
-It counts `dev/*`, `ready/*` and `claude/*` on the configured remote. `spike/*`
-is exempt by design -- a throwaway experiment is not a task branch -- and so is
-`main`.
+It counts `dev/*`, `ready/*` and the agent prefixes `claude/*`, `codex/*` and
+`cursor/*` on the configured remote. `spike/*` is exempt by design -- a
+throwaway experiment is not a task branch -- and so is `main`.
 
 For each branch it also says whether the branch still holds work of its own,
 because git calls a squash-merged branch "open" and merging one again
@@ -30,7 +30,15 @@ import subprocess
 import sys
 from typing import Optional
 
-TASK_PREFIXES = ("dev/", "ready/", "claude/")
+# Every prefix that can hold real work. The agent prefixes are here because an
+# agent branch is the kind that accumulates unnoticed: PR #24 arrived from
+# `cursor/llama-cpp-b12110` while this guard was being written, and a guard
+# that does not count a prefix silently permits an unbounded number of them.
+# `codex/` and `claude/` are named in git-workflow.md's branch-states table;
+# `cursor/` is in use and belongs with them.
+TASK_PREFIXES = ("dev/", "ready/", "claude/", "codex/", "cursor/")
+
+# A throwaway experiment is not a task branch.
 EXEMPT_PREFIXES = ("spike/",)
 
 

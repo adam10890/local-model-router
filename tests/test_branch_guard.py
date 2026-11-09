@@ -125,6 +125,20 @@ class TestCounting:
     def test_main_is_never_counted(self, repo):
         assert "main" not in branch_guard.task_branches("origin")
 
+    @pytest.mark.parametrize("prefix", ["dev", "ready", "claude", "codex", "cursor"])
+    def test_every_working_prefix_is_counted(self, repo, prefix):
+        """An uncounted prefix is an unbounded number of branches.
+
+        PR #24 arrived from `cursor/llama-cpp-b12110` while this guard was
+        being written, and the first version of the guard did not count it.
+        """
+        name = f"{prefix}/thing"
+        repo.checkout(name, new=True)
+        repo.write("x.txt", "x\n")
+        repo.commit("work")
+        repo.push(name)
+        assert branch_guard.task_branches("origin") == [name]
+
     def test_a_negative_allowance_is_rejected(self, repo):
         with pytest.raises(SystemExit):
             branch_guard.main(["--allow", "-1"])

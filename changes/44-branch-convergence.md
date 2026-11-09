@@ -6,9 +6,12 @@ The one-branch rule was already written in four places — `CLAUDE.md`, the root
 and one squash-merged in PR #19 that git still reported as open. Prose was not
 the enforcement mechanism.
 
-**`scripts/branch_guard.py`** (stdlib only) counts `dev/*`, `ready/*` and
-`claude/*` on a remote, exempts `spike/*`, and exits non-zero past the
-allowance. For each branch it says whether the branch still holds work of its
+**`scripts/branch_guard.py`** (stdlib only) counts `dev/*`, `ready/*` and the
+agent prefixes `claude/*`, `codex/*` and `cursor/*` on a remote, exempts
+`spike/*`, and exits non-zero past the allowance. The agent prefixes are
+counted because an agent branch is the kind that accumulates unnoticed: PR #24
+arrived from `cursor/llama-cpp-b12110` while this was being written, and the
+first version of the guard did not count it. For each branch it says whether the branch still holds work of its
 own. The test is not how many files match but, for each file that still
 differs, whether `main` changed that file too since the merge base: a file that
 differs because `main` moved on is work `main` already has, while a file only

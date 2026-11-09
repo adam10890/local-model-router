@@ -30,9 +30,13 @@ nowhere else.
 python scripts/branch_guard.py
 ```
 
-It must exit 0. It counts `dev/*`, `ready/*` and `claude/*` on `origin`,
-exempts `spike/*`, and for each branch says whether it still holds work of its
-own or is a merged leftover to delete. `--allow N` covers the owned-parallel
+It must exit 0. It counts `dev/*`, `ready/*` and the agent prefixes
+`claude/*`, `codex/*` and `cursor/*` on `origin`, exempts `spike/*`, and for
+each branch says whether it still holds work of its own or is a merged leftover
+to delete. **An agent prefix is counted deliberately:** an agent branch is the
+kind that accumulates unnoticed, and a prefix the guard does not count is an
+unbounded number of branches. If a new tool starts creating branches under a new
+prefix, add it to `TASK_PREFIXES`. `--allow N` covers the owned-parallel
 case above; `--queue` additionally requires each open branch's slug to appear
 in [`../future-improvements.md`](../future-improvements.md).
 
