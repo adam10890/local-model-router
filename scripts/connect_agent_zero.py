@@ -37,14 +37,19 @@ def _docker(*args: str) -> str:
     return subprocess.run(["docker", *args], capture_output=True, text=True, check=True).stdout
 
 
-def find_usr(container: str | None = None) -> Path:
-    """Host path bind-mounted at /a0/usr of the (single) Agent Zero container."""
-    if not container:
-        rows = [r.split("\t") for r in _docker("ps", "--format", "{{.Names}}\t{{.Image}}").splitlines()]
-        names = [name for name, image in rows if "agent-zero" in image]
-        if len(names) != 1:
-            sys.exit(f"found {len(names)} Agent Zero containers {names}; pass --container or --usr")
-        container = names[0]
+def find_container(container: str | None = None) -> str:
+    """The (single) running Agent Zero container, unless one was named."""
+    if container:
+        return container
+    rows = [r.split("\t") for r in _docker("ps", "--format", "{{.Names}}\t{{.Image}}").splitlines()]
+    names = [name for name, image in rows if "agent-zero" in image]
+    if len(names) != 1:
+        sys.exit(f"found {len(names)} Agent Zero containers {names}; pass --container or --usr")
+    return names[0]
+
+
+def find_usr(container: str) -> Path:
+    """Host path bind-mounted at /a0/usr of the Agent Zero container."""
     mounts = _docker("inspect", "-f", "{{range .Mounts}}{{.Destination}}|{{.Source}}\n{{end}}", container)
     for line in mounts.splitlines():
         dest, _, src = line.partition("|")
@@ -142,13 +147,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--usr", type=Path, help="host path of Agent Zero's /a0/usr (skips docker detection)")
     ap.add_argument("--no-select", action="store_true", help="add the preset but leave the active one alone")
     ap.add_argument("--dry-run", action="store_true", help="show what would change, write nothing")
+    ap.add_argument("--restart", action="store_true", help="restart Agent Zero's UI process so it reloads .env")
     a = ap.parse_args(argv)
 
     harnesses = _get(a.router, "/harnesses")["harnesses"]
     harness = next((h for h in harnesses if h["harness_id"] == "agent_zero"), None)
     if harness is None:
         sys.exit("Imperium has no agent_zero harness (check conf/harnesses.yaml)")
-    usr = a.usr or find_usr(a.container)
+    container = a.container or (None if a.usr else find_container())
+    usr = a.usr or find_usr(container)
     r = run(harness, slot_contexts(_get(a.router, "/backends")), usr, select=not a.no_select, dry_run=a.dry_run)
 
     chat = r["preset"]["chat"]
@@ -162,6 +169,16 @@ def main(argv: list[str] | None = None) -> int:
         print("  NOT selected: Imperium says the pinned model is not ready (restart the router after fixing conf/harnesses.yaml)")
     elif r["selected"] and not a.dry_run:
         print("  selected as the active preset - open a new chat in Agent Zero")
+    if not a.dry_run:
+        # Agent Zero reads usr/.env into its environment only at startup, so a key written
+        # above is invisible to an already-running UI ("Missing credentials" on first use).
+        restart = ["exec", container, "supervisorctl", "restart", "run_ui"] if container else None
+        if a.restart and restart:
+            _docker(*restart)
+            print("  restarted Agent Zero's UI so it reloads .env - refresh the page")
+        else:
+            cmd = f"docker {' '.join(restart)}" if restart else "restart Agent Zero's UI process"
+            print(f"  if Agent Zero was already running, reload its .env: {cmd}  (or pass --restart), then refresh")
     return 0
 
 

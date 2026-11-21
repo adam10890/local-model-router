@@ -201,8 +201,11 @@ the container's bind-mounted `usr/plugins/_model_config/presets.yaml` (backup:
 only when it is empty and router authentication is off, never overwrites a
 real key, and selects the preset only when both connections report
 `model_ready`. Use `--no-select` to add the preset without activating it, and
-`--container` or `--usr` when detection is ambiguous. Open a new Agent Zero
-chat afterwards.
+`--container` or `--usr` when detection is ambiguous. Agent Zero copies
+`usr/.env` into its environment only at startup, so a running instance answers
+`Missing credentials` until its UI process restarts: pass `--restart`, or run
+`docker exec <container> supervisorctl restart run_ui` (this interrupts running
+agent tasks). Then refresh the page and open a new chat.
 
 Observed on Agent Zero 2.16: its own preset resolver reported
 `Imperium (local)` as the selected preset with both slots pointing at the
