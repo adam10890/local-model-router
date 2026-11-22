@@ -97,13 +97,22 @@ a defined path: real-client evidence per harness.
     gate.
   - Turning on `A0_LMM_ROUTER_STRUCTURED_OUTPUT=1` by default: a shipped
     feature whose enforcement decision waits on these gates.
+  - An Agent Zero canary in a disposable container with its own `usr` (never
+    the operator's), wired with `scripts/connect_agent_zero.py` and run under
+    a per-run authorization checklist and incident-stop conditions borrowed
+    from Spynel's [provider-canary threat model](https://github.com/agent0ai/spynel/blob/main/docs/provider-canary-threat-model.md).
+    This is what "a safe isolated client invocation" means for Agent Zero in
+    [`spynel-adoption-plan.md`](spynel-adoption-plan.md). The web UI needs a
+    login, so the canary drives the router route and Agent Zero's own preset
+    resolver rather than a UI chat.
 
 ### Q5 — Replacement execution surface
 
 The `/orchestrator/*` surface is deprecated. Anything that replaces it is
 gated by the re-entry conditions already written down.
 
-- **Detail:** [`future-orchestration.md`](future-orchestration.md)
+- **Detail:** [`future-orchestration.md`](future-orchestration.md); Spynel
+  v0.16.5 re-review in [`spynel-adoption-plan.md`](spynel-adoption-plan.md)
 - **Status:** blocked — the re-entry gates are not met, and the ownership
   question in `## Open questions` must be answered first
 - **Slug:** `execution-surface`
@@ -128,6 +137,22 @@ until one of them is picked up and earns its own.
 - Cross-provider fallback breadth — per-role upstream preferences over the
   shipped upstream fallback lane.
 - Whiteboard code extraction in the dashboard chat surface.
+- Pin drift after a model swap. Observed 2026-11-22: after the model behind
+  GPU profile `ornith` was replaced, Hermes kept working (its pin follows the
+  watcher in process) while Agent Zero's static pin `ornith` answered
+  `503 harness_model_unavailable`, and `GET /ui/status` still reported
+  `overall: ready` with no blocking or optional issues. The failure is already
+  visible as `model_ready: false` in `GET /harnesses`. Two directions, neither
+  decided: show a pinned-but-unservable harness in the alert center, and/or
+  let a harness name a GPU profile or role instead of a model id. The second
+  touches G3 ("a pinned harness never silently changes its model") and is the
+  founder's call.
+- Agent-readable harness setup. `GET /harnesses` already carries a
+  per-harness `setup` manifest, but the MCP surface registers only `models://`
+  resources. Expose the manifests, and the connect command, as MCP resources
+  so an agent can read how to connect a client without scraping `docs/`.
+  Idea from Spynel's offline, versioned `spynel docs` (stable topic ids, no
+  live values in static text).
 
 ## Open questions
 
@@ -152,6 +177,8 @@ Process and repository work that justifies a branch without being a queue
 entry. Listed so `scripts/branch_guard.py --queue` can see the slug.
 
 - `branch-convergence` — branch hygiene, the one-branch guard, and this queue.
+- `spynel-rereview` — re-baseline the Spynel adoption plan against v0.16.5 and
+  record the Spynel-derived queue entries above.
 
 ## Shipped
 

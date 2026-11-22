@@ -209,10 +209,15 @@ agent tasks). Then refresh the page and open a new chat.
 
 Observed on Agent Zero 2.16: its own preset resolver reported
 `Imperium (local)` as the selected preset with both slots pointing at the
-harness URLs. A pin that is not ready (for example a `dmr/...` model whose
-server is down) answers `502 upstream_error`; repin it in the machine-local
-file named by `A0_LMM_ROUTER_HARNESSES_CONFIG` and restart the router, since
-profiles load at startup and the pin API is off by default.
+harness URLs. A pin that cannot be served answers `502 upstream_error` (for
+example a `dmr/...` model whose server is down) or
+`503 harness_model_unavailable` (a model id or GPU-profile name that no local
+slot serves any more, such as after the model behind a profile was replaced).
+Repin without a restart by enabling config writes (see "Add a harness") and
+sending `PATCH /harnesses/agent_zero/connections/chat` and `.../utility`.
+Otherwise edit the machine-local file named by
+`A0_LMM_ROUTER_HARNESSES_CONFIG` and restart the router, since profiles load
+at startup and the pin API is off by default.
 
 ## Add a harness
 
