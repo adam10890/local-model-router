@@ -146,7 +146,10 @@ until one of them is picked up and earns its own.
   decided: show a pinned-but-unservable harness in the alert center, and/or
   let a harness name a GPU profile or role instead of a model id. The second
   touches G3 ("a pinned harness never silently changes its model") and is the
-  founder's call.
+  founder's call. A slot-id pin (`slot_chat`) already gives the second today
+  and is what this machine's Agent Zero uses since 2026-11-22. Still open: the
+  alert-center half, and the pin API accepting role aliases the request path
+  does not resolve.
 - Agent-readable harness setup. `GET /harnesses` already carries a
   per-harness `setup` manifest, but the MCP surface registers only `models://`
   resources. Expose the manifests, and the connect command, as MCP resources

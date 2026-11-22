@@ -219,6 +219,19 @@ Otherwise edit the machine-local file named by
 `A0_LMM_ROUTER_HARNESSES_CONFIG` and restart the router, since profiles load
 at startup and the pin API is off by default.
 
+To keep Agent Zero working when the model behind a slot is replaced, pin both
+connections to the slot id instead of a model id (for example
+`model: slot_chat`). A pinned slot id resolves to whatever that slot serves
+now, and while the Hermes GPU slot is changing models the request gets
+`gpu_swap_in_progress` with `Retry-After` rather than
+`harness_model_unavailable`. Observed 2026-11-22 on Agent Zero 2.16 with
+`slot_chat` serving a replaced model. The trade-off is that the swap is silent
+for the client. After a swap, rerun the script: it reads the context window
+from the pinned slot, and Agent Zero re-reads a changed `presets.yaml` without
+a restart. Do not pin a role alias such as `chat`: the PATCH check accepts it,
+but by code reading the request path does not resolve it and would answer
+`harness_model_unavailable`.
+
 ## Add a harness
 
 1. Choose a stable lowercase harness ID.
