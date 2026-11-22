@@ -6,6 +6,12 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- `scripts/connect_agent_zero.py`: one command that connects a running Agent
+  Zero container to Imperium. It detects the container, reads the `agent_zero`
+  harness connections, writes an `Imperium (local)` model preset into Agent
+  Zero's bind-mounted `usr` directory, and selects it only when the pinned
+  model reports ready. Idempotent, backs up the presets file first, and never
+  overwrites an existing API key. Replaces hand-copying the Settings snippet.
 - `scripts/branch_guard.py` and a single authoritative one-branch rule in
   `docs/development/git-workflow.md`. The rule was already written in four
   places and `origin` still carried ten stale branches, nine merged and one

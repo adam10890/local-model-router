@@ -184,6 +184,36 @@ Agent Zero runs inside Docker, so `127.0.0.1` would address the container
 itself. Keep the `host.docker.internal` URLs above and ensure port 9000 is
 reachable from the container before running `scripts/smoke_harnesses.py`.
 
+### One command
+
+Instead of editing the preset by hand, run with Imperium up and the pinned
+model loaded:
+
+```powershell
+python scripts/connect_agent_zero.py --dry-run   # show what would change
+python scripts/connect_agent_zero.py             # do it
+```
+
+The script finds the single running Agent Zero container, reads the
+connections from `GET /harnesses`, and writes an `Imperium (local)` preset into
+the container's bind-mounted `usr/plugins/_model_config/presets.yaml` (backup:
+`presets.yaml.pre-imperium.bak`). It sets the shared `API_KEY_OTHER` to `local`
+only when it is empty and router authentication is off, never overwrites a
+real key, and selects the preset only when both connections report
+`model_ready`. Use `--no-select` to add the preset without activating it, and
+`--container` or `--usr` when detection is ambiguous. Agent Zero copies
+`usr/.env` into its environment only at startup, so a running instance answers
+`Missing credentials` until its UI process restarts: pass `--restart`, or run
+`docker exec <container> supervisorctl restart run_ui` (this interrupts running
+agent tasks). Then refresh the page and open a new chat.
+
+Observed on Agent Zero 2.16: its own preset resolver reported
+`Imperium (local)` as the selected preset with both slots pointing at the
+harness URLs. A pin that is not ready (for example a `dmr/...` model whose
+server is down) answers `502 upstream_error`; repin it in the machine-local
+file named by `A0_LMM_ROUTER_HARNESSES_CONFIG` and restart the router, since
+profiles load at startup and the pin API is off by default.
+
 ## Add a harness
 
 1. Choose a stable lowercase harness ID.
