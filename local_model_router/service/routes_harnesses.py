@@ -268,6 +268,22 @@ async def dashboard_icon_file(request: Request) -> Response:
     return FileResponse(path, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=86400"})
 
 
+async def dashboard_asset_file(request: Request) -> Response:
+    from local_model_router.dashboard import dashboard_asset
+
+    resolved = dashboard_asset(str(request.path_params.get("name") or ""))
+    if resolved is None:
+        return Response(status_code=404)
+    path, media_type = resolved
+    return FileResponse(
+        path,
+        media_type=media_type,
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
 
 def build_harness_routes(ctx: RouterContext) -> list[Route]:
     return [
@@ -292,5 +308,6 @@ def build_harness_routes(ctx: RouterContext) -> list[Route]:
         ),
         Route("/harnesses/{harness_id}", ctx.protected(ctx.bind(harness_detail))),
         Route("/ui", ctx.bind(dashboard_page)),
+        Route("/ui/assets/{name}", dashboard_asset_file),
         Route("/ui/icons/{name}", dashboard_icon_file),
     ]

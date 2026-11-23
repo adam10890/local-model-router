@@ -46,6 +46,8 @@ license-files = ["LICENSE"]
 [tool.setuptools.package-data]
 local_model_router = [
     "dashboard/*.html",
+    "dashboard/assets/*.css",
+    "dashboard/assets/*.js",
     "dashboard/icons/*.svg",
     "dashboard/icons/LICENSE",
     "service/agents.yaml",
