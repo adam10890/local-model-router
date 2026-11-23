@@ -61,6 +61,13 @@ codebase.
 - Task handoffs are disclosure decisions: content class caps the least-trusted
   executor allowed (`docs/task-disclosure.md`). Undeclared executors resolve to
   the least-trusted tier, and disclosure findings never quote matched text.
+- Cross-project decisions bind this repo too. Anything that stores or queues
+  something Adam asked to have done uses a מעקב אדם commitment as the
+  user-facing record; machine execution state links to its ID (SharedBrain
+  `agents/AGENTS.md`, commons concept
+  `personal-dashboard-task-source-of-truth`). Before writing a PRD, ADR, or
+  review, search SharedBrain and `docs/adr/` for existing decisions on the
+  topic and cite them.
 
 ## Work Guidance
 
