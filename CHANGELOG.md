@@ -6,6 +6,16 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Optional `harness_pin_drift` configuration alert in `GET /ui/status`
+  (`local_model_router/service/readiness.py`, `routes_setup.py`) surfacing
+  pinned harness connections whose target model is not currently loaded or
+  routed, without downgrading `overall: ready`.
+- Read-only MCP harness resources (`harnesses://list` and
+  `harnesses://{harness_id}/setup` in `local_model_router/mcp/resources.py`
+  and `router_bridge.py`) exposing sanitized harness manifests.
+- Generated OpenAPI `3.1.0` schema served at protected `GET /openapi.json`
+  (`local_model_router/service/openapi_spec.py`, `routes_fleet.py`) and HTTP
+  OpenAI/harness/pin-drift contract tests (`tests/test_openapi_and_contract.py`).
 - Bounded SSE token-usage extraction (`SseUsageExtractor` in
   `local_model_router/service/sse_usage.py`) for streaming `/v1/chat/completions`
   and `/harnesses/*/v1/chat/completions`, injecting

@@ -631,10 +631,17 @@ async def routing_request(ctx: RouterContext, request: Request) -> JSONResponse:
     return JSONResponse(result.model_dump())
 
 
+async def openapi_spec(_ctx: RouterContext, request: Request) -> JSONResponse:
+    from .openapi_spec import build_openapi_spec
+
+    return JSONResponse(build_openapi_spec(request.app.routes, _VERSION))
+
+
 
 def build_fleet_routes(ctx: RouterContext) -> list[Route]:
     return [
         Route("/health", ctx.bind(health)),
+        Route("/openapi.json", ctx.protected(ctx.bind(openapi_spec))),
         Route("/slots", ctx.protected(ctx.bind(slots))),
         Route("/config/preview", ctx.protected(ctx.bind(config_preview))),
         Route("/routing/preview", ctx.protected(ctx.bind(routing_preview))),

@@ -18,6 +18,7 @@ from .context import (
     _VERSION,
     RouterContext,
     _dict_or_empty,
+    _pin_model_allowed,
     resolve_app_hook,
 )
 from .fleet_manager import vram_unknown_summary
@@ -95,6 +96,26 @@ async def _collect_readiness(
             for row in (rows or [])
             if isinstance(row, dict) and row.get("id")
         ]
+    harness_pin_checks: list[dict[str, Any]] = []
+    if slot_rows or any(getattr(u, "serves_inference", False) for u in ctx.upstreams):
+        harness_pin_checks = [
+            {
+                "harness_id": profile.harness_id,
+                "connections": [
+                    {
+                        "name": connection.name,
+                        "pin_valid": _pin_model_allowed(
+                            connection.model,
+                            slot_rows,
+                            ctx.upstreams,
+                            extra_ids=ctx.gpu_pin_ids,
+                        ),
+                    }
+                    for connection in profile.connections.values()
+                ],
+            }
+            for profile in ctx.harness_profiles.list_profiles()
+        ]
     payload = build_ui_status(
         setup_state=setup_state_payload,
         slots_health=slot_rows,
@@ -102,6 +123,7 @@ async def _collect_readiness(
         base_url=base_url,
         process_models=process_models,
         live_ids=live_ids,
+        harnesses=harness_pin_checks,
     )
     return payload, setup_state_payload, slot_rows, compute, collection_errors
 

@@ -28,14 +28,34 @@ def _issue(
     *,
     action_en: str = "Resolve",
     action_he: str = "פתרון",
+    action_code: str | None = None,
 ) -> dict[str, Any]:
     return {
         "code": code,
         "category": category,
         "severity": severity,
         "message": _text(en, he),
-        "action": _action(f"resolve_{code}", href, action_en, action_he),
+        "action": _action(action_code or f"resolve_{code}", href, action_en, action_he),
     }
+
+
+def _drifted_harnesses(harnesses: list[dict[str, Any]] | None) -> list[str]:
+    affected: list[str] = []
+    for harness in harnesses or ():
+        if not isinstance(harness, dict):
+            continue
+        harness_id = str(harness.get("harness_id") or "").strip()
+        if not harness_id:
+            continue
+        for connection in harness.get("connections") or ():
+            if not isinstance(connection, dict):
+                continue
+            if connection.get("pin_valid") is False:
+                conn_name = str(connection.get("name") or "").strip()
+                label = f"{harness_id}:{conn_name}" if conn_name and conn_name != "default" else harness_id
+                if label not in affected:
+                    affected.append(label)
+    return sorted(affected)
 
 
 def display_model_stem(value: str) -> str:
@@ -161,6 +181,7 @@ def build_ui_status(
     base_url: str,
     process_models: dict[int, str] | None = None,
     live_ids: list[str] | None = None,
+    harnesses: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     discovery = setup_state.get("discovery") or {}
     hardware = setup_state.get("hardware") or {}
@@ -343,6 +364,22 @@ def build_ui_status(
         "ram_available_mb": ram.get("available_mb"),
         "backend": setup_state.get("recommended_backend") or active_slot.get("backend_type") or "unknown",
     }
+    affected_harnesses = _drifted_harnesses(harnesses)
+    if affected_harnesses:
+        drift_issue = _issue(
+            "harness_pin_drift",
+            "configuration",
+            "optional",
+            "#/connections",
+            "One or more harness connections are pinned to a model not currently configured in this router.",
+            "חיבור אחד או יותר מוצמד למודל שאינו מוגדר כרגע בנתב זה.",
+            action_en="Open connections",
+            action_he="פתיחת חיבורים",
+            action_code="open_connections",
+        )
+        drift_issue["affected_harnesses"] = affected_harnesses
+        optional.append(drift_issue)
+
     return {
         "schema_version": 1,
         "overall": overall,
