@@ -12,24 +12,19 @@ import json
 import os
 import sqlite3
 import tempfile
+import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
-try:
-    from local_model_router.helpers.context_planner import (
-        effective_ratio_for_role,
-        context_status_from_slot,
-        vram_safety_margin_gb,
-    )
-except ImportError:  # pragma: no cover - standalone service import mode
-    from local_model_router.helpers.context_planner import (  # type: ignore
-        effective_ratio_for_role,
-        context_status_from_slot,
-        vram_safety_margin_gb,
-    )
+from local_model_router.helpers.context_planner import (
+    context_status_from_slot,
+    effective_ratio_for_role,
+    vram_safety_margin_gb,
+)
 
 VALID_PRIORITIES = {"low", "normal", "high"}
 _PRIORITY_RANK = {"low": 0, "normal": 1, "high": 2}
@@ -79,8 +74,16 @@ def _json_dumps(value: Any) -> str:
 
 
 def _default_db_path() -> str:
-    base = Path(tempfile.gettempdir()) / "a0_lmm_router"
-    return str(base / "fleet_state.sqlite3")
+    override = os.environ.get("IMPERIUM_HOME", "").strip()
+    if override:
+        return str(Path(override).expanduser().resolve(strict=False) / "state" / "fleet_state.sqlite3")
+    local = os.environ.get("LOCALAPPDATA", "").strip()
+    if os.name == "nt" and local:
+        return str(Path(local) / "Imperium" / "state" / "fleet_state.sqlite3")
+    try:
+        return str(Path.home() / ".imperium" / "state" / "fleet_state.sqlite3")
+    except (RuntimeError, OSError):
+        return str(Path(tempfile.gettempdir()) / "imperium" / "fleet_state.sqlite3")
 
 
 def _int_from_env(name: str, default: int, minimum: int = 0) -> int:
@@ -128,6 +131,8 @@ class FleetStore:
     def __init__(self, db_path: Optional[str] = None) -> None:
         self.db_path = db_path or os.environ.get(_STATE_DB_ENV, "").strip() or _default_db_path()
         self._memory_conn: Optional[sqlite3.Connection] = None
+        self._memory_lock = threading.Lock()
+        self._write_count = 0
         if self.db_path == ":memory:":
             self._memory_conn = sqlite3.connect(":memory:", check_same_thread=False)
             self._memory_conn.row_factory = sqlite3.Row
@@ -138,12 +143,29 @@ class FleetStore:
             return self._memory_conn
         if self.db_path != ":memory:":
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=5.0)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=5000")
         return conn
 
+    @contextmanager
+    def _db(self):
+        if self._memory_conn is not None:
+            with self._memory_lock, self._memory_conn:
+                yield self._memory_conn
+            return
+        conn = self._connect()
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
+
     def _init_schema(self) -> None:
-        with self._connect() as conn:
+        with self._db() as conn:
+            if self._memory_conn is None:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS agents (
@@ -204,6 +226,82 @@ class FleetStore:
             )
             self._ensure_request_columns(conn)
             self._ensure_queue_event_columns(conn)
+            conn.executescript(
+                """
+                CREATE INDEX IF NOT EXISTS idx_requests_updated_at
+                    ON requests(updated_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_requests_status
+                    ON requests(status);
+                CREATE INDEX IF NOT EXISTS idx_queue_events_created_at
+                    ON queue_events(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_snapshots_source_id
+                    ON model_residency_snapshots(source, id DESC);
+                """
+            )
+
+    def prune(
+        self,
+        *,
+        max_requests: int = 10000,
+        max_queue_events: int = 20000,
+        max_snapshots_per_source: int = 100,
+    ) -> None:
+        """Keep SQLite tables bounded without dropping newest history per source."""
+        with self._db() as conn:
+            if max_requests >= 0:
+                conn.execute(
+                    """
+                    DELETE FROM requests
+                    WHERE rowid NOT IN (
+                        SELECT rowid FROM requests
+                        ORDER BY updated_at DESC, rowid DESC
+                        LIMIT ?
+                    )
+                    """,
+                    (int(max_requests),),
+                )
+            if max_queue_events >= 0:
+                conn.execute(
+                    """
+                    DELETE FROM queue_events
+                    WHERE id NOT IN (
+                        SELECT id FROM queue_events
+                        ORDER BY id DESC
+                        LIMIT ?
+                    )
+                    """,
+                    (int(max_queue_events),),
+                )
+            if max_snapshots_per_source >= 0:
+                sources = [
+                    row["source"]
+                    for row in conn.execute(
+                        "SELECT DISTINCT source FROM model_residency_snapshots"
+                    ).fetchall()
+                ]
+                for source in sources:
+                    conn.execute(
+                        """
+                        DELETE FROM model_residency_snapshots
+                        WHERE source = ?
+                          AND id NOT IN (
+                              SELECT id FROM model_residency_snapshots
+                              WHERE source = ?
+                              ORDER BY id DESC
+                              LIMIT ?
+                          )
+                        """,
+                        (source, source, int(max_snapshots_per_source)),
+                    )
+
+    def _maybe_prune(self) -> None:
+        self._write_count += 1
+        if self._write_count % 200 != 0:
+            return
+        try:
+            self.prune()
+        except Exception:
+            return
 
     def _ensure_request_columns(self, conn: sqlite3.Connection) -> None:
         existing = {
@@ -237,7 +335,7 @@ class FleetStore:
     def upsert_agent(self, agent: AgentIdentity, metadata: Optional[Dict[str, Any]] = None) -> None:
         metadata_json = _json_dumps(metadata or {})
         now = _now_iso()
-        with self._connect() as conn:
+        with self._db() as conn:
             conn.execute(
                 """
                 INSERT INTO agents (
@@ -259,12 +357,12 @@ class FleetStore:
         return self.get_agent(agent.agent_id) or agent.as_dict()
 
     def get_agent(self, agent_id: str) -> Optional[Dict[str, Any]]:
-        with self._connect() as conn:
+        with self._db() as conn:
             row = conn.execute("SELECT * FROM agents WHERE agent_id = ?", (agent_id,)).fetchone()
         return self._agent_row(row) if row else None
 
     def list_agents(self) -> list[Dict[str, Any]]:
-        with self._connect() as conn:
+        with self._db() as conn:
             rows = conn.execute("SELECT * FROM agents ORDER BY last_seen_at DESC, agent_id ASC").fetchall()
         return [self._agent_row(row) for row in rows]
 
@@ -286,7 +384,7 @@ class FleetStore:
     def create_request(self, agent: AgentIdentity) -> str:
         request_id = f"req_{uuid.uuid4().hex}"
         now = _now_iso()
-        with self._connect() as conn:
+        with self._db() as conn:
             conn.execute(
                 """
                 INSERT INTO requests (
@@ -312,6 +410,7 @@ class FleetStore:
                 """,
                 (agent.agent_id, agent.agent_type, agent.priority, now, now),
             )
+        self._maybe_prune()
         return request_id
 
     def update_request(
@@ -339,7 +438,7 @@ class FleetStore:
     ) -> None:
         reason_codes_json = _json_dumps(reason_codes) if reason_codes is not None else None
         fallback_int = int(bool(fallback_used)) if fallback_used is not None else None
-        with self._connect() as conn:
+        with self._db() as conn:
             conn.execute(
                 """
                 UPDATE requests
@@ -398,7 +497,7 @@ class FleetStore:
         active_count: int,
         admission_lane: Optional[str] = None,
     ) -> None:
-        with self._connect() as conn:
+        with self._db() as conn:
             conn.execute(
                 """
                 INSERT INTO queue_events (
@@ -412,9 +511,10 @@ class FleetStore:
                     active_count, admission_lane, _now_iso(),
                 ),
             )
+        self._maybe_prune()
 
     def record_model_snapshot(self, source: str, payload: Any) -> None:
-        with self._connect() as conn:
+        with self._db() as conn:
             conn.execute(
                 """
                 INSERT INTO model_residency_snapshots (source, payload_json, created_at)
@@ -422,9 +522,10 @@ class FleetStore:
                 """,
                 (source, _json_dumps(payload), _now_iso()),
             )
+        self._maybe_prune()
 
     def latest_model_snapshot(self, source: str) -> Optional[Dict[str, Any]]:
-        with self._connect() as conn:
+        with self._db() as conn:
             row = conn.execute(
                 """
                 SELECT payload_json, created_at
@@ -444,7 +545,7 @@ class FleetStore:
         return {"source": source, "created_at": row["created_at"], "payload": payload}
 
     def request_summary(self) -> Dict[str, Any]:
-        with self._connect() as conn:
+        with self._db() as conn:
             total = conn.execute("SELECT COUNT(*) AS n FROM requests").fetchone()["n"]
             by_status_rows = conn.execute(
                 "SELECT status, COUNT(*) AS n FROM requests GROUP BY status ORDER BY status"
@@ -454,7 +555,7 @@ class FleetStore:
                 SELECT request_id, agent_id, priority, status, slot_id, model,
                        upstream_name, admission_lane, error_code, updated_at
                 FROM requests
-                ORDER BY updated_at DESC
+                ORDER BY updated_at DESC, rowid DESC
                 LIMIT 10
                 """
             ).fetchall()
@@ -465,7 +566,7 @@ class FleetStore:
         }
 
     def routing_analytics(self, limit: int = 50) -> Dict[str, Any]:
-        with self._connect() as conn:
+        with self._db() as conn:
             recent_rows = conn.execute(
                 """
                 SELECT request_id, agent_id, agent_type, app_id, priority, status,
@@ -475,7 +576,7 @@ class FleetStore:
                        error_code, fallback_used, cache_status, prompt_tokens,
                        completion_tokens, reason_codes_json, updated_at
                 FROM requests
-                ORDER BY updated_at DESC
+                ORDER BY updated_at DESC, rowid DESC
                 LIMIT ?
                 """,
                 (limit,),

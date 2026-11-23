@@ -18,6 +18,8 @@ services:
       OBSERVER_PORT: "9000"
       A0_LMM_ROUTER_CONFIG: /app/conf/llama_cpp_servers.yaml
       A0_LMM_ROUTER_API_KEY: ${A0_LMM_ROUTER_API_KEY:?set an API key in .env}
+      A0_FLEET_STATE_DB: /app/data/fleet_state.sqlite3
+      A0_LMM_ROUTER_STATS_PATH: /app/data/failover_stats.json
       A0_FLEET_MAX_ACTIVE: ${A0_FLEET_MAX_ACTIVE:-1}
       A0_FLEET_MAX_QUEUE: ${A0_FLEET_MAX_QUEUE:-32}
     volumes:

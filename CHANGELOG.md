@@ -123,6 +123,25 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- Non-streaming upstream forwards now run `check_structured_output()` before
+  request finalization, so `422 structured_output_invalid` responses release the
+  admission lane afterward, omit rejected usage from the ledger, and record
+  `failed` telemetry accurately.
+- Upstream SSE streaming now uses `_ManagedStreamingResponse` so early ASGI
+  client disconnects release the `upstream:<name>` admission lane and close the
+  upstream HTTP session, and `_stream_upstream_response()` scans across chunk
+  boundaries so split `data: [DONE]` / `finish_reason` markers are not missed.
+- `POST /v1/embeddings` now participates in `FleetQueue` admission (`local`),
+  slot swap/operation phase checks (`503 gpu_swap_in_progress`), timeout/JSON
+  error mapping (`504`/`502`), and `FleetStore` request telemetry.
+- `FleetStore` now closes on-disk SQLite connections deterministically, enables
+  `PRAGMA journal_mode=WAL` and `busy_timeout=5000`, adds table indexes,
+  breaks timestamp ties by `rowid DESC`, bounds historical growth with periodic
+  pruning, deduplicates unchanged `observer_slots` snapshots from
+  `GET /fleet/status`, moves default state out of temp into Imperium's state
+  directory, and offloads `/cookbook` and analytics DB reads from the event
+  loop. `stats_tracker` now defaults to Imperium's state directory outside the
+  installed package and writes atomically.
 - `scripts/connect_agent_zero.py` now reads the context window of a harness
   pinned to a slot id (`slot_chat`) from that slot. It used to match model ids
   only, so a slot-id pin, the one that survives a model swap, fell back to
@@ -216,6 +235,20 @@ All notable changes to this project are documented here.
   longer reported as tool-incapable.
 - Managed llama.cpp processes now report stable startup/health failure codes,
   exit codes, restarts, and uptime, and clear stale errors after recovery.
+
+### Security
+
+- `GET /health` omits `config_path` for unauthenticated requests when
+  `A0_LMM_ROUTER_API_KEY` is configured or when accessed from non-loopback hosts.
+- `/harnesses/.../v1/...` unauthorized responses now use the OpenAI error JSON
+  envelope.
+- `/ui` now emits `Content-Security-Policy`, `X-Content-Type-Options`,
+  `X-Frame-Options`, and `Referrer-Policy` headers, and unauthenticated
+  localhost mutating routes reject cross-origin and simple form/plain-text CSRF
+  requests.
+- `Dockerfile` now installs non-editably, runs as non-root user `imperium`, and
+  defines a `HEALTHCHECK`; `docker-compose.yml` pins persistent `/app/data`
+  paths for `A0_FLEET_STATE_DB` and `A0_LMM_ROUTER_STATS_PATH`.
 
 ## [0.9.0] - 2026-07-17
 
