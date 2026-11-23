@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Orchestration and routing layer carried over from the plugin extraction:
+Orchestration and routing helper layer:
 config resolution, context planning, slot management, failover chains, and
 async health checks.
 

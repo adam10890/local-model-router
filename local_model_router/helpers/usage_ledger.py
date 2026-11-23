@@ -7,15 +7,9 @@ Codex; this ledger is the fallback source for the rest of the declared-limit
 providers, counted locally.
 
 Append-only JSONL, single file — Imperium records usage server-side in one
-process (the Starlette HTTP service), so there is no need for the
-per-process file split used by the sibling a0-plugin ledger this module is
-adapted from.
-
-Data-dir convention matches FleetStore._default_db_path()
-(local_model_router/service/fleet_manager.py:81-83) and
-agent_orchestrator._default_workspace_root()
-(local_model_router/service/agent_orchestrator.py:60-61): a file/dir under
-``Path(tempfile.gettempdir()) / "a0_lmm_router"``, overridable via an env var.
+process (the Starlette HTTP service). State defaults to Imperium's state
+directory, overridable via ``IMPERIUM_USAGE_LEDGER_PATH`` or
+``A0_USAGE_LEDGER_PATH``.
 """
 from __future__ import annotations
 
@@ -33,13 +27,29 @@ logger = logging.getLogger("local_model_router.usage_ledger")
 _lock = Lock()
 
 LEDGER_PATH_ENV = "A0_USAGE_LEDGER_PATH"
+IMPERIUM_LEDGER_PATH_ENV = "IMPERIUM_USAGE_LEDGER_PATH"
+
+
+def _default_ledger_path() -> Path:
+    for env_name in (IMPERIUM_LEDGER_PATH_ENV, LEDGER_PATH_ENV):
+        override = os.environ.get(env_name, "").strip()
+        if override:
+            return Path(override).expanduser().resolve(strict=False)
+    imperium_home = os.environ.get("IMPERIUM_HOME", "").strip()
+    if imperium_home:
+        return Path(imperium_home).expanduser().resolve(strict=False) / "state" / "usage_ledger.jsonl"
+    local = os.environ.get("LOCALAPPDATA", "").strip()
+    if os.name == "nt" and local:
+        return Path(local) / "Imperium" / "state" / "usage_ledger.jsonl"
+    try:
+        return Path.home() / ".imperium" / "state" / "usage_ledger.jsonl"
+    except (RuntimeError, OSError):
+        return Path(tempfile.gettempdir()) / "imperium" / "usage_ledger.jsonl"
+
 
 # Overridable in tests (monkeypatch.setattr(usage_ledger, "LEDGER_PATH", ...)),
 # same as stats_tracker._stats_path / fleet_manager's db_path.
-LEDGER_PATH: Path = Path(
-    os.environ.get(LEDGER_PATH_ENV, "").strip()
-    or str(Path(tempfile.gettempdir()) / "a0_lmm_router" / "usage_ledger.jsonl")
-)
+LEDGER_PATH: Path = _default_ledger_path()
 
 MAX_AGE_DAYS = 35
 

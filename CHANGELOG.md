@@ -6,6 +6,26 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- GitHub governance & CI quality gates: added `SECURITY.md`,
+  `.github/dependabot.yml` (`pip` and `github-actions`),
+  `.github/PULL_REQUEST_TEMPLATE.md`, `ruff` static syntax/undefined-name
+  checks (`pyproject.toml`), and an unconditional `quality` job in
+  `.github/workflows/tests.yml` running `ruff`, `tools/adr.py lint`,
+  `tests/test_dashboard_static_contract.py`, and advisory `pip-audit`.
+- Standardized all GitHub Actions workflows on `actions/checkout@v7` and
+  `actions/setup-python@v6`.
+
+### Changed
+
+- Cleaned up obsolete historical `a0_lmm_router` plugin comments, links,
+  docstrings, and default workspace/ledger paths (`usage_ledger.py` now defaults
+  to Imperium's state directory with `IMPERIUM_USAGE_LEDGER_PATH` and backward-
+  compatible `A0_USAGE_LEDGER_PATH` overrides; `README.md` foregrounds Hermes
+  while retaining Agent Zero client harness links).
+- Updated `docs/1.0-beta-evidence.md` with verified CI run IDs for
+  `Windows validation` (`45149757341`, `45253894169`) and `Dashboard browser`
+  (`45159790750`, `45253894314`) and synced `README.md` status version.
+
 - `scripts/connect_agent_zero.py`: one command that connects a running Agent
   Zero container to Imperium. It detects the container, reads the `agent_zero`
   harness connections, writes an `Imperium (local)` model preset into Agent
@@ -123,6 +143,9 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- `tools/adr.py index` now omits blockquote rationale lines under `## Status`
+  so `docs/adr/README.md` renders clean single-line statuses (fixing ADR-0016's
+  row).
 - Non-streaming upstream forwards now run `check_structured_output()` before
   request finalization, so `422 structured_output_invalid` responses release the
   admission lane afterward, omit rejected usage from the ledger, and record

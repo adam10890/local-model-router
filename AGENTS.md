@@ -7,10 +7,9 @@ of a local llama.cpp fleet: explainable intent routing, slot health/failover,
 chat-completions forwarding, and a Fleet Manager control plane (agent
 identity, bounded queueing, SQLite telemetry).
 
-Extracted 2026-06-10 from the `a0_lmm_router` Agent Zero plugin
-(github.com/adam10890/a0_lmm_router). The router is the product; Agent Zero
-is one client. Do not reintroduce Agent Zero imports or assumptions into this
-codebase.
+Imperium is a standalone local-first model router. Hermes is the primary client
+harness; Agent Zero and other runtimes are clients of the same router contract.
+Do not introduce Agent Zero imports or assumptions into this codebase.
 
 ## Ownership
 

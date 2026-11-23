@@ -1,6 +1,6 @@
 """App (client) profiles.
 
-Each application talking to the router — Agent Zero, Hermes, n8n,
+Each application talking to the router — Hermes, Pi, Agent Zero, n8n,
 Open WebUI, custom scripts — can have a profile in ``conf/apps.yaml``:
 a default model, an allowed-model policy, and notes. The app identifies
 itself with the ``X-App-Id`` header (falling back to the agent identity).

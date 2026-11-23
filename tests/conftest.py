@@ -3,7 +3,7 @@
 Makes two import styles work without installation:
   - ``import local_model_router...`` (repo root on sys.path)
   - bare helper imports like ``from context_planner import ...``
-    (package helpers dir on sys.path, matching the original plugin tests)
+    (package helpers dir on sys.path, supporting standalone helper imports)
 """
 from __future__ import annotations
 
@@ -33,9 +33,14 @@ def _hermetic_llama_process_scan(monkeypatch):
 @pytest.fixture(autouse=True)
 def _hermetic_state_paths(monkeypatch, tmp_path):
     """Keep tests out of real host state directories and repo data/."""
-    from local_model_router.helpers import stats_tracker
+    from local_model_router.helpers import stats_tracker, usage_ledger
 
     monkeypatch.setenv("A0_FLEET_STATE_DB", str(tmp_path / "fleet_state.sqlite3"))
     monkeypatch.setenv("A0_LMM_ROUTER_STATS_PATH", str(tmp_path / "failover_stats.json"))
+    monkeypatch.setenv("IMPERIUM_USAGE_LEDGER_PATH", str(tmp_path / "usage_ledger.jsonl"))
+    monkeypatch.setenv("A0_USAGE_LEDGER_PATH", str(tmp_path / "usage_ledger.jsonl"))
     monkeypatch.setattr(stats_tracker, "_stats", None)
     monkeypatch.setattr(stats_tracker, "_stats_path", None)
+    monkeypatch.setattr(usage_ledger, "LEDGER_PATH", tmp_path / "usage_ledger.jsonl")
+    usage_ledger._cache.clear()
+    monkeypatch.setattr(usage_ledger, "_last_prune_day", None)

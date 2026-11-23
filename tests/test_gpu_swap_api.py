@@ -763,9 +763,17 @@ def test_stream_send_disconnect_closes_slot_lease_queue_and_upstream(
             "server": ("127.0.0.1", 9000),
             "root_path": "",
         }
-        with pytest.raises((OSError, ClientDisconnect, BaseExceptionGroup)) as caught:
+        import builtins
+
+        base_exc_group = getattr(builtins, "BaseExceptionGroup", None)
+        disconnect_errors = (
+            (OSError, ClientDisconnect, base_exc_group)
+            if base_exc_group is not None
+            else (OSError, ClientDisconnect)
+        )
+        with pytest.raises(disconnect_errors) as caught:
             await app(scope, receive, send)
-        if isinstance(caught.value, BaseExceptionGroup):
+        if base_exc_group is not None and isinstance(caught.value, base_exc_group):
             assert any(
                 isinstance(item, (OSError, ClientDisconnect))
                 for item in caught.value.exceptions

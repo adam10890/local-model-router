@@ -131,7 +131,7 @@ class ObserverBackend:
         except ImportError as exc:
             raise ImportError(
                 "BackendManager not found. In standalone mode, install the "
-                "a0_lmm_router package path or use observer endpoints that do "
+                "local-model-router package or use observer endpoints that do "
                 "not require routing decisions."
             ) from exc
         return BackendManager(self.config_path)
