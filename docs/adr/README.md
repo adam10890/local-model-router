@@ -24,3 +24,4 @@
 | 0018 | [Scope Hermes Studio lease routing to the GPU slot](0018-scope-hermes-studio-lease-routing-to-the-gpu-slot.md) | Proposed | 2026-11-23 |
 | 0019 | [Acknowledge Studio jobs before acquiring the GPU lease](0019-acknowledge-studio-jobs-before-acquiring-the-gpu-lease.md) | Proposed | 2026-11-23 |
 | 0020 | [Isolate and schedule removal of legacy orchestrator API](0020-isolate-and-schedule-removal-of-legacy-orchestrator-api.md) | Proposed | 2026-11-23 |
+| 0021 | [Opt-in bounded request wait during Hermes GPU swap](0021-opt-in-bounded-request-wait-during-hermes-gpu-swap.md) | Proposed | 2026-11-23 |

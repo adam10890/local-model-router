@@ -1,3 +1,3 @@
 """local-model-router: local-first model gateway."""
 
-__version__ = "0.14.4"
+__version__ = "0.15.0"

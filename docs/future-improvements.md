@@ -253,6 +253,9 @@ entry. Listed so `scripts/branch_guard.py --queue` can see the slug.
 - `dashboard-modular-assets` — split `dashboard/index.html` into zero-build
   static CSS/JS assets at `/ui/assets/{name}`, tighten `/ui` CSP to
   `script-src 'self'`, and move stored browser API keys to `sessionStorage`.
+- `streaming-usage-and-swap-wait` — record SSE streaming token usage into
+  `FleetStore` and `usage_ledger`, fix pooled stream close guards, and add
+  opt-in bounded request wait on `gpu_swap_in_progress` (Proposed ADR-0021).
 
 ## Shipped
 

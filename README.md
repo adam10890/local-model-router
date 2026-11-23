@@ -39,7 +39,7 @@ Decision records: [`docs/adr/`](docs/adr/).
 
 ## Status
 
-**0.14.2 - Measured models, task disclosure, and reliable local/upstream routing.** Product outcomes and
+**0.15.0 - Measured models, task disclosure, streaming usage, and modular routing.** Product outcomes and
 1.0 beta exit gates live in [`GOALS.md`](GOALS.md). Recorded gate evidence
 lives in [`docs/1.0-beta-evidence.md`](docs/1.0-beta-evidence.md). Sequence
 of accepted work: [`docs/1.0-beta-roadmap.html`](docs/1.0-beta-roadmap.html).
@@ -265,7 +265,9 @@ and stop slots from the API or dashboard. On Windows, a local
 `conf/hermes_gpu_profiles.yaml` is also an explicit opt-in: `START.bat`
 enables fleet control unless the variable was already set. Set
 `A0_LMM_ROUTER_HERMES_WATCHER=0` to keep fleet control on while disabling the
-Hermes watcher.
+Hermes watcher. Set `IMPERIUM_SWAP_WAIT_SECONDS` (up to `60`, fallback
+`A0_LMM_ROUTER_SWAP_WAIT_SECONDS`) to wait briefly when a Hermes GPU model swap
+is already loading instead of failing immediately with `503 gpu_swap_in_progress`.
 
 ```text
 A0_LMM_ROUTER_ENABLE_FLEET_CONTROL=1
