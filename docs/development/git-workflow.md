@@ -84,7 +84,7 @@ Herdr planning entry refreshed on 2026-11-08; the historical `main` row below is
 | Branch | Status | Action |
 | --- | --- | --- |
 | `main` | active trunk | Branch new work from here. Beta gate Phases 0–5 merged (`3b3b006`…`7708717`). Evidence: `docs/1.0-beta-evidence.md`. |
-| `dev/task-ownership` | active task branch; owner Claude Code | Accept ADR-0016, record ADR-0017 task ownership, and queue Q8. Remove this row when merged and cleaned up. |
+| `dev/g2-harness-evidence` | active task branch; owner Claude Code | Record Q7 stage 1 as part of Q4. Remove this row when merged and cleaned up. |
 
 Add an inventory row only when a parallel or long-lived branch is explicitly
 approved. Remove the row when the branch is merged and deleted; do not retain

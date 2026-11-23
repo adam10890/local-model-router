@@ -105,6 +105,12 @@ a defined path: real-client evidence per harness.
     [`spynel-adoption-plan.md`](spynel-adoption-plan.md). The web UI needs a
     login, so the canary drives the router route and Agent Zero's own preset
     resolver rather than a UI chat.
+  - Q7 stage 1, the Hermes baseline with fakes: the effective busy mode, the
+    harness-wide ingress gate test, and how long a launch turn is held by
+    `503` / `Retry-After` during a simulated Studio lease. This is hermetic
+    Hermes harness evidence, and the later WhatsApp canary is G2 evidence
+    too. Adam recorded the fold-in on 2026-11-23. Q7 keeps its number for
+    stages 2–5.
 
 ### Q5 — Replacement execution surface
 
@@ -168,8 +174,8 @@ owns renderer attempts, and Imperium owns admission and GPU ownership.
 
 - **Detail:** [`prd/hermes-chat-during-studio.md`](prd/hermes-chat-during-studio.md)
 - **Status:** queued — task ownership is settled by ADR-0017 (commitments in
-  מעקב אדם, execution in Hermes Kanban). Implementation is gated on beta
-  stability and the Proposed ADRs for the standby route.
+  מעקב אדם, execution in Hermes Kanban). Stage 1 runs under Q4. Stages 2–5
+  are gated on beta stability and the Proposed ADRs for the standby route.
 - **Slug:** `hermes-chat-during-studio`
 
 ### Q8 — llama.cpp v1.0.0 runtime pin (`b12359`)
