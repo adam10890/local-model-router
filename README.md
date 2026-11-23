@@ -31,16 +31,15 @@ advanced llama.cpp control comes second and must not break that path.
 Wrong answers matter more than slow ones. Product changes need the
 founder’s explicit approval.
 
-This project was extracted from
-[`a0_lmm_router`](https://github.com/adam10890/a0_lmm_router), an Agent Zero
-plugin that grew a standalone provider. Here the router is the product;
-Agent Zero is one client, not the owner.
+Imperium is a standalone local-first router; Hermes is the primary client
+harness, and [Agent Zero](https://github.com/agent0ai/agent-zero), Pi, and
+Claude Code connect as OpenAI-compatible clients.
 
 Decision records: [`docs/adr/`](docs/adr/).
 
 ## Status
 
-**0.9.0 - Measured models and predictable admission.** Product outcomes and
+**0.14.2 - Measured models, task disclosure, and reliable local/upstream routing.** Product outcomes and
 1.0 beta exit gates live in [`GOALS.md`](GOALS.md). Recorded gate evidence
 lives in [`docs/1.0-beta-evidence.md`](docs/1.0-beta-evidence.md). Sequence
 of accepted work: [`docs/1.0-beta-roadmap.html`](docs/1.0-beta-roadmap.html).
@@ -364,10 +363,11 @@ Use model ID `local` in the consumers. The router ignores that compatibility
 label. `conf/harnesses.yaml` provides the connection's initial pin; after a
 verified Hermes GPU swap the process-local pin follows the loaded profile
 without rewriting YAML. The dashboard labels the Hermes selection, connection
-pin, and loaded GGUF separately. For Agent Zero
-2.7, select provider `other` (`Other OpenAI compatible`) for both Main and
-Utility Model Preset slots and use the two URLs above. See
-`docs/HARNESSES.md` for the versioned setup and runtime compatibility policy.
+pin, and loaded GGUF separately. For
+[Agent Zero](https://github.com/agent0ai/agent-zero) 2.7, select provider
+`other` (`Other OpenAI compatible`) for both Main and Utility Model Preset slots
+and use the two URLs above. See `docs/HARNESSES.md` for the versioned setup
+and runtime compatibility policy.
 
 ## Docker
 

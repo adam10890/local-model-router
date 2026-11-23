@@ -301,9 +301,17 @@ def test_upstream_stream_split_done_and_early_disconnect_release(tmp_path, monke
     assert status_body["queues"]["upstream:up"]["active"] == 0
 
     # Also verify early ASGI client disconnect cleans up via _ManagedStreamingResponse.on_close.
+    import builtins
     import json as _json
     import pytest
     from starlette.requests import ClientDisconnect
+
+    _base_exc_group = getattr(builtins, "BaseExceptionGroup", None)
+    _disconnect_errors = (
+        (OSError, ClientDisconnect, _base_exc_group)
+        if _base_exc_group is not None
+        else (OSError, ClientDisconnect)
+    )
 
     class HangingContent:
         async def iter_chunked(self, _size):
@@ -345,7 +353,7 @@ def test_upstream_stream_split_done_and_early_disconnect_release(tmp_path, monke
             "server": ("127.0.0.1", 9000),
             "root_path": "",
         }
-        with pytest.raises((OSError, ClientDisconnect, BaseExceptionGroup)):
+        with pytest.raises(_disconnect_errors):
             await app(scope, receive, send)
 
     asyncio.run(disconnect_stream())

@@ -73,7 +73,7 @@ if [[ "$INSTALL_DEPS" == "1" ]]; then
   "$PYTHON_BIN" -m pip install -e "$PLUGIN_ROOT"
 fi
 
-echo "Starting a0_lmm_router Fleet Manager"
+echo "Starting Imperium (local-model-router)"
 echo "  Bind:   http://$OBSERVER_HOST:$OBSERVER_PORT"
 echo "  Config: $A0_LMM_ROUTER_CONFIG"
 if [[ -n "${A0_LMM_ROUTER_API_KEY:-}" ]]; then

@@ -243,6 +243,9 @@ entry. Listed so `scripts/branch_guard.py --queue` can see the slug.
 - `core-reliability-and-security` — fix upstream structured-output/stream/embeddings
   lifecycle bugs, harden `FleetStore` and `stats_tracker`, and apply endpoint/Docker
   security hardening.
+- `github-governance-and-beta-evidence` — fix ADR index formatting, add GitHub
+  governance/CI quality gates, refresh beta evidence, and clean historical
+  `a0_lmm_router` plugin references.
 
 ## Shipped
 

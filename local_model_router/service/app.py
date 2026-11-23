@@ -1,5 +1,5 @@
 """
-Starlette app factory for the lmm-router read-only observer service.
+Starlette app factory for the Imperium (local-model-router) service.
 
 Usage:
     from service.app import create_app

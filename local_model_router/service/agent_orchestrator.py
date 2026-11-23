@@ -58,7 +58,7 @@ def _json_loads(value: str | None, fallback: Any) -> Any:
 
 
 def _default_workspace_root() -> str:
-    return str(Path(tempfile.gettempdir()) / "a0_lmm_router" / "agent_orchestrator")
+    return str(Path(tempfile.gettempdir()) / "imperium" / "agent_orchestrator")
 
 
 def _safe_id(prefix: str, provided: object = None) -> str:
