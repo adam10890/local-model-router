@@ -246,6 +246,10 @@ entry. Listed so `scripts/branch_guard.py --queue` can see the slug.
 - `github-governance-and-beta-evidence` — fix ADR index formatting, add GitHub
   governance/CI quality gates, refresh beta evidence, and clean historical
   `a0_lmm_router` plugin references.
+- `service-modularization` — extract pooled `SharedHttpClient`, split
+  `service/app.py` into focused route modules (`context.py`, `routes_*.py`),
+  and gate legacy `/orchestrator/*` behind `IMPERIUM_ENABLE_LEGACY_ORCHESTRATOR`
+  with an explicit `Sunset` header (Proposed ADR-0020).
 
 ## Shipped
 

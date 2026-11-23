@@ -2,10 +2,20 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Optional
 from urllib.parse import quote
 
 import aiohttp
+
+from local_model_router.service.http_client import SharedHttpClient
+
+_SHARED_HTTP_CLIENT: Optional[SharedHttpClient] = None
+
+
+def set_shared_http_client(client: Optional[SharedHttpClient]) -> None:
+    """Attach or clear the process-wide pooled HTTP client for the MCP server."""
+    global _SHARED_HTTP_CLIENT
+    _SHARED_HTTP_CLIENT = client
 
 
 _HTTP_ERRORS = {
@@ -46,29 +56,37 @@ async def _router_request(
     path: str,
     payload: dict[str, Any] | None = None,
     timeout: int = 30,
+    http_client: Optional[SharedHttpClient] = None,
 ) -> dict[str, Any]:
+    async def _send(session: Any) -> dict[str, Any]:
+        async with session.request(
+            method,
+            f"{_router_base_url()}{path}",
+            json=payload,
+            headers=_router_headers(),
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        ) as response:
+            if response.status >= 400:
+                return _router_error(response.status)
+            try:
+                data = await response.json(content_type=None)
+            except (aiohttp.ContentTypeError, ValueError):
+                return {
+                    "error": "router_invalid_response",
+                    "detail": "Router returned invalid JSON",
+                    "status": 502,
+                }
+            if isinstance(data, dict):
+                return data
+            return {"data": data}
+
     try:
+        pool = http_client or _SHARED_HTTP_CLIENT
+        if pool is not None:
+            async with pool.request_session() as session:
+                return await _send(session)
         async with aiohttp.ClientSession() as session:
-            async with session.request(
-                method,
-                f"{_router_base_url()}{path}",
-                json=payload,
-                headers=_router_headers(),
-                timeout=aiohttp.ClientTimeout(total=timeout),
-            ) as response:
-                if response.status >= 400:
-                    return _router_error(response.status)
-                try:
-                    data = await response.json(content_type=None)
-                except (aiohttp.ContentTypeError, ValueError):
-                    return {
-                        "error": "router_invalid_response",
-                        "detail": "Router returned invalid JSON",
-                        "status": 502,
-                    }
-                if isinstance(data, dict):
-                    return data
-                return {"data": data}
+            return await _send(session)
     except TimeoutError:
         return {
             "error": "router_timeout",

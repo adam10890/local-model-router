@@ -43,25 +43,50 @@ def _alias_capabilities(role: str) -> Dict[str, bool]:
     }
 
 
-async def _default_fetch(base_url: str) -> Optional[List[Dict[str, Any]]]:
+async def _default_fetch(
+    base_url: str,
+    *,
+    http_client: Optional[Any] = None,
+) -> Optional[List[Dict[str, Any]]]:
     """GET ``{base_url}/models`` and return its ``data`` list, or None."""
     url = base_url.rstrip("/") + "/models"
     try:
         timeout = aiohttp.ClientTimeout(total=_FETCH_TIMEOUT_SECONDS)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    return None
-                payload = await resp.json(content_type=None)
+        if http_client is not None:
+            async with http_client.request_session(timeout=timeout) as session:
+                get_kwargs = {} if http_client.is_patched() else {"timeout": timeout}
+                async with session.get(url, **get_kwargs) as resp:
+                    if resp.status != 200:
+                        return None
+                    payload = await resp.json(content_type=None)
+        else:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url) as resp:
+                    if resp.status != 200:
+                        return None
+                    payload = await resp.json(content_type=None)
     except Exception:
         return None
     data = payload.get("data") if isinstance(payload, dict) else None
     return data if isinstance(data, list) else None
 
 
-async def list_models(observer: Any, fetch: Optional[FetchFn] = None) -> Dict[str, Any]:
+async def list_models(
+    observer: Any,
+    fetch: Optional[FetchFn] = None,
+    *,
+    http_client: Optional[Any] = None,
+) -> Dict[str, Any]:
     """Build an OpenAI-compatible model list for the router."""
-    fetch_fn = fetch or _default_fetch
+    if fetch is not None:
+        fetch_fn = fetch
+    elif http_client is not None:
+        async def _pooled_fetch(base_url: str) -> Optional[List[Dict[str, Any]]]:
+            return await _default_fetch(base_url, http_client=http_client)
+
+        fetch_fn = _pooled_fetch
+    else:
+        fetch_fn = _default_fetch
     created = int(time.time())
     entries: List[Dict[str, Any]] = []
     by_id: Dict[str, Dict[str, Any]] = {}

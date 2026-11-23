@@ -56,12 +56,24 @@ def _urllib_probe(url: str, timeout: int) -> Dict:
         return {"ok": False, "error": str(exc)}
 
 
-async def _aiohttp_probe(url: str, timeout: int) -> Dict:
+async def _aiohttp_probe(
+    url: str,
+    timeout: int,
+    http_client: Optional[Any] = None,
+) -> Dict:
     """Default async probe: GET /health via aiohttp, return {"ok": bool}."""
     import aiohttp  # noqa: PLC0415
 
     try:
         client_timeout = aiohttp.ClientTimeout(total=timeout)
+        if http_client is not None:
+            async with http_client.request_session(timeout=client_timeout) as session:
+                get_kwargs = {} if http_client.is_patched() else {"timeout": client_timeout}
+                async with session.get(url, **get_kwargs) as resp:
+                    if resp.status == 200:
+                        data = await resp.json(content_type=None)
+                        return {"ok": data.get("status") == "ok", "http_status": resp.status}
+                    return {"ok": False, "http_status": resp.status}
         async with aiohttp.ClientSession(timeout=client_timeout) as session:
             async with session.get(url) as resp:
                 if resp.status == 200:
@@ -70,6 +82,9 @@ async def _aiohttp_probe(url: str, timeout: int) -> Dict:
                 return {"ok": False, "http_status": resp.status}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+_REAL_AIOHTTP_PROBE = _aiohttp_probe
 
 
 class SlotHealthChecker:
@@ -98,11 +113,13 @@ class SlotHealthChecker:
         probe_fn: Optional[Callable[[str, int], Dict]] = None,
         async_probe_fn: Optional[Any] = None,
         cache_ttl: Optional[float] = None,
+        http_client: Optional[Any] = None,
     ) -> None:
         self.timeout = timeout
         self._probe = probe_fn or _urllib_probe
         self._async_probe = async_probe_fn  # None → resolved at call time
         self.cache_ttl = _resolve_cache_ttl(cache_ttl)
+        self._http_client = http_client
         self._cache: Dict[str, Tuple[float, str]] = {}  # url -> (expires_at, status)
 
     def _cached_status(self, url: str) -> Optional[str]:
@@ -168,7 +185,10 @@ class SlotHealthChecker:
             return cached
         probe = self._async_probe or _aiohttp_probe
         try:
-            result = await probe(url, self.timeout)
+            if self._http_client is not None and probe is _REAL_AIOHTTP_PROBE:
+                result = await _aiohttp_probe(url, self.timeout, http_client=self._http_client)
+            else:
+                result = await probe(url, self.timeout)
             return self._store_status(url, HEALTHY if result.get("ok") else UNHEALTHY)
         except Exception:
             logger.debug("Async health probe raised unexpectedly for %s:%s", host, port)
