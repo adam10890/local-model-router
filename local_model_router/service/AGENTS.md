@@ -23,6 +23,10 @@ point: `__main__.py` (`python -m local_model_router`).
 - `routes_setup.py`, `routes_fleet.py`, `routes_harnesses.py`,
   `routes_orchestrator.py`, and `routes_openai.py` own their respective HTTP
   route handlers.
+- `sse_usage.py` owns bounded passive SSE token-usage extraction for local and
+  upstream streaming responses without storing content or prompts.
+- `hermes_model_watcher.py` manages single-GPU slot swaps and opt-in bounded
+  swap waiting (`IMPERIUM_SWAP_WAIT_SECONDS`).
 - `routing_intent.py` owns the Agent Client Contract schema and policy.
 - `observer.py` owns read-only fleet views; it never mutates state.
 - `fleet_manager.py` owns agent identity, bounded admission, SQLite state.
@@ -148,7 +152,7 @@ point: `__main__.py` (`python -m local_model_router`).
 
 ## Verification
 
-- `python -m pytest tests/test_routing_intent.py tests/test_observer_service.py tests/test_openai_chat_completions.py tests/test_fleet_manager.py tests/test_fleet_control.py tests/test_local_first_plus_api.py tests/test_agent_orchestrator.py tests/test_swarm_gate.py tests/test_execution_plan.py tests/test_service_modularization.py -q`
+- `python -m pytest tests/test_routing_intent.py tests/test_observer_service.py tests/test_openai_chat_completions.py tests/test_fleet_manager.py tests/test_fleet_control.py tests/test_local_first_plus_api.py tests/test_agent_orchestrator.py tests/test_swarm_gate.py tests/test_execution_plan.py tests/test_service_modularization.py tests/test_sse_usage.py -q`
 
 ## Child DOX Index
 

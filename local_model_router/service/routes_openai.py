@@ -48,6 +48,7 @@ from .fleet_manager import FleetQueue, QueueFull, identity_from_headers
 from .hermes_model_watcher import public_hermes_model_ids
 from .models_listing import list_models
 from .prompt_cache import cache_key as prompt_cache_key, is_cacheable as prompt_is_cacheable
+from .sse_usage import SseUsageExtractor
 
 
 def _evaluate_upstream_disclosure(ctx: RouterContext, upstream: UpstreamConfig, body: Dict[str, Any]):
@@ -154,13 +155,18 @@ async def forward_to_upstream(
             )
     try:
         if wants_stream:
-            session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=_FORWARD_TIMEOUT_SECONDS)
+            stream_timeout = aiohttp.ClientTimeout(total=_FORWARD_TIMEOUT_SECONDS)
+            session, should_close_session = await ctx.http_client.open_stream_session(
+                timeout=stream_timeout
             )
             try:
-                resp = await session.post(url, json=payload, headers=upstream.headers())
+                post_kwargs: Dict[str, Any] = {"json": payload, "headers": upstream.headers()}
+                if not should_close_session:
+                    post_kwargs["timeout"] = stream_timeout
+                resp = await session.post(url, **post_kwargs)
             except Exception:
-                await session.close()
+                if should_close_session:
+                    await session.close()
                 raise
             if resp.status >= 400:
                 try:
@@ -168,7 +174,8 @@ async def forward_to_upstream(
                 except Exception:
                     upstream_json = await resp.text()
                 resp.release()
-                await session.close()
+                if should_close_session:
+                    await session.close()
                 code, http_status, message = _classify_upstream_failure(
                     resp.status, upstream_json, pinned_harness=bool(pinned_harness)
                 )
@@ -191,21 +198,37 @@ async def forward_to_upstream(
                 )
 
             stream_state = {"failed": False, "finalized": False}
+            usage_extractor = SseUsageExtractor()
 
             async def finalize_once(status: str, **kwargs: Any) -> None:
                 if stream_state["finalized"]:
                     return
                 stream_state["finalized"] = True
+                usage_extractor.finish()
+                extracted = usage_extractor.usage()
+                if extracted and "usage" not in kwargs:
+                    kwargs["usage"] = extracted
                 if finalize is not None:
                     await finalize(status, **kwargs)
+                if extracted:
+                    resolve_app_hook("_record_upstream_usage", _record_upstream_usage)(
+                        upstream.name, extracted, bare_model
+                    )
 
             async def managed_upstream_stream():
                 async def stream_failed(code: str) -> None:
                     stream_state["failed"] = True
                     await finalize_once("failed", error_code=code)
 
+                stream_fn = resolve_app_hook("_stream_upstream_response", _stream_upstream_response)
+                stream_iter = (
+                    stream_fn(resp, session, stream_failed, close_session=should_close_session)
+                    if stream_fn is _stream_upstream_response
+                    else stream_fn(resp, session, stream_failed)
+                )
                 try:
-                    async for chunk in _stream_upstream_response(resp, session, stream_failed):
+                    async for chunk in stream_iter:
+                        usage_extractor.feed(chunk)
                         yield chunk
                 except asyncio.CancelledError:
                     await finalize_once("failed", error_code="client_disconnected")
@@ -226,7 +249,8 @@ async def forward_to_upstream(
                 except Exception:
                     pass
                 try:
-                    await session.close()
+                    if should_close_session:
+                        await session.close()
                 finally:
                     if not stream_state["finalized"]:
                         await finalize_once("failed", error_code="client_disconnected")
@@ -850,6 +874,7 @@ async def handle_chat_completions(ctx: RouterContext, request: Request) -> Respo
     pre_route_epoch: Optional[int] = None
     finished = False
     route_reason_codes: list[str] = []
+    swap_wait_state = {"ms": 0, "resolved": False}
 
     def fleet_headers(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         current = acquired_queue.snapshot() if acquired_queue is not None else {"queued": 0}
@@ -862,6 +887,8 @@ async def handle_chat_completions(ctx: RouterContext, request: Request) -> Respo
             "x-a0-fleet-queue-depth": str(current["queued"]),
             "x-a0-fleet-vram-available-gb": "unknown",
         }
+        if swap_wait_state["resolved"] and swap_wait_state["ms"] > 0:
+            headers["x-a0-router-swap-wait-ms"] = str(swap_wait_state["ms"])
         if extra:
             headers.update(extra)
         return headers
@@ -1001,7 +1028,12 @@ async def handle_chat_completions(ctx: RouterContext, request: Request) -> Respo
                 type(exc).__name__,
             )
         retry = ctx.hermes_watcher.retry_response()
+        if retry is not None and retry[0] == "gpu_swap_in_progress":
+            retry, waited_ms = await ctx.hermes_watcher.wait_while_swapping()
+            swap_wait_state["ms"] += waited_ms
         if retry is None:
+            if swap_wait_state["ms"] > 0:
+                swap_wait_state["resolved"] = True
             return None
         code, retry_after = retry
         await finish(
@@ -1407,6 +1439,8 @@ async def handle_chat_completions(ctx: RouterContext, request: Request) -> Respo
             stream=wants_stream,
             default_max_tokens=default_max_tokens,
         )
+        if wants_stream and "stream_options" not in payload:
+            payload["stream_options"] = {"include_usage": True}
         selected_context = resolve_app_hook("_context_for_slot", _context_for_slot)(
             ctx.observer.get_slots(),
             decision.selected_slot_id,
@@ -1490,18 +1524,25 @@ async def handle_chat_completions(ctx: RouterContext, request: Request) -> Respo
 
     try:
         if wants_stream:
-            session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=_FORWARD_TIMEOUT_SECONDS))
+            stream_timeout = aiohttp.ClientTimeout(total=_FORWARD_TIMEOUT_SECONDS)
+            session, should_close_session = await ctx.http_client.open_stream_session(
+                timeout=stream_timeout
+            )
             try:
-                resp = await session.post(url, json=payload, headers={"Content-Type": "application/json"})
+                post_kwargs = {"json": payload, "headers": {"Content-Type": "application/json"}}
+                if not should_close_session:
+                    post_kwargs["timeout"] = stream_timeout
+                resp = await session.post(url, **post_kwargs)
             except Exception:
-                await session.close()
+                if should_close_session:
+                    await session.close()
                 raise
 
             headers = router_response_headers(
                 "BYPASS",
                 {
-                "cache-control": "no-cache",
-                "x-accel-buffering": "no",
+                    "cache-control": "no-cache",
+                    "x-accel-buffering": "no",
                 },
             )
             # A stream is never buffered, so a JSON request cannot be
@@ -1515,7 +1556,8 @@ async def handle_chat_completions(ctx: RouterContext, request: Request) -> Respo
                 except Exception:
                     upstream_json = await resp.text()
                 resp.release()
-                await session.close()
+                if should_close_session:
+                    await session.close()
                 code, http_status, message = _classify_upstream_failure(
                     resp.status, upstream_json, pinned_harness=bool(dedicated)
                 )
@@ -1549,62 +1591,48 @@ async def handle_chat_completions(ctx: RouterContext, request: Request) -> Respo
                     headers=fleet_headers(),
                 )
 
-            async def managed_stream():
-                stream_state = {"failed": False}
+            usage_extractor = SseUsageExtractor()
+            stream_state = {"failed": False}
 
+            async def finalize_local_stream(status: str, *, error_code: Optional[str] = None) -> None:
+                usage_extractor.finish()
+                await finish(
+                    status,
+                    error_code=error_code,
+                    slot_id=decision.selected_slot_id,
+                    model=decision.selected_model,
+                    decision=decision,
+                    cache_status="BYPASS",
+                    usage=usage_extractor.usage(),
+                )
+
+            async def managed_stream():
                 async def stream_failed(code: str) -> None:
                     stream_state["failed"] = True
-                    await finish(
-                        "failed",
-                        error_code=code,
-                        slot_id=decision.selected_slot_id,
-                        model=decision.selected_model,
-                        decision=decision,
-                        cache_status="BYPASS",
-                    )
+                    await finalize_local_stream("failed", error_code=code)
 
+                stream_fn = resolve_app_hook("_stream_upstream_response", _stream_upstream_response)
+                stream_iter = (
+                    stream_fn(resp, session, stream_failed, close_session=should_close_session)
+                    if stream_fn is _stream_upstream_response
+                    else stream_fn(resp, session, stream_failed)
+                )
                 try:
-                    async for chunk in _stream_upstream_response(resp, session, stream_failed):
+                    async for chunk in stream_iter:
+                        usage_extractor.feed(chunk)
                         yield chunk
                 except asyncio.CancelledError:
-                    await finish(
-                        "failed",
-                        error_code="client_disconnected",
-                        slot_id=decision.selected_slot_id,
-                        model=decision.selected_model,
-                        decision=decision,
-                        cache_status="BYPASS",
-                    )
+                    await finalize_local_stream("failed", error_code="client_disconnected")
                     raise
                 except Exception:
-                    await finish(
-                        "failed",
-                        error_code="upstream_stream_error",
-                        slot_id=decision.selected_slot_id,
-                        model=decision.selected_model,
-                        decision=decision,
-                        cache_status="BYPASS",
-                    )
+                    await finalize_local_stream("failed", error_code="upstream_stream_error")
                     raise
                 else:
                     if not stream_state["failed"]:
-                        await finish(
-                            "completed",
-                            slot_id=decision.selected_slot_id,
-                            model=decision.selected_model,
-                            decision=decision,
-                            cache_status="BYPASS",
-                        )
+                        await finalize_local_stream("completed")
                 finally:
                     if not finished:
-                        await finish(
-                            "failed",
-                            error_code="client_disconnected",
-                            slot_id=decision.selected_slot_id,
-                            model=decision.selected_model,
-                            decision=decision,
-                            cache_status="BYPASS",
-                        )
+                        await finalize_local_stream("failed", error_code="client_disconnected")
 
             async def close_managed_stream() -> None:
                 try:
@@ -1612,17 +1640,11 @@ async def handle_chat_completions(ctx: RouterContext, request: Request) -> Respo
                 except Exception:
                     pass
                 try:
-                    await session.close()
+                    if should_close_session:
+                        await session.close()
                 finally:
                     if not finished:
-                        await finish(
-                            "failed",
-                            error_code="client_disconnected",
-                            slot_id=decision.selected_slot_id,
-                            model=decision.selected_model,
-                            decision=decision,
-                            cache_status="BYPASS",
-                        )
+                        await finalize_local_stream("failed", error_code="client_disconnected")
 
             return _ManagedStreamingResponse(
                 managed_stream(),

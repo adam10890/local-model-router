@@ -324,10 +324,8 @@ def _record_upstream_usage(upstream_name: Optional[str], usage: Optional[Dict[st
 
     Called from forward_to_upstream (the single choke point for every declared-
     upstream forward, both explicit-model-match and auto-fallback routing) right
-    where the real upstream name and the real response usage are both known.
-    # ponytail: streaming responses aren't parsed for a trailing usage chunk, so
-    # streamed upstream requests don't hit the ledger yet — add if budget drift
-    # from streaming traffic becomes noticeable.
+    where the real upstream name and the real response or streamed SSE usage
+    are both known.
     """
     try:
         if not upstream_name:

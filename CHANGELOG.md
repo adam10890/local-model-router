@@ -6,6 +6,18 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Bounded SSE token-usage extraction (`SseUsageExtractor` in
+  `local_model_router/service/sse_usage.py`) for streaming `/v1/chat/completions`
+  and `/harnesses/*/v1/chat/completions`, injecting
+  `stream_options.include_usage` (when absent) on local llama.cpp streams and
+  recording streaming `prompt_tokens` / `completion_tokens` into `FleetStore`
+  and `usage_ledger`.
+- Opt-in bounded wait during active Hermes GPU swaps
+  (`swap_wait_seconds` in `hermes_gpu_profiles.yaml` or
+  `IMPERIUM_SWAP_WAIT_SECONDS` with `A0_LMM_ROUTER_SWAP_WAIT_SECONDS`
+  fallback, default `0.0`, capped at `60.0`), emitting
+  `x-a0-router-swap-wait-ms` on resolved requests while fast-failing leases,
+  manual stops, failed swaps, and retry backoff (`docs/adr/0021-...`).
 - Modular static dashboard asset serving at `GET /ui/assets/{name}`
   (`styles.css`, `i18n.js`, `app.js` under
   `local_model_router/dashboard/assets/`) with strict filename validation and
