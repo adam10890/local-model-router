@@ -51,6 +51,18 @@ def test_preset_uses_router_urls_and_slot_context():
     assert preset["chat"]["provider"] == "other" and preset["chat"]["vision"] is False
 
 
+def test_slot_id_pin_gets_the_slot_context():
+    backends = {"backends": [{"slots": [
+        {"id": "slot_chat", "model_id": "muse-glimmer-30b", "context_size": 131072},
+    ]}]}
+    ctx = cz.slot_contexts(backends)
+    assert ctx == {"slot_chat": 131072, "muse-glimmer-30b": 131072}
+    harness = _harness()
+    for conn in harness["connections"]:
+        conn["model"] = "slot_chat"
+    assert cz.build_preset(harness, ctx)["chat"]["ctx_length"] == 131072
+
+
 def test_unknown_slot_context_falls_back_conservatively():
     assert cz.build_preset(_harness(), {})["chat"]["ctx_length"] == cz.DEFAULT_CTX
 

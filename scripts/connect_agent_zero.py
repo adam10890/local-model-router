@@ -59,13 +59,18 @@ def find_usr(container: str) -> Path:
 
 
 def slot_contexts(backends: dict) -> dict[str, int]:
-    """model_id -> context window of every local slot the router knows."""
+    """Context window of every local slot, keyed by slot id and by model_id.
+
+    A harness may pin either. A slot-id pin (``slot_chat``) follows a model swap,
+    so its context has to come from the slot, not from the old model's name.
+    """
     out: dict[str, int] = {}
     for backend in backends.get("backends", []):
         for slot in backend.get("slots", []):
             ctx = slot.get("effective_context_size") or slot.get("context_size")
-            if slot.get("model_id") and ctx:
-                out[slot["model_id"]] = int(ctx)
+            for key in (slot.get("id"), slot.get("model_id")):
+                if key and ctx:
+                    out[key] = int(ctx)
     return out
 
 

@@ -123,6 +123,10 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- `scripts/connect_agent_zero.py` now reads the context window of a harness
+  pinned to a slot id (`slot_chat`) from that slot. It used to match model ids
+  only, so a slot-id pin, the one that survives a model swap, fell back to
+  32,768 tokens.
 - The managed-runtime release lookup retries transient failures with a bounded
   backoff, and authenticates when `IMPERIUM_GITHUB_TOKEN` is set. An
   unauthenticated GitHub API is capped at 60 requests/hour per IP, which
