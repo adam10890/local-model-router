@@ -12,6 +12,8 @@ the others.
 
 ## Decision
 
+We will treat Hermes as the primary client for support and integration quality, and we will keep other clients supported as harness users rather than as an equal product focus.
+
 Hermes is the primary client for Imperium support and integration quality.
 Other clients stay supported as OpenAI-compatible harness users, not as equal
 first-class product focus.
@@ -25,3 +27,5 @@ is not only tribal knowledge.
 - Hermes harness path, docs, and live smoke get first attention.
 - Agent Zero and Pi remain clients, not Imperium components.
 - Future policy/rules surface is required; ad-hoc YAML alone is not enough.
+
+Negative: other clients get less integration attention, so they can lag behind Hermes when maintenance time is short.

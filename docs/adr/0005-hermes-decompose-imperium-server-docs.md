@@ -12,6 +12,8 @@ a standalone system on a cloud server.
 
 ## Decision
 
+We will use Hermes for daily task decomposition, and we will document Imperium as a standalone gateway instead of building a second orchestrator for that path.
+
 If Hermes already owns task decomposition, use that layer for the daily
 Hermes workflow. Do not duplicate a second orchestrator inside Imperium for
 that path.
@@ -28,3 +30,5 @@ Daily orchestration replacement code stays gated by
 - Docs must describe standalone server install of Imperium as a gateway.
 - Hermes remains primary interactive client on the operator workstation.
 - Imperium does not become Hermes; it remains the compute router.
+
+Negative: a cloud server without Hermes has no decomposition layer until the orchestration gates are met.

@@ -14,6 +14,8 @@ quality routing.
 
 ## Decision
 
+We will plan an explainable model decision system before any automatic per-turn weak-versus-strong choice, and until then we will let Hermes request only the explicit profiles in ADR 0015.
+
 Plan an Imperium **model decision system** that can choose (or recommend)
 weak vs strong (and later loop/catalog roles) with explainable reasons.
 
@@ -29,3 +31,5 @@ healthy.
   0015 may update it in memory after a verified session-selected load, without
   silently serving a restored or unrelated model.
 - Decision output must stay explainable (reason codes) and local-first.
+
+Negative: automatic quality routing stays unavailable, so idle-to-strong behavior cannot ship as a silent default.

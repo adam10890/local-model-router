@@ -13,6 +13,8 @@ sub-tasks look small enough for weaker models in parallel.
 
 ## Decision
 
+We will maximize useful local compute by role, and we will keep Imperium as the router and policy owner rather than a second orchestrator.
+
 Imperium should maximize useful local compute automatically:
 
 1. **Idle / listen** — keep a weak, cheap model warm (or a hot/cold policy
@@ -37,6 +39,8 @@ under the orchestration re-entry gates.
   `docs/future-orchestration.md` pass.
 - Policy must stay explainable (reason codes), local-first, and free of
   prompt bodies in telemetry.
+
+Negative: a bad split onto small models can multiply failures, and extra slots still share one GPU budget.
 
 ## Devil's advocate (recorded assumptions to test)
 

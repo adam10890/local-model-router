@@ -12,6 +12,8 @@ choice.
 
 ## Decision
 
+We will ship and harden the simple Start path before full llama.cpp flag control.
+
 Ship and harden path A before path B:
 
 1. **A** — simple Start that works for the default operator.
@@ -24,3 +26,5 @@ Advanced controls must not break or replace the simple path.
 - First-run, fleet start, and Hermes chat stay ahead of flag UIs.
 - Advanced flag surfaces are additive, opt-in, and documented.
 - Regression on the simple path blocks release more than missing a flag.
+
+Negative: advanced operators wait for flag control, and a flag the simple path cannot express stays out until that path is safe.

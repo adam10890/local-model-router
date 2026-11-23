@@ -157,6 +157,19 @@ until one of them is picked up and earns its own.
   Idea from Spynel's offline, versioned `spynel docs` (stable topic ids, no
   live values in static text).
 
+### Q7 — Hermes availability during Studio work
+
+Keep the same Hermes chat responsive while Studio uses the shared GPU. Prove a
+verified local standby, dependent task intake, strong-model planning and review
+at GPU boundaries, and one bounded small-worker skill. Adam's requests live as
+commitments in מעקב אדם, Hermes owns execution records and delivery, Studio
+owns renderer attempts, and Imperium owns admission and GPU ownership.
+
+- **Detail:** [`prd/hermes-chat-during-studio.md`](prd/hermes-chat-during-studio.md)
+- **Status:** blocked — the machine task store depends on open question 2
+  below. Implementation is also gated on beta stability and ADR approval.
+- **Slug:** `hermes-chat-during-studio`
+
 ## Open questions
 
 These are contradictions between accepted documents, not ideas. They are the
@@ -182,6 +195,8 @@ entry. Listed so `scripts/branch_guard.py --queue` can see the slug.
 - `branch-convergence` — branch hygiene, the one-branch guard, and this queue.
 - `spynel-rereview` — re-baseline the Spynel adoption plan against v0.16.5 and
   record the Spynel-derived queue entries above.
+- `adr-steward` — adopt `tools/adr.py` for the decision log (ADR-0016) and
+  the founder-directed wording pass on ADR-0001–0015.
 
 ## Shipped
 

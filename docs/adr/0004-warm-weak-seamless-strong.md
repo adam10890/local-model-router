@@ -12,6 +12,8 @@ instant.
 
 ## Decision
 
+We will keep a weaker model loaded while idle and promote to the strong model when interactive quality is needed.
+
 While idle or lightly waiting, Imperium may keep a weaker model loaded (or
 cold/hot per llama.cpp policy). When interactive quality is needed, promote
 to the strong model. Target: the operator should not feel the handoff.
@@ -24,3 +26,5 @@ Permanent GPU residency of the strong model is not required.
 - Hot/cold or dual-slot policies are in scope for compute maximization.
 - Routing must explain promote/demote with reason codes.
 - Latency budgets belong in readiness/status, not silent stalls.
+
+Negative: the strong model is not resident, so the first interactive turn pays the promote delay.
