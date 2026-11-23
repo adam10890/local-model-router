@@ -28,6 +28,7 @@ def _app(
     store=None,
     health=True,
     upstreams_text=None,
+    cpu_connection=False,
 ):
     BackendManager._instance = None
     monkeypatch.setenv("A0_LMM_ROUTER_ENABLE_FLEET_CONTROL", "1")
@@ -84,6 +85,23 @@ def _app(
               default: {model: ornith}
         """,
     )
+    if cpu_connection:
+        fleet_path = tmp_path / "llama_cpp_servers.yaml"
+        fleet_config = yaml.safe_load(fleet_path.read_text(encoding="utf-8"))
+        fleet_config["active_slots"].append({
+            "id": "utility_cpu",
+            "host": "localhost",
+            "port": 18889,
+            "role": "utility",
+            "enabled": True,
+            "model_id": "utility",
+            "gpu_layers": 0,
+        })
+        fleet_path.write_text(yaml.safe_dump(fleet_config), encoding="utf-8")
+        harnesses_path = tmp_path / "harnesses.yaml"
+        harness_config = yaml.safe_load(harnesses_path.read_text(encoding="utf-8"))
+        harness_config["harnesses"]["hermes"]["connections"]["cpu"] = {"model": "utility"}
+        harnesses_path.write_text(yaml.safe_dump(harness_config), encoding="utf-8")
 
     async def health_probe(_url, _timeout):
         return {"ok": health}
@@ -326,6 +344,45 @@ def test_studio_lease_stop_asks_hermes_to_wait_then_start_clears_it(tmp_path, mo
     response = _chat(client, path="/harnesses/hermes/v1/chat/completions")
     assert response.status_code == 200
     assert calls
+
+
+class _HermesLeaseBlockedCpu(AssertionError):
+    pass
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=_HermesLeaseBlockedCpu,
+    reason="The Hermes ingress gate rejects the whole harness during a Studio lease",
+)
+def test_studio_lease_leaves_pinned_hermes_cpu_available(tmp_path, monkeypatch):
+    app, manager, _watcher = _app(tmp_path, monkeypatch, cpu_connection=True)
+    calls = _patch_forward(monkeypatch)
+
+    async def fake_stop(_name):
+        return True
+
+    monkeypatch.setattr(manager._backend, "stop_slot", fake_stop)
+    client = TestClient(app)
+    cpu_path = "/harnesses/hermes/cpu/v1/chat/completions"
+    assert _chat(client, path=cpu_path, model="utility").status_code == 200
+    assert calls.pop()["args"][0] == "http://localhost:18889/v1/chat/completions"
+    assert not calls
+
+    lease = client.post("/fleet/slots/slot_chat/stop", json={"reason": "studio_lease"})
+    assert lease.status_code == 200, lease.text
+    strong = _chat(client, path="/harnesses/hermes/default/v1/chat/completions")
+    assert strong.status_code == 503
+    assert strong.json()["error"]["code"] == "gpu_leased_by_studio"
+    assert not calls
+
+    cpu = _chat(client, path=cpu_path, model="utility")
+    if cpu.status_code == 503 and cpu.json().get("error", {}).get("code") == "gpu_leased_by_studio":
+        assert cpu.headers["retry-after"] == "120"
+        assert not calls
+        raise _HermesLeaseBlockedCpu("The pinned CPU request was rejected before forwarding")
+    assert cpu.status_code == 200, cpu.text
+    assert [call["args"][0] for call in calls] == ["http://localhost:18889/v1/chat/completions"]
 
 
 def test_backoff_retry_after_comes_from_watchers_next_attempt_at(
