@@ -62,7 +62,7 @@ jobs:
         run: ./scripts/test_windows_cleanroom.ps1
       - name: Upload sanitized cleanroom evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-pr-evidence-${{ github.run_id }}
           path: |
@@ -106,7 +106,7 @@ jobs:
         run: ./scripts/test_windows_cleanroom.ps1 -FullOfflineSetup -Backend cpu -Lifecycle
       - name: Upload sanitized CPU evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-cpu-evidence-${{ github.run_id }}
           path: |
@@ -133,7 +133,7 @@ jobs:
         run: ./scripts/test_windows_cleanroom.ps1 -FullOfflineSetup -Backend cuda12
       - name: Upload sanitized NVIDIA evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-nvidia-evidence-${{ github.run_id }}
           path: |
