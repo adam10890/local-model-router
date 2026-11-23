@@ -146,3 +146,17 @@ Smaller areas without child contracts yet: `routing/` (aliases),
 by `MCP_ALLOW_MUTATING_TOOLS`), `a2a/` (card + skills; card is public, skills
 honor the API key), `dashboard/` (single static page at `/ui`; data calls
 carry the user-entered key).
+
+## Architecture Decision Records (binding)
+
+- Decision log: `docs/adr/` (index: `docs/adr/README.md`). Tooling: `python tools/adr.py`.
+- Before any task: read Accepted ADRs relevant to the files you touch, and treat them as constraints.
+- If your change conflicts with an Accepted ADR: stop, and propose a superseding ADR. Never edit
+  the Context, Decision, or Consequences of an Accepted or Rejected ADR.
+- If your change makes a significant choice (hard to reverse, cross-cutting, at least 2 viable
+  options, new external dependency, first of a kind): add a Proposed ADR in the same PR.
+- Agents never set an ADR to Accepted. Humans (or a delegated policy) approve; agents then run
+  `adr.py accept N`.
+- One decision per ADR. Write "We will ..." decisions. Every ADR lists at least one negative consequence.
+- `python tools/adr.py lint --base origin/main` must pass before merge.
+- End every session with the ADR handoff block (created / superseded / pending / constraints applied).

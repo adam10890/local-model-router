@@ -14,6 +14,8 @@ router made, and it was about routing capacity, not confidentiality.
 
 ## Decision
 
+We will rank executors on an explicit trust ladder, and we will resolve an undeclared executor to the least-trusted rung.
+
 Executors are ranked on an explicit trust ladder, most trusted first:
 
 1. `local_uncensored` — local model, no alignment filtering.
@@ -40,3 +42,5 @@ least-trusted rung.
   recorded evidence of the guarantee.
 - The ladder is founder taste (ADR 0007). Agents propose amendments to
   `local_model_router/disclosure/disclosure.yaml`; they do not invent rungs.
+
+Negative: a missing declaration fails closed, so a legitimate executor that forgot its tier is treated as untrusted.

@@ -11,6 +11,8 @@ model without the operator “feeling” the handoff (ADR 0004).
 
 ## Decision
 
+We will hold interactive strong-model promotion to about five seconds, and we will not count ADR 0015's cold card swap against that budget.
+
 The promote/load budget for the strong model is **about five seconds**.
 
 Longer stalls are a product failure for interactive Hermes chat unless the
@@ -27,3 +29,5 @@ target for a future warm-weak / hot-strong promotion system.
 - Status/readiness should surface when promote will exceed that budget.
 - Quality still beats speed when they conflict (ADR 0006), but promote
   latency has a hard UX target.
+
+Negative: a warm-path load that cannot finish in about five seconds is a product failure for interactive Hermes chat.

@@ -12,6 +12,8 @@ Hermes-on-server.
 
 ## Decision
 
+We will treat the cloud Imperium client as a separate application the founder builds later, and we will not assume Hermes is that UI.
+
 The main client for a cloud Imperium install is a **separate application the
 founder builds**. Adaptations for that app are created separately later.
 
@@ -24,3 +26,5 @@ workstation client.
   host.
 - Cloud client contract stays TBD until that app exists.
 - Workstation Hermes priority (ADR 0001) is unchanged.
+
+Negative: the cloud client contract stays undecided, so a cloud install cannot yet target a real client.

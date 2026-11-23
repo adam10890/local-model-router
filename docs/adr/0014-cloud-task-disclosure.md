@@ -14,6 +14,8 @@ router's own traffic, not the briefs we write by hand.
 
 ## Decision
 
+We will give a cloud model requirements for a generic skeleton, and we will keep names, data, and intent on the machine.
+
 A cloud model builds a **generic skeleton against product requirements**. We
 integrate the data, the names, and the intent locally.
 
@@ -39,3 +41,5 @@ to receive it (ADR 0013) and fixes the form it takes when sent: `skeleton_only`,
   repeats the secret is not a leak check.
 - Classification is a heuristic hint with stated evidence, never a silent
   verdict; a human can always override it.
+
+Negative: a cloud model cannot see purpose or real identifiers, so its output is a skeleton that a local pass must finish.

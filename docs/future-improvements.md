@@ -182,6 +182,8 @@ entry. Listed so `scripts/branch_guard.py --queue` can see the slug.
 - `branch-convergence` — branch hygiene, the one-branch guard, and this queue.
 - `spynel-rereview` — re-baseline the Spynel adoption plan against v0.16.5 and
   record the Spynel-derived queue entries above.
+- `adr-steward` — adopt `tools/adr.py` for the decision log (ADR-0016) and
+  the founder-directed wording pass on ADR-0001–0015.
 
 ## Shipped
 

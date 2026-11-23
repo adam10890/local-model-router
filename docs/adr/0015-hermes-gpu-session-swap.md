@@ -18,6 +18,8 @@ weak-to-strong promotion target in ADR 0009.
 
 ## Decision
 
+We will let the newest recent Hermes session choose the single GPU GGUF, and we will swap by replacing that one process rather than loading two models.
+
 The newest recognized Hermes selection from an open, non-archived session
 active within 15 minutes is the desired GPU profile. At most 32 matching rows
 are considered, ordered by `COALESCE(last_activity_at, started_at)`. If no
@@ -91,3 +93,5 @@ is loaded, it uses the configured default profile.
   operation time, attempt, and a sanitized result code.
 - Carnice rows in `docs/1.0-beta-evidence.md` remain dated historical evidence;
   they are not current `slot_chat` operating instructions.
+
+Negative: the card has a no-model window while the replacement or the restore loads, and interactive chat is down until that finishes.
