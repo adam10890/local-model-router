@@ -19,8 +19,11 @@ start workers. This does not satisfy or bypass the replacement re-entry gates.
 A future execution surface should provide visible workspaces, controllable
 terminal processes, attention notifications, and an explicit CLI or socket
 boundary. Imperium should continue to own model routing, hardware-aware
-capacity, task policy, and safe audit data; an optional execution adapter
-should own terminal processes and presentation.
+capacity, and safe audit data; an optional execution adapter
+should own terminal processes and presentation. Task ownership follows
+[ADR-0017](adr/0017-task-ownership-commitments-for-intent-executors-for-execution-state.md):
+מעקב אדם commitments hold intent, executors hold execution state, and
+Imperium holds neither.
 
 The replacement must not make a platform-specific terminal application a
 Windows runtime dependency.

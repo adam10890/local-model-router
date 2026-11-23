@@ -4,8 +4,7 @@ Date: 2026-11-10
 
 ## Status
 
-Proposed
-
+Accepted 2026-11-23 (v1.0)
 > In the context of Imperium's existing decision log, facing agents that must record the next decision without rewriting the ones already accepted, we decided for adr-steward and the Nygard template and neglected a hand-maintained index and a supersede-all rewrite, to achieve a lintable append-only log, accepting a generated index and one founder-directed wording pass on ADR-0001–0015, because those decisions stay in force and their numbers are already on main.
 
 ## Context
@@ -47,3 +46,4 @@ Review trigger: reopen this record if the founder wants the AWS template, or if 
 | Version | Date | Author | Change |
 |---|---|---|---|
 | 0.1 | 2026-11-10 | cursor | Initial proposal, including the founder-directed wording pass |
+| 1.0 | 2026-11-23 | agent | Accepted |

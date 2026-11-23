@@ -113,8 +113,9 @@ gated by the re-entry conditions already written down.
 
 - **Detail:** [`future-orchestration.md`](future-orchestration.md); Spynel
   v0.16.5 re-review in [`spynel-adoption-plan.md`](spynel-adoption-plan.md)
-- **Status:** blocked — the re-entry gates are not met, and the ownership
-  question in `## Open questions` must be answered first
+- **Status:** blocked — the re-entry gates are not met. Task ownership is
+  settled by [ADR-0017](adr/0017-task-ownership-commitments-for-intent-executors-for-execution-state.md):
+  a replacement surface executes work, it does not own tasks or task policy
 - **Slug:** `execution-surface`
 - **Folds in:**
   - Declarative YAML workflows and a minimal runner (Archon-inspired): this is
@@ -166,9 +167,42 @@ commitments in מעקב אדם, Hermes owns execution records and delivery, Stud
 owns renderer attempts, and Imperium owns admission and GPU ownership.
 
 - **Detail:** [`prd/hermes-chat-during-studio.md`](prd/hermes-chat-during-studio.md)
-- **Status:** blocked — the machine task store depends on open question 2
-  below. Implementation is also gated on beta stability and ADR approval.
+- **Status:** queued — task ownership is settled by ADR-0017 (commitments in
+  מעקב אדם, execution in Hermes Kanban). Implementation is gated on beta
+  stability and the Proposed ADRs for the standby route.
 - **Slug:** `hermes-chat-during-studio`
+
+### Q8 — llama.cpp v1.0.0 runtime pin (`b12359`)
+
+Move the managed Windows runtime from nightly `b12110` to `b12359`, the binary
+build named by the llama.cpp `v1.0.0` source release. Keep the current server
+arguments, smoke on the live RTX machine, and roll back on any failed probe.
+New flags (FP8 KV cache, MoE cache, sharding, audio) are follow-ups that each
+need a measured profile change.
+
+- **Detail:** [`superpowers/plans/2026-11-16-llama-cpp-v1.md`](superpowers/plans/2026-11-16-llama-cpp-v1.md)
+- **Status:** queued — Task 5 needs the live machine and Adam's approval
+- **Slug:** `llama-cpp-v1`
+- **Update every version reference in the same change.** Before merging, run
+  `git grep -n -E "b9987|b12110|min_llama_cpp"` and resolve every hit:
+  - Change to `b12359`: `local_model_router/setup/runtime_catalog.json`
+    (`recommended` tag, source, commit, and every asset name, URL, sha256 and
+    size), `local_model_router/setup/model_catalog.json` `min_llama_cpp`, the
+    `--tag` help example in `local_model_router/cli.py`, the `b12110`
+    comments in `helpers/backends/docker_backend.py` and
+    `subprocess_backend.py` (re-check the behavior they describe), and the
+    tests that hard-code the recommended tag (`tests/test_setup_engine.py`,
+    `tests/test_cli_commands.py`).
+  - Decide explicitly: the Docker images
+    (`ghcr.io/ggml-org/llama.cpp:server-cuda` / `:server` in
+    `docker_backend.py` and `conf/llama_cpp_servers.example.yaml`) use
+    floating tags. Pin them to the `b12359` build or document that Docker
+    stays unpinned.
+  - Leave unchanged, because they record history: `docs/evidence/*.json`,
+    `docs/1.0-beta-evidence.md`, `changes/`, and the PR #24 notes in
+    `scripts/branch_guard.py` and `tests/test_branch_guard.py`.
+  - The live machine: `imperium update --tag b12359 --yes`, then confirm the
+    manifest shows `runtime.tag` `b12359` and `previous_runtime.tag` `b12110`.
 
 ## Open questions
 
@@ -176,13 +210,14 @@ These are contradictions between accepted documents, not ideas. They are the
 founder's to settle, and an entry that depends on one cannot start until it is
 settled.
 
-1. **Who owns task policy.** `future-orchestration.md` says Imperium continues
-   to own task policy; `spynel-adoption-plan.md` says HIVE, not Imperium, owns
-   durable task orchestration. Both cannot be the contract. Blocks Q5.
-2. **The canonical task service has no named owner.** `herdr-development.md`,
-   the work plan's phase D and `herdr-todo.md` P16/WB2 all require one, and no
-   document says which system provides it. Blocks the later Herdr packages in
-   Q3.
+1. **Who owns task policy.** *Settled 2026-11-23 by
+   [ADR-0017](adr/0017-task-ownership-commitments-for-intent-executors-for-execution-state.md).*
+   Imperium does not own tasks or task policy. HIVE stays a proposal until two
+   executors must coordinate one task. `future-orchestration.md` was aligned.
+2. **The canonical task service has no named owner.** *Settled 2026-11-23 by
+   ADR-0017.* מעקב אדם commitments hold what Adam asked to have done; the
+   executor that runs the work owns execution state and links to the
+   commitment ID. This is the canonical service for Herdr P16/WB2 and phase D.
 3. **Plugins: framework or not.** The original backlog accepted a drop-in
    plugin folder; R09, P12 and the roadmap's 2.0 line all say no plugin
    framework. One of them has to go. Currently affects nothing in flight.
@@ -197,6 +232,8 @@ entry. Listed so `scripts/branch_guard.py --queue` can see the slug.
   record the Spynel-derived queue entries above.
 - `adr-steward` — adopt `tools/adr.py` for the decision log (ADR-0016) and
   the founder-directed wording pass on ADR-0001–0015.
+- `task-ownership` — accept ADR-0016, record ADR-0017 (settles open questions
+  1 and 2), and queue Q8.
 
 ## Shipped
 

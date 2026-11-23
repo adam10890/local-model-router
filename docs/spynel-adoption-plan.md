@@ -77,8 +77,8 @@ is not a dependency, and no Spynel source code is copied into Imperium.
   - The durable task contract (Markdown record, lease, claim journal, crash
     recovery test) stays the post-gate HIVE contract in
     [future-orchestration.md](future-orchestration.md); Spynel is a worked
-    example of it, which bears on open questions 1 and 2 but does not settle
-    them.
+    example of it, which bore on open questions 1 and 2; ADR-0017 settled
+    both.
   - Offline, versioned, agent-readable documentation, queued in Q6 as MCP
     resources for harness setup.
 - Not adopted: Spynel as a runtime dependency, its channels (Telegram,
