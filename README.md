@@ -39,7 +39,7 @@ Decision records: [`docs/adr/`](docs/adr/).
 
 ## Status
 
-**0.15.0 - Measured models, task disclosure, streaming usage, and modular routing.** Product outcomes and
+**0.16.0 - Measured models, task disclosure, modular routing, and contract visibility.** Product outcomes and
 1.0 beta exit gates live in [`GOALS.md`](GOALS.md). Recorded gate evidence
 lives in [`docs/1.0-beta-evidence.md`](docs/1.0-beta-evidence.md). Sequence
 of accepted work: [`docs/1.0-beta-roadmap.html`](docs/1.0-beta-roadmap.html).
@@ -74,6 +74,7 @@ What works today:
 | First-run setup | loopback-only `/setup/*` | hardware discovery, reviewed plan, managed downloads, progress, cancellation, and smoke test |
 | Cookbook | `GET /cookbook` | scans your GGUF folder, VRAM fit math, per-role model recommendations with confidence grades |
 | A2A | `GET /.well-known/agent-card.json`, `POST /a2a` | agent card + skills for agent-to-agent use |
+| OpenAPI schema | `GET /openapi.json` | generated OpenAPI 3.1.0 schema covering live router, harness, setup, and fleet routes (honors bearer auth) |
 | MCP | `python -m local_model_router mcp` | Streamable HTTP MCP server (port 8095, `[mcp]` extra) |
 
 **Three surfaces, one rule:** the OpenAI-compatible API is for model clients;
@@ -395,7 +396,9 @@ Tools: `chat_completion`, `utility_completion`, `route_completion`,
 `model_card`, `providers_list`, `route_preview`, `compute_budget`,
 `route_task` - plus admin tools
 (`start_fleet`, `start_slot`, `stop_slot`) **only** when
-`MCP_ALLOW_MUTATING_TOOLS=1`. Bearer auth is on by default; inspect with
+`MCP_ALLOW_MUTATING_TOOLS=1`. Resources: `models://fleet/status`,
+`models://{slot_id}/info`, `models://hardware/profile`, `models://slots/list`,
+`harnesses://list`, and `harnesses://{harness_id}/setup`. Bearer auth is on by default; inspect with
 `npx @modelcontextprotocol/inspector http://127.0.0.1:8095/mcp`.
 MCP calls the router at `A0_LMM_ROUTER_BASE_URL` (default
 `http://127.0.0.1:9000`) and reuses `A0_LMM_ROUTER_API_KEY`.

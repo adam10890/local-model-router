@@ -237,3 +237,13 @@ async def slot_configs() -> dict[str, dict[str, Any]]:
 async def hardware_profile() -> dict[str, Any]:
     status = await fleet_status()
     return status.get("compute") or {}
+
+
+async def harnesses_list() -> dict[str, Any]:
+    """Fetch configured client harness manifests from GET /harnesses."""
+    return await _router_request("GET", "/harnesses")
+
+
+async def harness_detail(harness_id: str) -> dict[str, Any]:
+    """Fetch a single harness manifest and setup instructions."""
+    return await _router_request("GET", f"/harnesses/{quote(harness_id, safe='')}")

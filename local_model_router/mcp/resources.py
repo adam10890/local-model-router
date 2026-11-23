@@ -72,3 +72,15 @@ def register_resources(mcp: FastMCP) -> None:
             for name, cfg in configs.items()
         ]
         return json.dumps({"slots": slots}, indent=2)
+
+    @mcp.resource("harnesses://list")
+    async def harnesses_list_resource() -> str:
+        """Configured client harnesses, pinned connections, and readiness flags."""
+        data = await bridge.harnesses_list()
+        return json.dumps(data, indent=2)
+
+    @mcp.resource("harnesses://{harness_id}/setup")
+    async def harness_setup_resource(harness_id: str) -> str:
+        """Connection endpoints and copy-paste client setup snippet for one harness."""
+        data = await bridge.harness_detail(harness_id)
+        return json.dumps(data, indent=2)
