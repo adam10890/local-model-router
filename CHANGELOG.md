@@ -6,6 +6,10 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Modular static dashboard asset serving at `GET /ui/assets/{name}`
+  (`styles.css`, `i18n.js`, `app.js` under
+  `local_model_router/dashboard/assets/`) with strict filename validation and
+  package-data packaging (`pyproject.toml`).
 - Pooled HTTP client (`SharedHttpClient` in
   `local_model_router/service/http_client.py`) sharing one
   `aiohttp.ClientSession` per event loop across forwarding, embeddings, slot
@@ -25,6 +29,11 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- Extracted inline `<style>` and `<script>` blocks out of
+  `local_model_router/dashboard/index.html` into static assets (`styles.css`,
+  `i18n.js`, `app.js`), passing setup token and version via `<meta>` tags,
+  tightening `/ui` Content-Security-Policy to `script-src 'self'`, and moving
+  browser-stored `imperium.apiKey` to `sessionStorage`.
 - Split the monolithic `local_model_router/service/app.py` into
   `context.py`, `routes_setup.py`, `routes_fleet.py`, `routes_harnesses.py`,
   `routes_orchestrator.py`, `routes_openai.py`, and a slim `app.py` entrypoint

@@ -250,6 +250,9 @@ entry. Listed so `scripts/branch_guard.py --queue` can see the slug.
   `service/app.py` into focused route modules (`context.py`, `routes_*.py`),
   and gate legacy `/orchestrator/*` behind `IMPERIUM_ENABLE_LEGACY_ORCHESTRATOR`
   with an explicit `Sunset` header (Proposed ADR-0020).
+- `dashboard-modular-assets` — split `dashboard/index.html` into zero-build
+  static CSS/JS assets at `/ui/assets/{name}`, tighten `/ui` CSP to
+  `script-src 'self'`, and move stored browser API keys to `sessionStorage`.
 
 ## Shipped
 
