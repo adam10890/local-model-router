@@ -6,6 +6,14 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Pooled HTTP client (`SharedHttpClient` in
+  `local_model_router/service/http_client.py`) sharing one
+  `aiohttp.ClientSession` per event loop across forwarding, embeddings, slot
+  `/models` discovery, async slot health probes, and the MCP HTTP bridge, with
+  transparent test monkeypatch fallback and clean lifespan shutdown.
+- Proposed ADR-0020
+  (`docs/adr/0020-isolate-and-schedule-removal-of-legacy-orchestrator-api.md`)
+  recording the `/orchestrator/*` isolation and sunset schedule.
 - GitHub governance & CI quality gates: added `SECURITY.md`,
   `.github/dependabot.yml` (`pip` and `github-actions`),
   `.github/PULL_REQUEST_TEMPLATE.md`, `ruff` static syntax/undefined-name
@@ -16,6 +24,16 @@ All notable changes to this project are documented here.
   `actions/setup-python@v6`.
 
 ### Changed
+
+- Split the monolithic `local_model_router/service/app.py` into
+  `context.py`, `routes_setup.py`, `routes_fleet.py`, `routes_harnesses.py`,
+  `routes_orchestrator.py`, `routes_openai.py`, and a slim `app.py` entrypoint
+  while preserving existing test and helper re-exports.
+- Gated legacy `/orchestrator/*` routes and default `AgentOrchestrator`
+  startup behind `IMPERIUM_ENABLE_LEGACY_ORCHESTRATOR` (with
+  `A0_LMM_ROUTER_ENABLE_LEGACY_ORCHESTRATOR` fallback, default `"1"`) and
+  emitted `Sunset: Wed, 31 Dec 2026 23:59:59 GMT` alongside
+  `Deprecation: true`.
 
 - Cleaned up obsolete historical `a0_lmm_router` plugin comments, links,
   docstrings, and default workspace/ledger paths (`usage_ledger.py` now defaults

@@ -60,3 +60,19 @@ review and preservation of its MIT notice.
 - Prompts and secrets remain absent from telemetry and summary endpoints.
 - The orchestration package is optional; the router starts without it.
 - A migration and removal policy exists for the deprecated API.
+
+## Legacy `/orchestrator/*` sunset policy (ADR-0020)
+
+- **Feature toggle:** `IMPERIUM_ENABLE_LEGACY_ORCHESTRATOR` (with fallback
+  `A0_LMM_ROUTER_ENABLE_LEGACY_ORCHESTRATOR`, defaulting to `"1"` during the
+  deprecation window). Setting it to `0` (`false`/`no`/`off`) omits the
+  `/orchestrator/*` routes (returning `404`) and skips initializing
+  `AgentOrchestrator` / `orchestrator.sqlite3` while leaving `/health`, setup,
+  harness, and OpenAI endpoints unaffected.
+- **Sunset header:** while enabled, all `/orchestrator/*` responses include both
+  `Deprecation: true` and `Sunset: Wed, 31 Dec 2026 23:59:59 GMT`.
+- **Migration path:** move task ownership and execution commitments to the
+  external commitment tracker and primary Hermes harness per
+  [ADR-0017](adr/0017-task-ownership-commitments-for-intent-executors-for-execution-state.md).
+  Removal of `routes_orchestrator.py` and `agent_orchestrator.py` is scheduled
+  after the `2026-12-31` sunset date once remaining beta P0 gates close.
