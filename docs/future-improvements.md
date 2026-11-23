@@ -240,6 +240,9 @@ entry. Listed so `scripts/branch_guard.py --queue` can see the slug.
   the founder-directed wording pass on ADR-0001–0015.
 - `task-ownership` — accept ADR-0016, record ADR-0017 (settles open questions
   1 and 2), and queue Q8.
+- `core-reliability-and-security` — fix upstream structured-output/stream/embeddings
+  lifecycle bugs, harden `FleetStore` and `stats_tracker`, and apply endpoint/Docker
+  security hardening.
 
 ## Shipped
 

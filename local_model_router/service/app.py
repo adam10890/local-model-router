@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
+from urllib.parse import urlparse
 
 import aiohttp
 from pydantic import ValidationError
@@ -227,6 +228,7 @@ def _classify_upstream_failure(
     Connection/timeout paths stay outside this helper. Capability gaps
     (missing mmproj / image input) must not look like an unloaded model.
     """
+    del pinned_harness
     message = _upstream_error_text(body) or "upstream request failed"
     lowered = message.lower()
     if any(
@@ -235,8 +237,6 @@ def _classify_upstream_failure(
     ):
         http_status = status if 400 <= status < 500 else 400
         return "upstream_capability_missing", http_status, message
-    if pinned_harness:
-        return "upstream_error", status if status >= 400 else 502, message
     return "upstream_error", status if status >= 400 else 502, message
 
 
@@ -303,6 +303,47 @@ def _pin_model_allowed(model: str, slots: list, upstream_list: list, extra_ids: 
     )
 
 
+_ALLOWED_LOCAL_ORIGINS = frozenset({"127.0.0.1", "localhost", "::1", "testserver"})
+_CSRF_BLOCKED_MEDIA_TYPES = frozenset(
+    {
+        "text/plain",
+        "application/x-www-form-urlencoded",
+        "multipart/form-data",
+    }
+)
+_UI_SECURITY_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+}
+
+
+def _origin_check_error(request: Request, api_key: str) -> Optional[JSONResponse]:
+    if api_key or request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return None
+    origin = request.headers.get("origin", "").strip()
+    if not origin:
+        return None
+    if origin.lower() == "null":
+        return JSONResponse({"error": "cross_origin_forbidden"}, status_code=403)
+    hostname = (urlparse(origin).hostname or "").strip().lower()
+    if hostname not in _ALLOWED_LOCAL_ORIGINS:
+        return JSONResponse({"error": "cross_origin_forbidden"}, status_code=403)
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type in _CSRF_BLOCKED_MEDIA_TYPES:
+        return JSONResponse({"error": "unsupported_media_type"}, status_code=415)
+    return None
+
+
 def _configured_api_key() -> str:
     return os.environ.get(_API_KEY_ENV, "").strip()
 
@@ -322,7 +363,8 @@ def _authorized(request: Request, api_key: str) -> bool:
 
 
 def _unauthorized_response(request: Request) -> JSONResponse:
-    if request.url.path.startswith("/v1/"):
+    path = request.url.path
+    if path.startswith("/v1/") or "/v1/" in path:
         return _openai_error(
             "missing or invalid bearer token",
             "unauthorized",
@@ -596,15 +638,30 @@ async def _stream_upstream_response(
     on_error: Optional[Callable[[str], Awaitable[None]]] = None,
 ):
     saw_done = False
+    tail = b""
     try:
         async for chunk in resp.content.iter_chunked(8192):
             if chunk:
-                if b"data: [DONE]" in chunk:
+                window = tail + chunk
+                if b"data: [DONE]" in window:
                     saw_done = True
-                elif b'"finish_reason"' in chunk and b'"finish_reason":null' not in chunk.replace(b" ", b""):
-                    # Non-null finish_reason is a usable completion signal when
-                    # the upstream omits the terminal [DONE] marker.
-                    saw_done = True
+                else:
+                    compact = window.replace(b" ", b"")
+                    idx = 0
+                    while True:
+                        pos = compact.find(b'"finish_reason":', idx)
+                        if pos == -1:
+                            break
+                        after = compact[pos + len(b'"finish_reason":'):]
+                        if after and not after.startswith(b"null") and (
+                            len(after) >= 4 or not b"null".startswith(after)
+                        ):
+                            # Non-null finish_reason is a usable completion signal when
+                            # the upstream omits the terminal [DONE] marker.
+                            saw_done = True
+                            break
+                        idx = pos + 1
+                tail = window[-256:]
                 yield chunk
         if not saw_done and on_error is not None:
             await on_error("upstream_stream_incomplete")
@@ -846,6 +903,9 @@ def create_app(
         async def wrapper(request: Request) -> Response:
             if not _authorized(request, api_key):
                 return _unauthorized_response(request)
+            origin_error = _origin_check_error(request, api_key)
+            if origin_error is not None:
+                return origin_error
             return await handler(request)
 
         return wrapper
@@ -893,12 +953,16 @@ def create_app(
         return payload
 
     async def health(request: Request) -> JSONResponse:
-        return JSONResponse({
+        client_host = request.client.host if request.client else ""
+        is_loopback = client_host in {"127.0.0.1", "::1", "localhost", "testclient"}
+        payload: Dict[str, Any] = {
             "status": "ok",
             "service": _SERVICE_NAME,
             "version": _VERSION,
-            "config_path": observer.config_path,
-        })
+        }
+        if (not api_key and is_loopback) or (bool(api_key) and _authorized(request, api_key)):
+            payload["config_path"] = observer.config_path
+        return JSONResponse(payload)
 
     async def slots(request: Request) -> JSONResponse:
         return JSONResponse(observer.get_slots())
@@ -1129,13 +1193,21 @@ def create_app(
             setup_api_active["value"] = False
         return JSONResponse(result)
 
+    last_observer_snapshot: Dict[str, Optional[str]] = {"json": None}
+
     async def fleet_status(request: Request) -> JSONResponse:
         slots = observer.get_slots()
         snapshot = slots_model_snapshot(slots)
         context_windows = context_windows_from_slots(slots)
-        store.record_model_snapshot("observer_slots", snapshot)
-        agents = store.list_agents()
-        vram, compute = await compute_status()
+        snapshot_json = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+        if snapshot_json != last_observer_snapshot["json"]:
+            last_observer_snapshot["json"] = snapshot_json
+            await asyncio.to_thread(store.record_model_snapshot, "observer_slots", snapshot)
+        agents, request_summary, (vram, compute) = await asyncio.gather(
+            asyncio.to_thread(store.list_agents),
+            asyncio.to_thread(store.request_summary),
+            compute_status(),
+        )
         managed_slots = await fleet_control.status() if control_enabled and supports_start_stop else {}
         runtime_fields = (
             "running",
@@ -1178,7 +1250,7 @@ def create_app(
                     "count": len(agents),
                     "items": agents,
                 },
-                "requests": store.request_summary(),
+                "requests": request_summary,
                 "vram": vram,
                 "compute": compute,
                 "slots": slots,
@@ -1283,7 +1355,8 @@ def create_app(
         ):
             return JSONResponse(_cookbook_cache["report"])
 
-        report = build_report(
+        report = await asyncio.to_thread(
+            build_report,
             models_dir,
             fleet_conf.get("hardware") or {},
             fleet_conf.get("context_policy") or {},
@@ -1757,7 +1830,7 @@ def create_app(
             limit = max(1, min(1000, int(request.query_params.get("limit", "50"))))
         except ValueError:
             limit = 50
-        return JSONResponse(store.routing_analytics(limit=limit))
+        return JSONResponse(await asyncio.to_thread(store.routing_analytics, limit=limit))
 
     async def agents_list(request: Request) -> JSONResponse:
         return JSONResponse({"agents": agent_catalog.public_list()})
@@ -2107,34 +2180,53 @@ def create_app(
                         headers=out_headers,
                     )
 
-                async def managed_upstream_stream():
-                    stream_state = {"failed": False}
+                stream_state = {"failed": False, "finalized": False}
 
+                async def finalize_once(status: str, **kwargs: Any) -> None:
+                    if stream_state["finalized"]:
+                        return
+                    stream_state["finalized"] = True
+                    if finalize is not None:
+                        await finalize(status, **kwargs)
+
+                async def managed_upstream_stream():
                     async def stream_failed(code: str) -> None:
                         stream_state["failed"] = True
-                        if finalize is not None:
-                            await finalize("failed", error_code=code)
+                        await finalize_once("failed", error_code=code)
 
                     try:
                         async for chunk in _stream_upstream_response(resp, session, stream_failed):
                             yield chunk
                     except asyncio.CancelledError:
-                        if finalize is not None:
-                            await finalize("failed", error_code="client_disconnected")
+                        await finalize_once("failed", error_code="client_disconnected")
                         raise
                     except Exception:
-                        if finalize is not None:
-                            await finalize("failed", error_code="upstream_stream_error")
+                        await finalize_once("failed", error_code="upstream_stream_error")
                         raise
                     else:
-                        if finalize is not None and not stream_state["failed"]:
-                            await finalize("completed")
+                        if not stream_state["failed"]:
+                            await finalize_once("completed")
+                    finally:
+                        if not stream_state["finalized"]:
+                            await finalize_once("failed", error_code="client_disconnected")
 
-                return StreamingResponse(
+                async def close_managed_upstream_stream() -> None:
+                    try:
+                        resp.release()
+                    except Exception:
+                        pass
+                    try:
+                        await session.close()
+                    finally:
+                        if not stream_state["finalized"]:
+                            await finalize_once("failed", error_code="client_disconnected")
+
+                return _ManagedStreamingResponse(
                     managed_upstream_stream(),
                     status_code=resp.status,
                     media_type="text/event-stream",
                     headers={**out_headers, "cache-control": "no-cache", "x-accel-buffering": "no"},
+                    on_close=close_managed_upstream_stream,
                 )
 
             async with aiohttp.ClientSession() as session:
@@ -2178,41 +2270,55 @@ def create_app(
                             },
                             headers=out_headers,
                         )
-                    if finalize is not None:
-                        await finalize(
-                            "completed" if resp.status < 400 else "failed",
-                            error_code=None if resp.status < 400 else "upstream_error",
-                            usage=_dict_or_empty(upstream_json.get("usage"))
-                            if isinstance(upstream_json, dict)
-                            else {},
-                        )
-                    if resp.status < 400:
-                        async def resend_upstream(repair_payload: Dict[str, Any]) -> Any:
-                            async with session.post(
-                                url,
-                                json=repair_payload,
-                                headers=upstream.headers(),
-                                timeout=aiohttp.ClientTimeout(total=_FORWARD_TIMEOUT_SECONDS),
-                            ) as retry_resp:
-                                if retry_resp.status >= 400:
-                                    return None
-                                return await retry_resp.json(content_type=None)
+                    usage = (
+                        _dict_or_empty(upstream_json.get("usage"))
+                        if isinstance(upstream_json, dict)
+                        else {}
+                    )
+                    if resp.status >= 400:
+                        if finalize is not None:
+                            await finalize("failed", error_code="upstream_error", usage=usage)
+                        return JSONResponse(upstream_json, status_code=resp.status, headers=out_headers)
 
-                        upstream_json, structured_code = await check_structured_output(
-                            payload, upstream_json, resend_upstream
-                        )
-                        if structured_code:
-                            out_headers["x-a0-router-structured-output"] = structured_code
-                        if structured_code == structured_output.FAILED and _structured_output_enforced():
-                            if finalize is not None:
-                                await finalize("failed", error_code=structured_output.FAILED)
-                            return _openai_error(
-                                "the model did not return valid JSON for a response_format request",
-                                structured_output.FAILED,
-                                422,
-                                headers=out_headers,
+                    async def resend_upstream(repair_payload: Dict[str, Any]) -> Any:
+                        # Rides the admission lease this request already holds:
+                        # a second acquire would deadlock at max_active=1.
+                        async with session.post(
+                            url,
+                            json=repair_payload,
+                            headers=upstream.headers(),
+                            timeout=aiohttp.ClientTimeout(total=_FORWARD_TIMEOUT_SECONDS),
+                        ) as retry_resp:
+                            if retry_resp.status >= 400:
+                                return None
+                            return await retry_resp.json(content_type=None)
+
+                    upstream_json, structured_code = await check_structured_output(
+                        payload, upstream_json, resend_upstream
+                    )
+                    if structured_code:
+                        out_headers["x-a0-router-structured-output"] = structured_code
+                    usage = (
+                        _dict_or_empty(upstream_json.get("usage"))
+                        if isinstance(upstream_json, dict)
+                        else {}
+                    )
+                    if structured_code == structured_output.FAILED and _structured_output_enforced():
+                        if finalize is not None:
+                            await finalize(
+                                "failed",
+                                error_code=structured_output.FAILED,
+                                usage=usage,
                             )
-                        _record_upstream_usage(upstream.name, _dict_or_empty(upstream_json).get("usage"), bare_model)
+                        return _openai_error(
+                            "the model did not return valid JSON for a response_format request",
+                            structured_output.FAILED,
+                            422,
+                            headers=out_headers,
+                        )
+                    if finalize is not None:
+                        await finalize("completed", usage=usage)
+                    _record_upstream_usage(upstream.name, usage, bare_model)
                     return JSONResponse(upstream_json, status_code=resp.status, headers=out_headers)
         except asyncio.CancelledError:
             if finalize is not None:
@@ -2263,7 +2369,10 @@ def create_app(
 
         client_host = request.client.host if request.client else ""
         token = setup_token if client_host in {"127.0.0.1", "::1", "localhost", "testclient"} else ""
-        return HTMLResponse(dashboard_html(setup_token=token))
+        return HTMLResponse(
+            dashboard_html(setup_token=token),
+            headers=_UI_SECURITY_HEADERS,
+        )
 
     async def dashboard_icon_file(request: Request) -> Response:
         from local_model_router.dashboard import dashboard_icon
@@ -2359,36 +2468,220 @@ def create_app(
         routing = _dict_or_empty(body.get("routing"))
         routing.update({"role": "embed", "task_type": "embedding"})
         body["routing"] = routing
+        requested_model = str(body.get("model") or "embedding").strip() or "embedding"
         try:
             agent = identity_from_headers(request.headers, body)
-            intent = _intent_from_chat_body(body, agent, requested_model=str(body.get("model") or "embedding"))
+            app_id = _app_id_from(request.headers, body, agent)
+            intent = _intent_from_chat_body(
+                body, agent, app_id=app_id, requested_model=requested_model
+            )
+        except ValidationError as exc:
+            import json as _json
+
+            return _openai_error(
+                "routing metadata failed validation",
+                "routing_validation_error",
+                422,
+                extra={"detail": _json.loads(exc.json())},
+            )
+        except ValueError as exc:
+            return _openai_error(
+                "invalid request priority; use low, normal, or high",
+                "invalid_priority",
+                422,
+                param="X-Priority",
+                extra={"detail": str(exc)},
+            )
+
+        request_id = store.create_request(agent)
+        started = time.monotonic()
+        admission = None
+        acquired_queue: Optional[FleetQueue] = None
+        admission_lane = "local"
+        tracked_slot_id: Optional[str] = None
+        finished = False
+
+        def embed_headers(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+            current = acquired_queue.snapshot() if acquired_queue is not None else {"queued": 0}
+            headers = {
+                "x-a0-request-id": request_id,
+                "x-a0-admission-lane": admission_lane,
+                "x-a0-agent-id": agent.agent_id,
+                "x-a0-agent-type": agent.agent_type,
+                "x-a0-fleet-request-id": request_id,
+                "x-a0-fleet-queue-depth": str(current["queued"]),
+            }
+            if extra:
+                headers.update(extra)
+            return headers
+
+        async def finish(
+            status: str,
+            *,
+            error_code: Optional[str] = None,
+            slot_id: Optional[str] = None,
+            model: Optional[str] = None,
+            decision: Any = None,
+            usage: Optional[Dict[str, Any]] = None,
+        ) -> None:
+            nonlocal finished, tracked_slot_id
+            if finished:
+                return
+            finished = True
+            duration_ms = int((time.monotonic() - started) * 1000)
+            usage = usage or {}
+            try:
+                store.update_request(
+                    request_id,
+                    status=status,
+                    slot_id=slot_id,
+                    model=model,
+                    queued_ms=admission.queued_ms if admission is not None else 0,
+                    duration_ms=duration_ms,
+                    error_code=error_code,
+                    app_id=app_id,
+                    requested_model=requested_model,
+                    resolved_model=model or getattr(decision, "selected_model", None),
+                    routing_strategy=getattr(decision, "routing_strategy", intent.routing_strategy),
+                    selected_source="local",
+                    admission_lane=admission_lane,
+                    fallback_used=getattr(decision, "fallback_used", False),
+                    reason_codes=getattr(decision, "reason_codes", None) or [],
+                    cache_status="BYPASS",
+                    prompt_tokens=usage.get("prompt_tokens"),
+                    completion_tokens=usage.get("completion_tokens"),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Embedding telemetry finalization failed (%s)",
+                    type(exc).__name__,
+                )
+            finally:
+                if tracked_slot_id is not None and shared_manager is not None:
+                    shared_manager.finish_slot_request(tracked_slot_id)
+                    tracked_slot_id = None
+                if acquired_queue is not None:
+                    await acquired_queue.release()
+
+        try:
             decision = await intent_handler.handle(intent)
         except Exception as exc:
+            await finish("failed", error_code="routing_error")
             return _openai_error(
                 f"embedding routing failed: {type(exc).__name__}: {exc}",
                 "routing_error",
                 500,
                 error_type="server_error",
+                headers=embed_headers(),
             )
         if decision.no_slot_available or not decision.selected_url:
+            await finish("failed", error_code="no_slot_available", decision=decision)
             return _openai_error(
                 "no healthy local embedding slot is available",
                 "no_slot_available",
                 503,
                 error_type="server_error",
                 extra={"routing": decision.model_dump()},
+                headers=embed_headers(),
             )
 
-        payload = {key: value for key, value in body.items() if key not in _ROUTING_ONLY_KEYS}
-        payload.pop("stream", None)
-        payload["model"] = _forward_model_for(body, "embedding", decision.selected_model) or "local"
-        url = decision.selected_url.rstrip("/") + "/embeddings"
-        headers = {
-            "x-a0-router-slot-id": decision.selected_slot_id or "",
-            "x-a0-router-model": decision.selected_model or "",
-            "x-a0-router-strategy": decision.routing_strategy,
-        }
+        coordinated_slot = (
+            decision.selected_slot_id
+            if shared_manager is not None
+            and decision.selected_slot_id in getattr(shared_manager, "_slot_configs", {})
+            else None
+        )
+        slot_epoch: Optional[int] = None
+        if coordinated_slot is not None:
+            operation = shared_manager.slot_operation_snapshot(coordinated_slot)
+            slot_epoch = int(operation["epoch"])
+            if operation["phase"] != "idle":
+                await finish("rejected", error_code="gpu_swap_in_progress", decision=decision)
+                return _openai_error(
+                    "The selected embedding slot is being changed; retry this request",
+                    "gpu_swap_in_progress",
+                    503,
+                    error_type="server_error",
+                    extra={"routing": decision.model_dump()},
+                    headers=embed_headers({"Retry-After": "5"}),
+                )
+
+        target_queue = admission_queues["local"]
         try:
+            admission = await target_queue.acquire(agent.priority)
+            acquired_queue = target_queue
+            store.update_request(
+                request_id,
+                status="admitted",
+                queued_ms=admission.queued_ms,
+                app_id=app_id,
+                requested_model=requested_model,
+                routing_strategy=decision.routing_strategy,
+                admission_lane=admission_lane,
+            )
+            store.record_queue_event(
+                request_id=request_id,
+                agent=agent,
+                event_type="admitted",
+                queue_depth=admission.queue_depth_at_admit,
+                active_count=admission.active_at_admit,
+                admission_lane=admission_lane,
+            )
+        except QueueFull as exc:
+            await finish("rejected", error_code="queue_full", decision=decision)
+            store.record_queue_event(
+                request_id=request_id,
+                agent=agent,
+                event_type="queue_full",
+                queue_depth=exc.queue_depth,
+                active_count=target_queue.snapshot()["active"],
+                admission_lane=admission_lane,
+            )
+            return _openai_error(
+                "admission lane 'local' is full",
+                "queue_full",
+                429,
+                error_type="server_error",
+                extra={
+                    "queue": {
+                        "admission_lane": admission_lane,
+                        "queue_depth": exc.queue_depth,
+                        "max_queue": exc.max_queue,
+                        "max_active": target_queue.max_active,
+                    }
+                },
+                headers=embed_headers(),
+            )
+        except asyncio.CancelledError:
+            await finish("failed", error_code="client_disconnected", decision=decision)
+            raise
+
+        try:
+            if coordinated_slot is not None:
+                lease_result = shared_manager.try_begin_slot_request(
+                    coordinated_slot, expected_epoch=slot_epoch
+                )
+                if lease_result != "ok":
+                    await finish("rejected", error_code=lease_result, decision=decision)
+                    return _openai_error(
+                        "The selected embedding slot is being changed; retry this request",
+                        lease_result,
+                        503,
+                        error_type="server_error",
+                        extra={"routing": decision.model_dump()},
+                        headers=embed_headers({"Retry-After": "5"}),
+                    )
+                tracked_slot_id = coordinated_slot
+
+            payload = {key: value for key, value in body.items() if key not in _ROUTING_ONLY_KEYS}
+            payload.pop("stream", None)
+            payload["model"] = _forward_model_for(body, "embedding", decision.selected_model) or "local"
+            url = decision.selected_url.rstrip("/") + "/embeddings"
+            headers = embed_headers({
+                "x-a0-router-slot-id": decision.selected_slot_id or "",
+                "x-a0-router-model": decision.selected_model or "",
+                "x-a0-router-strategy": decision.routing_strategy,
+            })
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     url,
@@ -2396,14 +2689,88 @@ def create_app(
                     headers={"Content-Type": "application/json"},
                     timeout=aiohttp.ClientTimeout(total=_FORWARD_TIMEOUT_SECONDS),
                 ) as response:
-                    data = await response.json(content_type=None)
+                    try:
+                        data = await response.json(content_type=None)
+                    except Exception:
+                        upstream_text = await response.text()
+                        await finish(
+                            "failed",
+                            error_code="upstream_invalid_json",
+                            slot_id=decision.selected_slot_id,
+                            model=decision.selected_model,
+                            decision=decision,
+                        )
+                        return _openai_error(
+                            "embedding slot response was not valid JSON",
+                            "upstream_invalid_json",
+                            502,
+                            error_type="server_error",
+                            extra={"upstream_status": response.status, "upstream_body": upstream_text[:1000]},
+                            headers=headers,
+                        )
+                    usage = _dict_or_empty(data.get("usage")) if isinstance(data, dict) else {}
+                    await finish(
+                        "completed" if response.status < 400 else "failed",
+                        error_code=None if response.status < 400 else "upstream_error",
+                        slot_id=decision.selected_slot_id,
+                        model=decision.selected_model,
+                        decision=decision,
+                        usage=usage,
+                    )
                     return JSONResponse(data, status_code=response.status, headers=headers)
+        except asyncio.CancelledError:
+            await finish(
+                "failed",
+                error_code="client_disconnected",
+                slot_id=decision.selected_slot_id,
+                model=decision.selected_model,
+                decision=decision,
+            )
+            raise
         except aiohttp.ClientError as exc:
+            await finish(
+                "failed",
+                error_code="upstream_unreachable",
+                slot_id=decision.selected_slot_id,
+                model=decision.selected_model,
+                decision=decision,
+            )
             return _openai_error(
                 f"could not reach embedding slot: {exc}",
                 "upstream_unreachable",
                 502,
                 error_type="server_error",
+                headers=embed_headers(),
+            )
+        except TimeoutError:
+            await finish(
+                "failed",
+                error_code="upstream_timeout",
+                slot_id=decision.selected_slot_id,
+                model=decision.selected_model,
+                decision=decision,
+            )
+            return _openai_error(
+                "embedding slot timed out",
+                "upstream_timeout",
+                504,
+                error_type="server_error",
+                headers=embed_headers(),
+            )
+        except Exception:
+            await finish(
+                "failed",
+                error_code="upstream_error",
+                slot_id=decision.selected_slot_id,
+                model=decision.selected_model,
+                decision=decision,
+            )
+            return _openai_error(
+                "embedding slot request failed",
+                "upstream_error",
+                502,
+                error_type="server_error",
+                headers=embed_headers(),
             )
 
     async def chat_completions(request: Request) -> Response:

@@ -28,3 +28,14 @@ def _hermetic_llama_process_scan(monkeypatch):
         "local_model_router.service.app.inspect_running_llama_models",
         lambda: {},
     )
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_state_paths(monkeypatch, tmp_path):
+    """Keep tests out of real host state directories and repo data/."""
+    from local_model_router.helpers import stats_tracker
+
+    monkeypatch.setenv("A0_FLEET_STATE_DB", str(tmp_path / "fleet_state.sqlite3"))
+    monkeypatch.setenv("A0_LMM_ROUTER_STATS_PATH", str(tmp_path / "failover_stats.json"))
+    monkeypatch.setattr(stats_tracker, "_stats", None)
+    monkeypatch.setattr(stats_tracker, "_stats_path", None)
