@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import hashlib
 import json
 import os
@@ -88,6 +89,8 @@ def default_home() -> Path:
 class SetupEngine:
     """Stateful setup coordinator; callers explicitly confirm every download."""
 
+    _EVENT_RETENTION = 200
+
     def __init__(self, *, home: str | Path | None = None, config_path: str | Path | None = None) -> None:
         self.home = Path(home or default_home()).expanduser().resolve(strict=False)
         self.runtime_dir = self.home / "runtime" / "llama.cpp"
@@ -115,7 +118,8 @@ class SetupEngine:
             )
             if path is not None
         ]
-        self._events: list[dict[str, Any]] = []
+        self._events: deque[dict[str, Any]] = deque(maxlen=self._EVENT_RETENTION)
+        self._next_event_id: int = 1
         self._cancel = threading.Event()
         self._lock = threading.Lock()
         self._apply_lock = threading.Lock()
@@ -131,9 +135,11 @@ class SetupEngine:
 
     def _emit(self, stage: str, status: str, detail: str = "", progress: float | None = None) -> None:
         with self._lock:
+            event_id = self._next_event_id
+            self._next_event_id += 1
             self._events.append(
                 {
-                    "id": len(self._events) + 1,
+                    "id": event_id,
                     "at": time.time(),
                     "stage": stage,
                     "status": status,
@@ -141,12 +147,55 @@ class SetupEngine:
                     "progress": progress,
                 }
             )
-            self._events = self._events[-200:]
 
     def events(self, after: int = 0) -> dict[str, Any]:
+        cursor_in = max(0, int(after))
         with self._lock:
-            rows = [event for event in self._events if int(event["id"]) > after]
-        return {"events": rows, "cancelled": self._cancel.is_set()}
+            latest_id = self._next_event_id - 1
+            retained = list(self._events)
+            cancelled = self._cancel.is_set()
+        oldest_id = int(retained[0]["id"]) if retained else None
+        if latest_id == 0 or oldest_id is None:
+            resync_required = cursor_in > 0
+            return {
+                "events": [],
+                "cancelled": cancelled,
+                "history": "lost" if resync_required else "empty",
+                "resync_required": resync_required,
+                "cursor": 0,
+                "oldest_id": None,
+                "latest_id": 0,
+            }
+        if cursor_in == 0:
+            return {
+                "events": retained,
+                "cancelled": cancelled,
+                "history": "retained",
+                "resync_required": False,
+                "cursor": latest_id,
+                "oldest_id": oldest_id,
+                "latest_id": latest_id,
+            }
+        if cursor_in > latest_id or cursor_in < oldest_id - 1:
+            return {
+                "events": retained,
+                "cancelled": cancelled,
+                "history": "lost",
+                "resync_required": True,
+                "cursor": latest_id,
+                "oldest_id": oldest_id,
+                "latest_id": latest_id,
+            }
+        rows = [event for event in retained if int(event["id"]) > cursor_in]
+        return {
+            "events": rows,
+            "cancelled": cancelled,
+            "history": "retained",
+            "resync_required": False,
+            "cursor": latest_id,
+            "oldest_id": oldest_id,
+            "latest_id": latest_id,
+        }
 
     def cancel(self) -> None:
         self._cancel.set()

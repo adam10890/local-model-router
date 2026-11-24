@@ -1172,3 +1172,69 @@ def test_release_lookup_never_sends_an_ambient_github_token(monkeypatch):
 
     assert not any(key.lower() == "authorization" for key in seen)
     assert "an-operators-personal-token" not in json.dumps(seen)
+
+
+def test_setup_events_keep_monotonic_ids_past_retention_rollover(tmp_path):
+    engine = _engine(tmp_path)
+    for idx in range(1, 206):
+        engine._emit("download", "running", f"step-{idx}", progress=min(0.99, idx / 210))
+
+    full = engine.events(0)
+    assert full["history"] == "retained"
+    assert full["resync_required"] is False
+    assert full["oldest_id"] == 6
+    assert full["latest_id"] == 205
+    assert full["cursor"] == 205
+    assert len(full["events"]) == 200
+    assert full["events"][0]["id"] == 6
+    assert full["events"][-1]["id"] == 205
+
+    boundary = engine.events(5)
+    assert boundary["history"] == "retained"
+    assert boundary["resync_required"] is False
+    assert [ev["id"] for ev in boundary["events"]][:3] == [6, 7, 8]
+    assert len(boundary["events"]) == 200
+
+    gap = engine.events(4)
+    assert gap["history"] == "lost"
+    assert gap["resync_required"] is True
+    assert gap["cursor"] == 205
+    assert len(gap["events"]) == 200
+
+    engine._emit("download", "complete", "step-206", progress=1.0)
+    incremental = engine.events(205)
+    assert incremental["history"] == "retained"
+    assert incremental["resync_required"] is False
+    assert incremental["cursor"] == 206
+    assert [ev["id"] for ev in incremental["events"]] == [206]
+    assert incremental["events"][0]["detail"] == "step-206"
+
+
+def test_setup_events_distinguish_empty_lost_and_ahead_cursors(tmp_path):
+    engine = _engine(tmp_path)
+
+    empty = engine.events(0)
+    assert empty == {
+        "events": [],
+        "cancelled": False,
+        "history": "empty",
+        "resync_required": False,
+        "cursor": 0,
+        "oldest_id": None,
+        "latest_id": 0,
+    }
+
+    stale = engine.events(5)
+    assert stale["history"] == "lost"
+    assert stale["resync_required"] is True
+    assert stale["events"] == []
+    assert stale["cursor"] == 0
+
+    engine._emit("config", "running", "s1", progress=0.2)
+    engine._emit("config", "complete", "s2", progress=1.0)
+    ahead = engine.events(50)
+    assert ahead["history"] == "lost"
+    assert ahead["resync_required"] is True
+    assert ahead["cursor"] == 2
+    assert ahead["latest_id"] == 2
+    assert [ev["id"] for ev in ahead["events"]] == [1, 2]

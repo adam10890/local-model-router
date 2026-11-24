@@ -68,8 +68,8 @@ invisible to the routing decision.
 ### Q3 — Herdr-inspired reliability slices
 
 Sixty pinned source observations grouped into twenty-four bounded packages.
-The recommended first slice is P01, the counter regression, then P03 honest
-readiness.
+`P01` (monotonic setup event cursors and resync) shipped in `0.16.2`; the
+recommended next slice is `P03` (honest readiness).
 
 - **Detail:** [`herdr-development.md`](herdr-development.md) (R01–R60),
   [`herdr-todo.md`](herdr-todo.md) (P01–P24 and their evidence),
