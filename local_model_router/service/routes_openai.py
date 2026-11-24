@@ -21,6 +21,7 @@ from local_model_router.upstreams.registry import UpstreamConfig, match_upstream
 from .context import (
     _FORWARD_TIMEOUT_SECONDS,
     _ROUTING_ONLY_KEYS,
+    _STREAM_TIMEOUT,
     SERVICE_LOGGER,
     RouterContext,
     _ManagedStreamingResponse,
@@ -48,7 +49,7 @@ from .fleet_manager import FleetQueue, QueueFull, identity_from_headers
 from .hermes_model_watcher import public_hermes_model_ids
 from .models_listing import list_models
 from .prompt_cache import cache_key as prompt_cache_key, is_cacheable as prompt_is_cacheable
-from .sse_usage import SseUsageExtractor
+from .sse_usage import SseUsageExtractor, UsageOnlyEventFilter, request_stream_usage
 
 
 def _evaluate_upstream_disclosure(ctx: RouterContext, upstream: UpstreamConfig, body: Dict[str, Any]):
@@ -119,6 +120,7 @@ async def forward_to_upstream(
 ) -> Response:
     wants_stream = body.get("stream") is True
     payload = _forward_payload(body, bare_model, stream=wants_stream)
+    hide_usage = request_stream_usage(payload)
     url = upstream.base_url + "/chat/completions"
     out_headers = {
         **(response_headers or {}),
@@ -155,7 +157,7 @@ async def forward_to_upstream(
             )
     try:
         if wants_stream:
-            stream_timeout = aiohttp.ClientTimeout(total=_FORWARD_TIMEOUT_SECONDS)
+            stream_timeout = _STREAM_TIMEOUT
             session, should_close_session = await ctx.http_client.open_stream_session(
                 timeout=stream_timeout
             )
@@ -226,10 +228,18 @@ async def forward_to_upstream(
                     if stream_fn is _stream_upstream_response
                     else stream_fn(resp, session, stream_failed)
                 )
+                usage_filter = UsageOnlyEventFilter() if hide_usage else None
                 try:
                     async for chunk in stream_iter:
                         usage_extractor.feed(chunk)
-                        yield chunk
+                        if usage_filter is not None:
+                            chunk = usage_filter.feed(chunk)
+                        if chunk:
+                            yield chunk
+                    if usage_filter is not None:
+                        rest = usage_filter.flush()
+                        if rest:
+                            yield rest
                 except asyncio.CancelledError:
                     await finalize_once("failed", error_code="client_disconnected")
                     raise
@@ -1439,8 +1449,7 @@ async def handle_chat_completions(ctx: RouterContext, request: Request) -> Respo
             stream=wants_stream,
             default_max_tokens=default_max_tokens,
         )
-        if wants_stream and "stream_options" not in payload:
-            payload["stream_options"] = {"include_usage": True}
+        hide_usage = request_stream_usage(payload)
         selected_context = resolve_app_hook("_context_for_slot", _context_for_slot)(
             ctx.observer.get_slots(),
             decision.selected_slot_id,
@@ -1524,7 +1533,7 @@ async def handle_chat_completions(ctx: RouterContext, request: Request) -> Respo
 
     try:
         if wants_stream:
-            stream_timeout = aiohttp.ClientTimeout(total=_FORWARD_TIMEOUT_SECONDS)
+            stream_timeout = _STREAM_TIMEOUT
             session, should_close_session = await ctx.http_client.open_stream_session(
                 timeout=stream_timeout
             )
@@ -1617,10 +1626,18 @@ async def handle_chat_completions(ctx: RouterContext, request: Request) -> Respo
                     if stream_fn is _stream_upstream_response
                     else stream_fn(resp, session, stream_failed)
                 )
+                usage_filter = UsageOnlyEventFilter() if hide_usage else None
                 try:
                     async for chunk in stream_iter:
                         usage_extractor.feed(chunk)
-                        yield chunk
+                        if usage_filter is not None:
+                            chunk = usage_filter.feed(chunk)
+                        if chunk:
+                            yield chunk
+                    if usage_filter is not None:
+                        rest = usage_filter.flush()
+                        if rest:
+                            yield rest
                 except asyncio.CancelledError:
                     await finalize_local_stream("failed", error_code="client_disconnected")
                     raise
