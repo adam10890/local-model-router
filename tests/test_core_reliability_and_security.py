@@ -527,10 +527,27 @@ def test_security_headers_health_redaction_401_envelope_and_csrf_guard(tmp_path,
 
     ui = c_open.get("/ui")
     assert ui.status_code == 200
-    assert "Content-Security-Policy" in ui.headers
+    csp = ui.headers["Content-Security-Policy"]
+    assert "script-src 'self';" in csp
+    assert "script-src 'self' 'unsafe-inline'" not in csp
+    assert "style-src 'self' 'unsafe-inline'" in csp
     assert ui.headers["X-Content-Type-Options"] == "nosniff"
     assert ui.headers["X-Frame-Options"] == "DENY"
     assert ui.headers["Referrer-Policy"] == "no-referrer"
+
+    for asset, prefix in (("styles.css", "text/css"), ("i18n.js", "application/javascript"), ("app.js", "application/javascript")):
+        asset_resp = c_open.get(f"/ui/assets/{asset}")
+        assert asset_resp.status_code == 200
+        assert asset_resp.headers["content-type"].startswith(prefix)
+        assert asset_resp.headers["X-Content-Type-Options"] == "nosniff"
+        assert asset_resp.headers["Cache-Control"] == "no-cache"
+
+    assert c_open.get("/ui/assets/missing.js").status_code == 404
+    assert c_open.get("/ui/assets/..%2Findex.html").status_code == 404
+    assert c_open.get("/ui/assets/foo.py").status_code == 404
+    app_js = c_open.get("/ui/assets/app.js").text
+    assert 'sessionStorage.setItem("imperium.apiKey"' in app_js
+    assert 'localStorage.setItem("imperium.apiKey"' not in app_js
 
     csrf_evil = c_open.post(
         "/fleet/agents/register",

@@ -5,6 +5,7 @@ import asyncio
 import inspect
 import json
 import logging
+import math
 import os
 import socket
 import sqlite3
@@ -21,6 +22,19 @@ logger = logging.getLogger("uvicorn.error").getChild("imperium.hermes_gpu")
 
 STUDIO_LEASE_REASON = "studio_lease"
 STUDIO_LEASE_RETRY_AFTER = 120
+_SWAP_WAIT_ENV = "IMPERIUM_SWAP_WAIT_SECONDS"
+_SWAP_WAIT_LEGACY_ENV = "A0_LMM_ROUTER_SWAP_WAIT_SECONDS"
+_MAX_SWAP_WAIT_SECONDS = 60.0
+
+
+def _clamp_swap_wait(raw: Any) -> float:
+    try:
+        parsed = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(parsed):
+        return 0.0
+    return max(0.0, min(_MAX_SWAP_WAIT_SECONDS, parsed))
 
 _HERMES_TO_PROFILE = {
     "ornith": "ornith",
@@ -168,6 +182,7 @@ class HermesGpuConfig:
     max_start_attempts: int = 3
     retry_backoff_seconds: tuple[float, ...] = (15.0, 60.0)
     default_profile: str = "ornith"
+    swap_wait_seconds: float = 0.0
 
     @property
     def state_path(self) -> Path:
@@ -231,6 +246,10 @@ def load_hermes_gpu_config(path: Path, fleet_config_path: str | os.PathLike[str]
     default_profile = str(data.get("default_profile") or "ornith")
     if default_profile not in profiles:
         default_profile = next(iter(profiles))
+    env_wait = os.environ.get(_SWAP_WAIT_ENV)
+    if env_wait is None:
+        env_wait = os.environ.get(_SWAP_WAIT_LEGACY_ENV)
+    raw_wait = env_wait if (env_wait is not None and env_wait.strip() != "") else data.get("swap_wait_seconds", 0.0)
     return HermesGpuConfig(
         slot_id=str(data.get("slot_id") or "slot_chat"),
         poll_seconds=number("poll_seconds", 3.0, 1.0),
@@ -240,6 +259,7 @@ def load_hermes_gpu_config(path: Path, fleet_config_path: str | os.PathLike[str]
         max_start_attempts=integer("max_start_attempts", 3, 1, 3),
         retry_backoff_seconds=backoff,
         default_profile=default_profile,
+        swap_wait_seconds=_clamp_swap_wait(raw_wait),
         hermes_home=home,
         profiles={str(key): dict(value) for key, value in profiles.items() if isinstance(value, dict)},
         path=path,
@@ -346,6 +366,7 @@ class HermesModelWatcher:
     _session_warning: Optional[str] = field(default=None, init=False, repr=False)
     _profile_warning: Optional[str] = field(default=None, init=False, repr=False)
     _state_warning: Optional[str] = field(default=None, init=False, repr=False)
+    _waiters: list[asyncio.Event] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self) -> None:
         state = _read_state(self.cfg.state_path)
@@ -361,6 +382,10 @@ class HermesModelWatcher:
     @property
     def swapping(self) -> bool:
         return self._task is not None and not self._task.done()
+
+    def _notify_waiters(self) -> None:
+        for event in list(self._waiters):
+            event.set()
 
     def _set_phase(self, phase: str, *, code: Optional[str] = None, message: Optional[str] = None) -> None:
         if phase != self.phase:
@@ -381,6 +406,7 @@ class HermesModelWatcher:
             self.failure_code = code
         if message is not None:
             self.error = message
+        self._notify_waiters()
 
     def snapshot(self) -> dict[str, Any]:
         retry_after = None
@@ -427,6 +453,64 @@ class HermesModelWatcher:
                 1, self.snapshot()["retry_after_seconds"] or 5
             )
         return None
+
+    async def wait_while_swapping(
+        self,
+        max_wait_seconds: Optional[float] = None,
+    ) -> tuple[Optional[tuple[str, int]], int]:
+        """Wait up to the configured budget only for active GPU swaps (never backoff/leases)."""
+        if max_wait_seconds is not None:
+            budget = _clamp_swap_wait(max_wait_seconds)
+        else:
+            env_wait = os.environ.get(_SWAP_WAIT_ENV)
+            if env_wait is None:
+                env_wait = os.environ.get(_SWAP_WAIT_LEGACY_ENV)
+            if env_wait is not None and env_wait.strip() != "":
+                budget = _clamp_swap_wait(env_wait)
+            else:
+                budget = _clamp_swap_wait(getattr(self.cfg, "swap_wait_seconds", 0.0))
+
+        retry = self.retry_response()
+        if (
+            retry is None
+            or budget <= 0
+            or retry[0] != "gpu_swap_in_progress"
+            or self.phase == "backoff"
+        ):
+            return retry, 0
+
+        started = time.monotonic()
+        deadline = started + budget
+        waited = False
+        while True:
+            event = asyncio.Event()
+            self._waiters.append(event)
+            try:
+                retry = self.retry_response()
+                if (
+                    retry is None
+                    or retry[0] != "gpu_swap_in_progress"
+                    or self.phase == "backoff"
+                ):
+                    elapsed = int((time.monotonic() - started) * 1000)
+                    if waited and retry is None:
+                        elapsed = max(1, elapsed)
+                    return retry, max(0, elapsed)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return retry, max(0, int((time.monotonic() - started) * 1000))
+                waited = True
+                try:
+                    await asyncio.wait_for(event.wait(), timeout=remaining)
+                except asyncio.TimeoutError:
+                    current = self.retry_response()
+                    elapsed = int((time.monotonic() - started) * 1000)
+                    if current is None:
+                        elapsed = max(1, elapsed)
+                    return current, max(0, elapsed)
+            finally:
+                if event in self._waiters:
+                    self._waiters.remove(event)
 
     def _manager(self):
         if self.manager_factory is not None:
@@ -645,6 +729,7 @@ class HermesModelWatcher:
         action = decide_swap(self.desired, self.loaded, self.swapping)
         if action == "swap" and self.desired and self._blocked_target != self.desired:
             self._task = asyncio.create_task(self._swap_loop(self.desired))
+            self._task.add_done_callback(lambda _t: self._notify_waiters())
         elif action == "swap" and self.desired == self._blocked_target:
             action = "blocked"
         elif action == "idle":
@@ -823,6 +908,7 @@ class HermesModelWatcher:
                 manager.set_auto_restart_suppressed(self.cfg.slot_id, True)
             manager.finish_slot_operation(self.cfg.slot_id)
             self._operation_started = None
+            self._notify_waiters()
 
     async def _restore_original(
         self,

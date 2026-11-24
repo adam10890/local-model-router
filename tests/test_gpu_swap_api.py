@@ -980,3 +980,152 @@ def test_prepare_shutdown_succeeds_when_fleet_control_is_disabled(tmp_path, monk
 
     assert response.status_code == 200
     assert response.json() == {"ok": True, "action": "prepare_shutdown", "results": {}}
+
+
+def test_hermes_swap_wait_config_reads_env_and_clamps_to_sixty_seconds(tmp_path, monkeypatch):
+    from pathlib import Path
+    from local_model_router.service.hermes_model_watcher import load_hermes_gpu_config
+
+    profiles = Path(
+        _write(
+            tmp_path / "hermes_gpu_profiles.yaml",
+            """
+            slot_id: slot_chat
+            swap_wait_seconds: 3.5
+            profiles:
+              ornith:
+                slot_model: qwen
+            """,
+        )
+    )
+    monkeypatch.delenv("IMPERIUM_SWAP_WAIT_SECONDS", raising=False)
+    monkeypatch.delenv("A0_LMM_ROUTER_SWAP_WAIT_SECONDS", raising=False)
+    assert load_hermes_gpu_config(profiles, tmp_path / "llama.yaml").swap_wait_seconds == 3.5
+
+    monkeypatch.setenv("A0_LMM_ROUTER_SWAP_WAIT_SECONDS", "12")
+    assert load_hermes_gpu_config(profiles, tmp_path / "llama.yaml").swap_wait_seconds == 12.0
+
+    monkeypatch.setenv("IMPERIUM_SWAP_WAIT_SECONDS", "120")
+    assert load_hermes_gpu_config(profiles, tmp_path / "llama.yaml").swap_wait_seconds == 60.0
+
+
+def test_hermes_swap_wait_fast_fails_for_non_waitable_states(tmp_path, monkeypatch):
+    _app_obj, manager, watcher = _app(tmp_path, monkeypatch)
+    monkeypatch.setenv("IMPERIUM_SWAP_WAIT_SECONDS", "5")
+
+    async def finish_now():
+        await asyncio.sleep(5)
+
+    async def check_fast_fail():
+        # 1. Manual stop / Studio lease -> 0ms immediate return
+        manager.set_manual_stop("slot_chat", True)
+        manager.set_lease_reason("slot_chat", "studio_lease")
+        retry, waited = await watcher.wait_while_swapping(max_wait_seconds=5.0)
+        assert retry[0] == "gpu_leased_by_studio"
+        assert waited == 0
+
+        manager.set_lease_reason("slot_chat", None)
+        retry, waited = await watcher.wait_while_swapping(max_wait_seconds=5.0)
+        assert retry == ("gpu_slot_stopped", 0)
+        assert waited == 0
+        manager.set_manual_stop("slot_chat", False)
+
+        # 2. Permanent blocked target -> 0ms immediate return
+        watcher.desired = "qwen38_27b"
+        watcher.loaded = "ornith"
+        watcher._blocked_target = "qwen38_27b"
+        retry, waited = await watcher.wait_while_swapping(max_wait_seconds=5.0)
+        assert retry == ("gpu_swap_failed", 0)
+        assert waited == 0
+        watcher._blocked_target = None
+
+        # 3. Backoff phase during active swap -> 0ms immediate return
+        watcher.phase = "backoff"
+        watcher._task = asyncio.create_task(finish_now())
+        try:
+            retry, waited = await watcher.wait_while_swapping(max_wait_seconds=5.0)
+            assert retry[0] == "gpu_swap_in_progress"
+            assert waited == 0
+        finally:
+            watcher._task.cancel()
+            try:
+                await watcher._task
+            except asyncio.CancelledError:
+                pass
+            watcher._task = None
+            watcher.phase = "idle"
+
+    asyncio.run(check_fast_fail())
+
+
+def test_hermes_opt_in_swap_wait_resolves_and_emits_wait_header(tmp_path, monkeypatch):
+    app, _manager, watcher = _app(tmp_path, monkeypatch)
+    _patch_forward(monkeypatch)
+    monkeypatch.setenv("IMPERIUM_SWAP_WAIT_SECONDS", "2")
+
+    async def scenario():
+        async def fake_swap():
+            await asyncio.sleep(0.05)
+            watcher.loaded = "ornith"
+            watcher._set_phase("idle")
+
+        watcher.desired = "ornith"
+        watcher.loaded = "qwen38_27b"
+        watcher.phase = "loading"
+        task = asyncio.create_task(fake_swap())
+        watcher._task = task
+        task.add_done_callback(lambda _t: watcher._notify_waiters())
+
+        async def fake_refresh(*, probe_loaded=True):
+            return "swap" if watcher.swapping else "idle"
+
+        monkeypatch.setattr(watcher, "refresh_desired", fake_refresh)
+        status, body, headers = await _asgi_post_json(
+            app,
+            "/harnesses/hermes/v1/chat/completions",
+            {"model": "model-chat", "messages": [{"role": "user", "content": "hi"}]},
+        )
+        await task
+        assert status == 200
+        assert body["id"] == "chatcmpl-swap"
+        assert int(headers["x-a0-router-swap-wait-ms"]) >= 1
+
+    asyncio.run(scenario())
+
+
+def test_hermes_opt_in_swap_wait_timeout_returns_503(tmp_path, monkeypatch):
+    app, _manager, watcher = _app(tmp_path, monkeypatch)
+    _patch_forward(monkeypatch)
+    monkeypatch.setenv("IMPERIUM_SWAP_WAIT_SECONDS", "0.05")
+
+    async def scenario():
+        async def stalled_swap():
+            await asyncio.sleep(2.0)
+
+        watcher.desired = "qwen38_27b"
+        watcher.loaded = "ornith"
+        watcher.phase = "loading"
+        watcher._task = asyncio.create_task(stalled_swap())
+
+        async def fake_refresh(*, probe_loaded=True):
+            return "swap"
+
+        monkeypatch.setattr(watcher, "refresh_desired", fake_refresh)
+        try:
+            status, body, headers = await _asgi_post_json(
+                app,
+                "/harnesses/hermes/v1/chat/completions",
+                {"model": "model-chat", "messages": [{"role": "user", "content": "hi"}]},
+            )
+            assert status == 503
+            assert body["error"]["code"] == "gpu_swap_in_progress"
+            assert "x-a0-router-swap-wait-ms" not in headers
+        finally:
+            watcher._task.cancel()
+            try:
+                await watcher._task
+            except asyncio.CancelledError:
+                pass
+            watcher._task = None
+
+    asyncio.run(scenario())

@@ -21,10 +21,25 @@ def _client(tmp_path, monkeypatch):
     return TestClient(app)
 
 
-def test_dashboard_ships_en_he_and_light_dark_theme_hooks(tmp_path, monkeypatch):
-    html = _client(tmp_path, monkeypatch).get("/ui").text
+def _dashboard_bundle(client) -> str:
+    parts = [client.get("/ui").text]
+    for asset in ("styles.css", "i18n.js", "app.js"):
+        resp = client.get(f"/ui/assets/{asset}")
+        assert resp.status_code == 200, asset
+        parts.append(resp.text)
+    return "\n".join(parts)
 
-    assert 'lang="en"' in html
+
+def test_dashboard_ships_en_he_and_light_dark_theme_hooks(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    shell = client.get("/ui").text
+    html = _dashboard_bundle(client)
+
+    assert '<script defer src="/ui/assets/i18n.js"></script>' in shell
+    assert '<script defer src="/ui/assets/app.js"></script>' in shell
+    assert "<style>" not in shell
+    assert "(() => {" not in shell
+    assert 'lang="en"' in shell
     assert 'data-theme="light"' in html
     assert 'html[data-theme="dark"]' in html
     assert 'id="theme-control"' in html

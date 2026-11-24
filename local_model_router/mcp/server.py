@@ -17,6 +17,7 @@ Config override via llama_cpp_servers.yaml:
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 import hmac
 import logging
 import os
@@ -25,8 +26,10 @@ from pathlib import Path
 from mcp.server.auth.provider import AccessToken  # noqa: E402
 from mcp.server.auth.settings import AuthSettings  # noqa: E402
 from mcp.server.fastmcp import FastMCP  # noqa: E402
+from local_model_router.mcp import router_bridge  # noqa: E402
 from local_model_router.mcp.tools import register_tools  # noqa: E402
 from local_model_router.mcp.resources import register_resources  # noqa: E402
+from local_model_router.service.http_client import SharedHttpClient  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -120,6 +123,16 @@ def create_app(
 ) -> FastMCP:
     # host/port are passed to FastMCP at construction time; mcp>=1.10 dropped
     # them from FastMCP.run() kwargs and reads them from settings instead.
+    @asynccontextmanager
+    async def _mcp_lifespan(_server: FastMCP):
+        pool = SharedHttpClient()
+        router_bridge.set_shared_http_client(pool)
+        try:
+            yield {}
+        finally:
+            router_bridge.set_shared_http_client(None)
+            await pool.close()
+
     token_verifier = StaticFileTokenVerifier() if enable_auth else None
     mcp = FastMCP(
         "lmm-router",
@@ -132,6 +145,7 @@ def create_app(
         port=port,
         auth=_auth_settings(host, port) if enable_auth else None,
         token_verifier=token_verifier,
+        lifespan=_mcp_lifespan,
     )
     register_tools(mcp, allow_mutating_tools=allow_mutating_tools)
     register_resources(mcp)
