@@ -65,6 +65,13 @@ logger = SERVICE_LOGGER
 _SERVICE_NAME = "lmm-router-observer"
 _COMPUTE_CACHE_TTL_SECONDS = 5.0
 _FORWARD_TIMEOUT_SECONDS = 120
+# A stream is bounded by silence between reads, not total length: a long
+# local generation must not be cut at the forward timeout.
+_STREAM_TIMEOUT = aiohttp.ClientTimeout(
+    total=None,
+    sock_connect=_FORWARD_TIMEOUT_SECONDS,
+    sock_read=_FORWARD_TIMEOUT_SECONDS,
+)
 _API_KEY_ENV = "A0_LMM_ROUTER_API_KEY"
 
 

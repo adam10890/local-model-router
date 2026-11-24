@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Streams longer than 120 seconds are no longer cut mid-generation: streaming
+  forwards are bounded by `sock_read` silence (`_STREAM_TIMEOUT`) instead of a
+  `total` timeout.
+- The usage-only SSE chunk (`"choices": []`) that the router requests for
+  token accounting is now hidden from clients that did not ask for
+  `stream_options.include_usage`, so `choices[0]` parsers no longer break.
+- Streaming forwards to declared upstreams now request
+  `stream_options.include_usage` too, so streamed cloud spend reaches
+  `usage_ledger` and the compute budget instead of being skipped.
+
 ### Added
 
 - Optional `harness_pin_drift` configuration alert in `GET /ui/status`
