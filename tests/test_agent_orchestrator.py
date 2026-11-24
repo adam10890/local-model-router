@@ -398,8 +398,8 @@ def test_pending_ticket_cannot_be_claimed(tmp_path, monkeypatch):
 
 
 def test_dashboard_hides_legacy_orchestration_surface():
-    from local_model_router.dashboard import dashboard_html
+    from local_model_router.dashboard import dashboard_bundle_text
 
-    html = dashboard_html()
+    html = dashboard_bundle_text()
     assert 'request("/orchestrator/' not in html
     assert '["advanced/orchestration"' not in html

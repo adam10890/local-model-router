@@ -329,9 +329,17 @@ def test_mcp_resources_delegate_to_http_bridge(monkeypatch):
     async def hardware_profile():
         return {"gpus": []}
 
+    async def harnesses_list():
+        return {"harnesses": [{"harness_id": "hermes", "connections": [{"name": "default", "model": "ornith"}]}]}
+
+    async def harness_detail(harness_id: str):
+        return {"harness_id": harness_id, "connections": [{"name": "default", "model": "ornith"}]}
+
     monkeypatch.setattr(resources.bridge, "fleet_status", fleet_status)
     monkeypatch.setattr(resources.bridge, "slot_configs", slot_configs)
     monkeypatch.setattr(resources.bridge, "hardware_profile", hardware_profile)
+    monkeypatch.setattr(resources.bridge, "harnesses_list", harnesses_list)
+    monkeypatch.setattr(resources.bridge, "harness_detail", harness_detail)
     registrar = _Registrar()
     resources.register_resources(registrar)
 
@@ -340,6 +348,10 @@ def test_mcp_resources_delegate_to_http_bridge(monkeypatch):
     assert "not found" in asyncio.run(registrar.resources["models://{slot_id}/info"]("missing"))
     assert '"gpus": []' in asyncio.run(registrar.resources["models://hardware/profile"]())
     assert '"id": "chat"' in asyncio.run(registrar.resources["models://slots/list"]())
+    assert '"hermes"' in asyncio.run(registrar.resources["harnesses://list"]())
+    assert '"harness_id": "hermes"' in asyncio.run(
+        registrar.resources["harnesses://{harness_id}/setup"]("hermes")
+    )
 
 
 def test_bridge_has_no_backend_manager_path():
@@ -347,6 +359,43 @@ def test_bridge_has_no_backend_manager_path():
     assert "BackendManager" not in source
     assert "llama_cpp_manager" not in source
     assert not hasattr(router_bridge, "_get_manager")
+
+
+def test_bridge_harnesses_helpers_call_router_endpoints(monkeypatch):
+    seen: list[tuple[str, str]] = []
+
+    class FakeResponse:
+        status = 200
+
+        async def json(self, content_type=None):
+            return {"harnesses": []} if seen[-1][1] == "/harnesses" else {"harness_id": "hermes"}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+    class FakeSession:
+        def request(self, method, url, **_kwargs):
+            seen.append((method, url.split("9000", 1)[-1]))
+            return FakeResponse()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+    monkeypatch.setenv("A0_FLEET_MANAGER_BASE_URL", "http://127.0.0.1:9000")
+    monkeypatch.setattr(router_bridge.aiohttp, "ClientSession", lambda: FakeSession())
+
+    listed = asyncio.run(router_bridge.harnesses_list())
+    detail = asyncio.run(router_bridge.harness_detail("hermes/default"))
+
+    assert listed == {"harnesses": []}
+    assert detail == {"harness_id": "hermes"}
+    assert seen == [("GET", "/harnesses"), ("GET", "/harnesses/hermes%2Fdefault")]
 
 
 def test_core_app_builds_when_mcp_extra_is_unavailable(tmp_path):

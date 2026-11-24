@@ -137,32 +137,19 @@ until one of them is picked up and earns its own.
 - Per-app API keys and rate limits — extend `apps/profiles.py`
   (`conf/apps.yaml`) with per-`X-App-Id` credentials and budgets; today a
   single global bearer key is the only auth.
-- Incremental split of `service/app.py` into api / routing / telemetry seams,
-  tests covering each seam first, never big-bang.
 - Actionable cookbook — wire `GET /cookbook` output to the opt-in fleet
   control so a recommendation can be applied in one step.
 - Cross-provider fallback breadth — per-role upstream preferences over the
   shipped upstream fallback lane.
 - Whiteboard code extraction in the dashboard chat surface.
-- Pin drift after a model swap. Observed 2026-11-22: after the model behind
-  GPU profile `ornith` was replaced, Hermes kept working (its pin follows the
-  watcher in process) while Agent Zero's static pin `ornith` answered
-  `503 harness_model_unavailable`, and `GET /ui/status` still reported
-  `overall: ready` with no blocking or optional issues. The failure is already
-  visible as `model_ready: false` in `GET /harnesses`. Two directions, neither
-  decided: show a pinned-but-unservable harness in the alert center, and/or
-  let a harness name a GPU profile or role instead of a model id. The second
-  touches G3 ("a pinned harness never silently changes its model") and is the
-  founder's call. A slot-id pin (`slot_chat`) already gives the second today
-  and is what this machine's Agent Zero uses since 2026-11-22. Still open: the
-  alert-center half, and the pin API accepting role aliases the request path
-  does not resolve.
-- Agent-readable harness setup. `GET /harnesses` already carries a
-  per-harness `setup` manifest, but the MCP surface registers only `models://`
-  resources. Expose the manifests, and the connect command, as MCP resources
-  so an agent can read how to connect a client without scraping `docs/`.
-  Idea from Spynel's offline, versioned `spynel docs` (stable topic ids, no
-  live values in static text).
+- GPU-profile or role pins after a model swap. Observed 2026-11-22: after the
+  model behind GPU profile `ornith` was replaced, Agent Zero's static pin
+  `ornith` answered `503 harness_model_unavailable`. Showing pinned-but-unservable
+  harnesses in the alert center shipped in v0.16.0 (`harness_pin_drift` in
+  `GET /ui/status`). Still open: whether the pin API may resolve a GPU profile
+  or role alias (touches G3 "a pinned harness never silently changes its model"
+  and is the founder's call; slot-id pin `slot_chat` already covers this
+  today).
 
 ### Q7 — Hermes availability during Studio work
 
@@ -246,10 +233,39 @@ entry. Listed so `scripts/branch_guard.py --queue` can see the slug.
 - `github-governance-and-beta-evidence` — fix ADR index formatting, add GitHub
   governance/CI quality gates, refresh beta evidence, and clean historical
   `a0_lmm_router` plugin references.
+- `service-modularization` — extract pooled `SharedHttpClient`, split
+  `service/app.py` into focused route modules (`context.py`, `routes_*.py`),
+  and gate legacy `/orchestrator/*` behind `IMPERIUM_ENABLE_LEGACY_ORCHESTRATOR`
+  with an explicit `Sunset` header (Proposed ADR-0020).
+- `dashboard-modular-assets` — split `dashboard/index.html` into zero-build
+  static CSS/JS assets at `/ui/assets/{name}`, tighten `/ui` CSP to
+  `script-src 'self'`, and move stored browser API keys to `sessionStorage`.
+- `streaming-usage-and-swap-wait` — record SSE streaming token usage into
+  `FleetStore` and `usage_ledger`, fix pooled stream close guards, and add
+  opt-in bounded request wait on `gpu_swap_in_progress` (Proposed ADR-0021).
+- `pin-drift-openapi-mcp-harnesses` — add optional `harness_pin_drift`
+  readiness alert in `GET /ui/status`, expose MCP `harnesses://list` and
+  `harnesses://{harness_id}/setup` resources, serve OpenAPI `3.1.0` at
+  protected `GET /openapi.json`, and add HTTP contract tests.
 
 ## Shipped
 
 Newest first. An entry here is traceable to the version that carries it.
+
+- **Pin-drift alert, MCP harness resources, and OpenAPI 3.1.0 schema** (0.16.0) —
+  optional `harness_pin_drift` alert in `GET /ui/status`, read-only MCP
+  `harnesses://list` and `harnesses://{harness_id}/setup` resources, and
+  protected `GET /openapi.json` schema generation (`service/openapi_spec.py`).
+- **SSE streaming usage accounting and opt-in bounded Hermes swap wait** (0.15.0,
+  Proposed ADR-0021) — `SseUsageExtractor` (`service/sse_usage.py`) for local
+  and upstream SSE streams plus bounded `swap_wait_seconds` /
+  `IMPERIUM_SWAP_WAIT_SECONDS`.
+- **Service route modularization and static dashboard assets** (0.14.3–0.14.4,
+  Proposed ADR-0020) — incremental split of `service/app.py` into
+  `context.py`, `http_client.py`, and `routes_*.py`; opt-in legacy
+  `/orchestrator/*` gate with `Sunset` header; static CSS/JS at
+  `/ui/assets/{name}`, `script-src 'self'` CSP, and `sessionStorage` key
+  storage.
 
 - **Structured-output checking** (0.14.0) — a reply to a `response_format`
   request is parsed before it is returned or cached; observe by default,

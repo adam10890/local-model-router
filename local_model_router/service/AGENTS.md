@@ -2,16 +2,33 @@
 
 ## Purpose
 
-The HTTP surface: Starlette app (`app.py`), dry-run routing intent
-(`routing_intent.py`), read-only fleet observer (`observer.py`), Fleet
-Manager control plane (`fleet_manager.py`), and opt-in fleet lifecycle
-control (`fleet_control.py`). Agent ticket coordination lives in
-`agent_orchestrator.py`. Entry point: `__main__.py`
-(`python -m local_model_router`).
+The HTTP surface: Starlette app assembly (`app.py`), shared runtime context and
+helpers (`context.py`), pooled HTTP session management (`http_client.py`), split
+route modules (`routes_setup.py`, `routes_fleet.py`, `routes_harnesses.py`,
+`routes_orchestrator.py`, `routes_openai.py`), dry-run routing intent
+(`routing_intent.py`), read-only fleet observer (`observer.py`), Fleet Manager
+control plane (`fleet_manager.py`), and opt-in fleet lifecycle control
+(`fleet_control.py`). Deprecated agent ticket coordination lives in
+`agent_orchestrator.py` (gated by `IMPERIUM_ENABLE_LEGACY_ORCHESTRATOR`). Entry
+point: `__main__.py` (`python -m local_model_router`).
 
 ## Ownership
 
-- `app.py` owns routes, auth middleware, and chat-completions forwarding.
+- `app.py` assembles `create_app()`, `lifespan()`, and compatibility
+  re-exports for monkeypatch hooks.
+- `context.py` owns `RouterContext`, auth/origin/setup wrappers, `Sunset`
+  deprecation headers, and shared OpenAI/routing helper functions.
+- `http_client.py` owns `SharedHttpClient` (one pooled `aiohttp.ClientSession`
+  per event loop with transparent monkeypatch fallback).
+- `routes_setup.py`, `routes_fleet.py`, `routes_harnesses.py`,
+  `routes_orchestrator.py`, and `routes_openai.py` own their respective HTTP
+  route handlers.
+- `openapi_spec.py` generates the OpenAPI `3.1.0` schema served at protected
+  `GET /openapi.json`.
+- `sse_usage.py` owns bounded passive SSE token-usage extraction for local and
+  upstream streaming responses without storing content or prompts.
+- `hermes_model_watcher.py` manages single-GPU slot swaps and opt-in bounded
+  swap waiting (`IMPERIUM_SWAP_WAIT_SECONDS`).
 - `routing_intent.py` owns the Agent Client Contract schema and policy.
 - `observer.py` owns read-only fleet views; it never mutates state.
 - `fleet_manager.py` owns agent identity, bounded admission, SQLite state.
@@ -131,12 +148,13 @@ control (`fleet_control.py`). Agent ticket coordination lives in
 ## Work Guidance
 
 - Keep forwarding, auth, and packaging as separate implementation gates.
-- New endpoints get a route in `app.py`, schema in `routing_intent.py` (or a
-  new module), and tests in `tests/`.
+- New endpoints go into the matching `routes_*.py` module (registered in
+  `app.py`), schema in `routing_intent.py` (or a new module), and tests in
+  `tests/`.
 
 ## Verification
 
-- `python -m pytest tests/test_routing_intent.py tests/test_observer_service.py tests/test_openai_chat_completions.py tests/test_fleet_manager.py tests/test_fleet_control.py tests/test_local_first_plus_api.py tests/test_agent_orchestrator.py tests/test_swarm_gate.py tests/test_execution_plan.py -q`
+- `python -m pytest tests/test_routing_intent.py tests/test_observer_service.py tests/test_openai_chat_completions.py tests/test_fleet_manager.py tests/test_fleet_control.py tests/test_local_first_plus_api.py tests/test_agent_orchestrator.py tests/test_swarm_gate.py tests/test_execution_plan.py tests/test_service_modularization.py tests/test_sse_usage.py tests/test_openapi_and_contract.py -q`
 
 ## Child DOX Index
 

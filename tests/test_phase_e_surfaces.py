@@ -43,12 +43,27 @@ def _make_app(tmp_path, monkeypatch, api_key=None, **kwargs):
 # dashboard
 # ---------------------------------------------------------------------------
 
+def _dashboard_bundle(client: TestClient) -> str:
+    parts = [client.get("/ui").text]
+    for asset in ("styles.css", "i18n.js", "app.js"):
+        res = client.get(f"/ui/assets/{asset}")
+        assert res.status_code == 200, asset
+        parts.append(res.text)
+    return "\n".join(parts)
+
+
 def test_dashboard_page_loads(tmp_path, monkeypatch):
     client = TestClient(_make_app(tmp_path, monkeypatch))
     resp = client.get("/ui")
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
-    html = resp.text
+    shell = resp.text
+    assert "Imperium" in shell
+    assert "/ui/assets/styles.css" in shell
+    assert "/ui/assets/i18n.js" in shell
+    assert "/ui/assets/app.js" in shell
+    assert "__IMPERIUM_SETUP_TOKEN__" not in shell
+    html = _dashboard_bundle(client)
     assert "Imperium" in html
     assert "/ui/status" in html
     assert "/setup/plan" in html
@@ -70,7 +85,7 @@ def test_dashboard_page_loads(tmp_path, monkeypatch):
 
 def test_dashboard_has_six_resumable_setup_stages_and_simple_model_aliases(tmp_path, monkeypatch):
     client = TestClient(_make_app(tmp_path, monkeypatch))
-    html = client.get("/ui").text
+    html = _dashboard_bundle(client)
 
     assert 'const labels=["stepWelcome","stepHardware","stepRuntime","stepModel","stepReview","stepInstall"]' in html
     assert 'localStorage.getItem("imperium.setup")' in html
@@ -93,7 +108,7 @@ def test_dashboard_has_six_resumable_setup_stages_and_simple_model_aliases(tmp_p
 
 def test_dashboard_setup_reuses_local_models_folder_and_contains_long_model_text(tmp_path, monkeypatch):
     client = TestClient(_make_app(tmp_path, monkeypatch))
-    html = client.get("/ui").text
+    html = _dashboard_bundle(client)
 
     assert 'data-action="models-folder"' in html
     assert "const localModels=(state.setup?.discovery?.local_models||[]).map(localModelDetails)" in html
@@ -107,7 +122,7 @@ def test_dashboard_setup_reuses_local_models_folder_and_contains_long_model_text
 
 def test_dashboard_has_global_categorized_system_alerts(tmp_path, monkeypatch):
     client = TestClient(_make_app(tmp_path, monkeypatch))
-    html = client.get("/ui").text
+    html = _dashboard_bundle(client)
 
     assert 'id="alerts-button"' in html
     assert 'aria-controls="drawer"' in html

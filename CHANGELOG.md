@@ -6,6 +6,40 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Optional `harness_pin_drift` configuration alert in `GET /ui/status`
+  (`local_model_router/service/readiness.py`, `routes_setup.py`) surfacing
+  pinned harness connections whose target model is not currently loaded or
+  routed, without downgrading `overall: ready`.
+- Read-only MCP harness resources (`harnesses://list` and
+  `harnesses://{harness_id}/setup` in `local_model_router/mcp/resources.py`
+  and `router_bridge.py`) exposing sanitized harness manifests.
+- Generated OpenAPI `3.1.0` schema served at protected `GET /openapi.json`
+  (`local_model_router/service/openapi_spec.py`, `routes_fleet.py`) and HTTP
+  OpenAI/harness/pin-drift contract tests (`tests/test_openapi_and_contract.py`).
+- Bounded SSE token-usage extraction (`SseUsageExtractor` in
+  `local_model_router/service/sse_usage.py`) for streaming `/v1/chat/completions`
+  and `/harnesses/*/v1/chat/completions`, injecting
+  `stream_options.include_usage` (when absent) on local llama.cpp streams and
+  recording streaming `prompt_tokens` / `completion_tokens` into `FleetStore`
+  and `usage_ledger`.
+- Opt-in bounded wait during active Hermes GPU swaps
+  (`swap_wait_seconds` in `hermes_gpu_profiles.yaml` or
+  `IMPERIUM_SWAP_WAIT_SECONDS` with `A0_LMM_ROUTER_SWAP_WAIT_SECONDS`
+  fallback, default `0.0`, capped at `60.0`), emitting
+  `x-a0-router-swap-wait-ms` on resolved requests while fast-failing leases,
+  manual stops, failed swaps, and retry backoff (`docs/adr/0021-...`).
+- Modular static dashboard asset serving at `GET /ui/assets/{name}`
+  (`styles.css`, `i18n.js`, `app.js` under
+  `local_model_router/dashboard/assets/`) with strict filename validation and
+  package-data packaging (`pyproject.toml`).
+- Pooled HTTP client (`SharedHttpClient` in
+  `local_model_router/service/http_client.py`) sharing one
+  `aiohttp.ClientSession` per event loop across forwarding, embeddings, slot
+  `/models` discovery, async slot health probes, and the MCP HTTP bridge, with
+  transparent test monkeypatch fallback and clean lifespan shutdown.
+- Proposed ADR-0020
+  (`docs/adr/0020-isolate-and-schedule-removal-of-legacy-orchestrator-api.md`)
+  recording the `/orchestrator/*` isolation and sunset schedule.
 - GitHub governance & CI quality gates: added `SECURITY.md`,
   `.github/dependabot.yml` (`pip` and `github-actions`),
   `.github/PULL_REQUEST_TEMPLATE.md`, `ruff` static syntax/undefined-name
@@ -16,6 +50,21 @@ All notable changes to this project are documented here.
   `actions/setup-python@v6`.
 
 ### Changed
+
+- Extracted inline `<style>` and `<script>` blocks out of
+  `local_model_router/dashboard/index.html` into static assets (`styles.css`,
+  `i18n.js`, `app.js`), passing setup token and version via `<meta>` tags,
+  tightening `/ui` Content-Security-Policy to `script-src 'self'`, and moving
+  browser-stored `imperium.apiKey` to `sessionStorage`.
+- Split the monolithic `local_model_router/service/app.py` into
+  `context.py`, `routes_setup.py`, `routes_fleet.py`, `routes_harnesses.py`,
+  `routes_orchestrator.py`, `routes_openai.py`, and a slim `app.py` entrypoint
+  while preserving existing test and helper re-exports.
+- Gated legacy `/orchestrator/*` routes and default `AgentOrchestrator`
+  startup behind `IMPERIUM_ENABLE_LEGACY_ORCHESTRATOR` (with
+  `A0_LMM_ROUTER_ENABLE_LEGACY_ORCHESTRATOR` fallback, default `"1"`) and
+  emitted `Sunset: Wed, 31 Dec 2026 23:59:59 GMT` alongside
+  `Deprecation: true`.
 
 - Cleaned up obsolete historical `a0_lmm_router` plugin comments, links,
   docstrings, and default workspace/ledger paths (`usage_ledger.py` now defaults
