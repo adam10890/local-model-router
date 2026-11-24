@@ -6,6 +6,14 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- Setup event stream and polling cursor regression (Herdr P01 / R16–R18):
+  `SetupEngine` (`local_model_router/setup/engine.py`) now assigns monotonic
+  event IDs across the 200-item retention window and reports `history`
+  (`empty`/`retained`/`lost`), `resync_required`, `cursor`, `oldest_id`, and
+  `latest_id`. `GET /setup/events` (`local_model_router/service/routes_setup.py`)
+  returns `503 setup_events_unavailable` / SSE `event: resync` on store
+  failures and handles snapshot-to-stream transitions cleanly alongside
+  `state.eventCursor` resync in `local_model_router/dashboard/assets/app.js`.
 - Streams longer than 120 seconds are no longer cut mid-generation: streaming
   forwards are bounded by `sock_read` silence (`_STREAM_TIMEOUT`) instead of a
   `total` timeout.

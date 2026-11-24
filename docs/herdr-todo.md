@@ -8,20 +8,20 @@ This is a repository development checklist, not Personal Dashboard commitments o
 
 ## Next proposed slices
 
-Recommended review order: **P01 counter regression → P03 honest readiness → P02 draft/focus → P05 stop cause → P10 recovery gaps**. These can be implemented independently in isolated slices; P01 does not wait for a journal, native app, global framework or Herdr trial. Reorder a concrete security/configuration defect ahead of UI polish if one is found.
+Recommended review order: **P03 honest readiness → P02 draft/focus → P05 stop cause → P10 recovery gaps** (`P01` verified in `0.16.2`). These can be implemented independently in isolated slices; P03 does not wait for a journal, native app, global framework or Herdr trial. Reorder a concrete security/configuration defect ahead of UI polish if one is found.
 
 Each package section records its primary proposal IDs, delivery state, first bounded implementation and measurable completion. Future checks named here are acceptance work, not tests run by this documentation change.
 
 <a id="p01"></a>
 ## P01 - Correct setup event cursors and resync
 
-- **State:** candidate - gap review and selection required. **Proposals:** R16 R17 R18. **Effort:** Short fix; Medium full resync; **simplicity:** Moderate; **urgency/value:** U0 / Very high.
+- **State:** verified (`0.16.2`). **Proposals:** R16 R17 R18. **Effort:** Short fix; Medium full resync; **simplicity:** Moderate; **urgency/value:** U0 / Very high.
 - **Depends on:** None. **Gate:** Existing-path fix now; review additive replay contract separately.
-- [ ] Recheck exact affected baseline and existing coverage; record selected scope, owner and missing behavior before implementation.
-- [ ] Use an independent monotonic counter; distinguish retained, lost and unavailable history; define snapshot/startup ordering without introducing a generic event framework.
-- [ ] Verify: After retention rolls over, later events remain discoverable. Test the exact retained boundary and a transition during subscription startup; a gap requests resync rather than returning a misleading empty list.
-- **Code/check owners:** local_model_router/setup/engine.py; tests/test_setup_engine.py; tests/test_setup_api.py.
-- **Evidence:** no implementation PR, runtime proof or completion receipt recorded.
+- [x] Recheck exact affected baseline and existing coverage; record selected scope, owner and missing behavior before implementation.
+- [x] Use an independent monotonic counter; distinguish retained, lost and unavailable history; define snapshot/startup ordering without introducing a generic event framework.
+- [x] Verify: After retention rolls over, later events remain discoverable. Test the exact retained boundary and a transition during subscription startup; a gap requests resync rather than returning a misleading empty list.
+- **Code/check owners:** local_model_router/setup/engine.py; local_model_router/service/routes_setup.py; local_model_router/dashboard/assets/app.js; tests/test_setup_engine.py; tests/test_setup_api.py.
+- **Evidence:** Implemented in `0.16.2` (`dev/herdr`); verified via monotonic rollover/boundary/gap/unavailable unit and SSE transition tests in `tests/test_setup_engine.py` and `tests/test_setup_api.py`.
 
 <a id="p02"></a>
 ## P02 - Preserve chat continuity and consume existing streaming

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import json
+from types import SimpleNamespace
+
 from starlette.testclient import TestClient
 
+from local_model_router.service import routes_setup
 from local_model_router.service.app import create_app
 from local_model_router.setup import SetupEngine
 
@@ -157,3 +162,128 @@ def test_successful_apply_disables_setup_but_keeps_dashboard_state(tmp_path, mon
     assert status.status_code == 200
     assert status.json()["setup_api_active"] is False
     assert status.json()["setup"]["setup_complete"] is True
+
+
+def test_setup_events_api_tracks_rollover_gap_resync_and_unavailable(tmp_path, monkeypatch):
+    monkeypatch.delenv("A0_LMM_ROUTER_API_KEY", raising=False)
+    app = create_app(
+        str(tmp_path / "missing.yaml"),
+        setup_home=str(tmp_path / "home"),
+        upstreams_path=str(tmp_path / "upstreams.yaml"),
+        apps_path=str(tmp_path / "apps.yaml"),
+        harnesses_path=str(tmp_path / "harnesses.yaml"),
+    )
+    client = TestClient(app)
+    headers = {"X-Setup-Token": app.state.setup_token}
+
+    empty = client.get("/setup/events?after=0", headers=headers)
+    assert empty.status_code == 200
+    assert empty.json()["history"] == "empty"
+    assert empty.json()["resync_required"] is False
+
+    for idx in range(1, 203):
+        app.state.setup_engine._emit("download", "running", f"chunk-{idx}", progress=0.5)
+
+    caught_up = client.get("/setup/events?after=202", headers=headers)
+    assert caught_up.status_code == 200
+    assert caught_up.json()["history"] == "retained"
+    assert caught_up.json()["events"] == []
+
+    app.state.setup_engine._emit("download", "complete", "chunk-203", progress=1.0)
+    next_poll = client.get("/setup/events?after=202", headers=headers)
+    assert next_poll.status_code == 200
+    assert [ev["id"] for ev in next_poll.json()["events"]] == [203]
+
+    gap = client.get("/setup/events?after=1", headers=headers)
+    assert gap.status_code == 200
+    assert gap.json()["history"] == "lost"
+    assert gap.json()["resync_required"] is True
+    assert gap.json()["cursor"] == 203
+    assert len(gap.json()["events"]) == 200
+
+    monkeypatch.setattr(app.state.setup_engine, "events", lambda _after=0: (_ for _ in ()).throw(RuntimeError("boom")))
+    unavailable = client.get("/setup/events?after=0", headers=headers)
+    assert unavailable.status_code == 503
+    assert unavailable.json()["error"] == "setup_events_unavailable"
+    assert unavailable.json()["history"] == "unavailable"
+    assert unavailable.json()["resync_required"] is True
+
+
+def test_setup_events_sse_resync_transition_and_unavailable(tmp_path, monkeypatch):
+    monkeypatch.delenv("A0_LMM_ROUTER_API_KEY", raising=False)
+    app = create_app(
+        str(tmp_path / "missing.yaml"),
+        setup_home=str(tmp_path / "home"),
+        upstreams_path=str(tmp_path / "upstreams.yaml"),
+        apps_path=str(tmp_path / "apps.yaml"),
+        harnesses_path=str(tmp_path / "harnesses.yaml"),
+    )
+    for idx in range(1, 206):
+        app.state.setup_engine._emit("download", "running", f"step-{idx}", progress=0.5)
+
+    class FakeRequest:
+        def __init__(self, after: str, polls: int, *, on_sleep=None):
+            self.query_params = {"after": after}
+            self.headers = {"accept": "text/event-stream"}
+            self._checks = 0
+            self._polls = polls
+            self._on_sleep = on_sleep
+
+        async def is_disconnected(self) -> bool:
+            # Two checks per loop iteration (top + bottom)
+            disconnected = (self._checks // 2) >= self._polls
+            self._checks += 1
+            return disconnected
+
+    async def run_resync_and_transition() -> list[str]:
+        polls = 0
+
+        async def fake_sleep(_delay: float) -> None:
+            nonlocal polls
+            polls += 1
+            if polls == 1:
+                app.state.setup_engine._emit("download", "complete", "step-206", progress=1.0)
+
+        monkeypatch.setattr(routes_setup.asyncio, "sleep", fake_sleep)
+        ctx = SimpleNamespace(setup_engine=app.state.setup_engine)
+        req = FakeRequest(after="1", polls=2)
+        response = await routes_setup.setup_events(ctx, req)
+        chunks: list[str] = []
+        async for chunk in response.body_iterator:
+            chunks.append(chunk.decode() if isinstance(chunk, bytes) else chunk)
+        return chunks
+
+    chunks = asyncio.run(run_resync_and_transition())
+    assert chunks[0].startswith("event: resync\n")
+    resync_data = json.loads(chunks[0].split("data: ", 1)[1])
+    assert resync_data["history"] == "lost"
+    assert resync_data["resync_required"] is True
+    assert resync_data["cursor"] == 205
+    emitted_ids = [
+        json.loads(chunk.split("data: ", 1)[1])["id"]
+        for chunk in chunks
+        if chunk.startswith("event: setup\n")
+    ]
+    assert emitted_ids[0] == 6
+    assert emitted_ids[-2:] == [205, 206]
+    assert emitted_ids.count(206) == 1
+
+    async def run_unavailable() -> list[str]:
+        monkeypatch.setattr(app.state.setup_engine, "events", lambda _after=0: (_ for _ in ()).throw(RuntimeError("down")))
+        ctx = SimpleNamespace(setup_engine=app.state.setup_engine)
+        req = FakeRequest(after="0", polls=1)
+        response = await routes_setup.setup_events(ctx, req)
+        chunks: list[str] = []
+        async for chunk in response.body_iterator:
+            chunks.append(chunk.decode() if isinstance(chunk, bytes) else chunk)
+        return chunks
+
+    err_chunks = asyncio.run(run_unavailable())
+    assert len(err_chunks) == 1
+    assert err_chunks[0].startswith("event: resync\n")
+    err_data = json.loads(err_chunks[0].split("data: ", 1)[1])
+    assert err_data == {
+        "error": "setup_events_unavailable",
+        "history": "unavailable",
+        "resync_required": True,
+    }

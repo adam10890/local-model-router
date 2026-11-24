@@ -251,15 +251,61 @@ async def setup_events(ctx: RouterContext, request: Request) -> Response:
     except ValueError:
         after = 0
     if "text/event-stream" not in request.headers.get("accept", ""):
-        return JSONResponse(ctx.setup_engine.events(after))
+        try:
+            payload = ctx.setup_engine.events(after)
+        except Exception:
+            SERVICE_LOGGER.warning("Setup event lookup failed", exc_info=True)
+            return JSONResponse(
+                {
+                    "error": "setup_events_unavailable",
+                    "events": [],
+                    "cancelled": False,
+                    "history": "unavailable",
+                    "resync_required": True,
+                    "cursor": 0,
+                    "oldest_id": None,
+                    "latest_id": 0,
+                },
+                status_code=503,
+            )
+        return JSONResponse(payload)
 
     async def stream_events():
         cursor = after
         while not await request.is_disconnected():
-            payload = ctx.setup_engine.events(cursor)
-            for event in payload["events"]:
-                cursor = max(cursor, int(event["id"]))
-                yield f"event: setup\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+            try:
+                payload = ctx.setup_engine.events(cursor)
+            except Exception:
+                SERVICE_LOGGER.warning("Setup event stream lookup failed", exc_info=True)
+                err_payload = {
+                    "error": "setup_events_unavailable",
+                    "history": "unavailable",
+                    "resync_required": True,
+                }
+                yield f"event: resync\ndata: {json.dumps(err_payload, ensure_ascii=False)}\n\n"
+                return
+            if payload.get("resync_required"):
+                resync_meta = {
+                    "history": payload.get("history", "lost"),
+                    "resync_required": True,
+                    "cursor": int(payload.get("cursor") or 0),
+                    "oldest_id": payload.get("oldest_id"),
+                    "latest_id": int(payload.get("latest_id") or 0),
+                    "cancelled": bool(payload.get("cancelled")),
+                }
+                yield f"event: resync\ndata: {json.dumps(resync_meta, ensure_ascii=False)}\n\n"
+                for event in payload.get("events") or ():
+                    yield f"event: setup\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                cursor = int(payload.get("cursor") or 0)
+            else:
+                for event in payload.get("events") or ():
+                    event_id = int(event["id"])
+                    if event_id <= cursor:
+                        continue
+                    cursor = event_id
+                    yield f"event: setup\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+            if await request.is_disconnected():
+                break
             await asyncio.sleep(0.5)
 
     return StreamingResponse(stream_events(), media_type="text/event-stream")
