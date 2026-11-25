@@ -252,10 +252,23 @@ stored. Use `--force` to refresh an unchanged model.
 5. Run the smoke script before pointing clients at the provider.
 
 Managed Windows runtime updates query recent llama.cpp rolling releases and
-accept only the newest build that supplies every expected backend asset with a
-GitHub SHA-256 digest. `imperium update --tag bNNNN` installs that rolling
-build after the same digest check. `imperium rollback` restores the previous
-pinned runtime and updates the managed configuration path with it.
+verify every expected backend asset against its GitHub SHA-256 digest:
+
+```text
+imperium update --check
+imperium update --tag b12359 --yes
+imperium rollback
+```
+
+Upstream `v1.0.0` is a source release with no Windows binaries; the matching
+rolling binary build is `b12359` (CUDA 12.4 assets). Running `imperium update`
+without `--tag` selects the newest verified rolling build inside the 20-release
+API window, which is already past `b12359`, so pin `--tag b12359` when targeting
+the `v1.0.0` binary baseline. `imperium rollback` restores the previous pinned
+runtime and updates the managed configuration path with it. Optional Docker
+backend defaults (`ghcr.io/ggml-org/llama.cpp:server-cuda` and `:server`) stay
+on upstream floating tags unless an operator pins `global.docker_image_gpu` or
+`global.docker_image_cpu` explicitly.
 
 ## Local llama.cpp vs upstreams
 

@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- Managed Windows `llama.cpp` runtime pin updated to `b12359`, the rolling binary
+  build corresponding to upstream `llama.cpp` `v1.0.0` (CUDA 12.4 assets, driver
+  floor `551.61` preserved):
+  - `SetupEngine._tagged_runtime_release` explicitly names `b12359` when source-only
+    tag `v1.0.0` is requested (`invalid_release`), and `imperium update --tag`
+    help + `docs/PROVIDER.md` document the pinned update/rollback workflow while
+    keeping optional Docker backend defaults on upstream floating tags.
+  - `local_model_router/setup/runtime_catalog.json` (`cpu`, `vulkan`, `cuda12`)
+    and `local_model_router/setup/model_catalog.json` (`min_llama_cpp`) retargeted
+    to `b12359` after live RTX 4090 verification with existing server flags locked.
+
 ### Fixed
 
 - Stop attribution and Windows installer recovery hardening (Herdr P05 and P10;

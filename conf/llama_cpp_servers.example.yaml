@@ -197,6 +197,7 @@ global:
     utility: host.docker.internal:8088
     embedding: host.docker.internal:8082
     scribe: host.docker.internal:8090
+  # Optional Docker backend images stay on upstream floating tags unless pinned explicitly.
   docker_image_gpu: ghcr.io/ggml-org/llama.cpp:server-cuda
   docker_image_cpu: ghcr.io/ggml-org/llama.cpp:server
   docker_network: a0-lmm-net

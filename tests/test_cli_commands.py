@@ -456,10 +456,10 @@ def test_update_confirmation_install_missing_runtime_and_rollback(monkeypatch, c
     assert cli.main(["update", "--yes"]) == 0
     assert ("install", "cpu", "latest", None) in engine.calls
 
-    engine.update = {"update_available": False, "latest": "b12140"}
-    assert cli.main(["update", "--tag", "b12110"]) == 2
-    assert cli.main(["update", "--tag", "b12110", "--yes"]) == 0
-    assert ("install", "cpu", "pinned", "b12110") in engine.calls
+    engine.update = {"update_available": False, "latest": "b12400"}
+    assert cli.main(["update", "--tag", "b12359"]) == 2
+    assert cli.main(["update", "--tag", "b12359", "--yes"]) == 0
+    assert ("install", "cpu", "pinned", "b12359") in engine.calls
 
     capsys.readouterr()
     engine.runtime = None

@@ -556,30 +556,85 @@ def test_tagged_runtime_release_uses_the_named_build(tmp_path, monkeypatch):
     def fake_releases(url):
         seen.append(url)
         return [{
-            "tag_name": "b12110",
+            "tag_name": "b12359",
             "assets": [{
-                "name": "llama-b12110-bin-win-cpu-x64.zip",
+                "name": "llama-b12359-bin-win-cpu-x64.zip",
                 "digest": f"sha256:{digest}",
-                "browser_download_url": "https://example.invalid/b12110.zip",
+                "browser_download_url": "https://example.invalid/b12359.zip",
                 "size": 7,
             }],
-            "html_url": "https://example.invalid/b12110",
+            "html_url": "https://example.invalid/b12359",
         }]
 
     monkeypatch.setattr(engine, "_github_releases", fake_releases)
 
-    release, assets = engine._tagged_runtime_release("cpu", "b12110")
+    release, assets = engine._tagged_runtime_release("cpu", "b12359")
 
-    assert seen == [engine.runtime_catalog["releases_api"].split("?", 1)[0] + "/tags/b12110"]
-    assert release["tag_name"] == "b12110"
+    assert seen == [engine.runtime_catalog["releases_api"].split("?", 1)[0] + "/tags/b12359"]
+    assert release["tag_name"] == "b12359"
     assert assets[0]["sha256"] == digest
 
 
-def test_tagged_runtime_release_rejects_semver_tag(tmp_path):
+def test_tagged_runtime_release_rejects_semver_tag(tmp_path, monkeypatch):
     engine = _engine(tmp_path)
+    monkeypatch.setattr(engine, "_github_releases", lambda _url: pytest.fail("network lookup was used"))
     with pytest.raises(SetupError) as caught:
         engine._tagged_runtime_release("cpu", "v0.9.0")
     assert caught.value.code == "invalid_release"
+    assert "b12359" not in caught.value.message
+
+
+def test_source_tag_v1_names_the_nightly_binary(tmp_path, monkeypatch):
+    engine = _engine(tmp_path)
+    monkeypatch.setattr(engine, "_github_releases", lambda _url: pytest.fail("network lookup was used"))
+    with pytest.raises(SetupError) as raised:
+        engine._tagged_runtime_release("cuda12", "v1.0.0")
+    assert raised.value.code == "invalid_release"
+    assert "b12359" in raised.value.message
+
+
+def test_b12359_cuda12_assets_verify(tmp_path):
+    engine = _engine(tmp_path)
+    release = {
+        "tag_name": "b12359",
+        "draft": False,
+        "assets": [
+            {
+                "name": "llama-b12359-bin-win-cuda-12.4-x64.zip",
+                "digest": "sha256:e9c0abf442e8339c06728366c1ad2c711332f9939c0c00603fb75d85fd44c914",
+                "browser_download_url": "https://example.invalid/llama-b12359-cuda-12.4.zip",
+                "size": 318976332,
+            },
+            {
+                "name": "cudart-llama-bin-win-cuda-12.4-x64.zip",
+                "digest": "sha256:8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
+                "browser_download_url": "https://example.invalid/cudart-b12359-cuda-12.4.zip",
+                "size": 391443627,
+            },
+            {
+                "name": "llama-b12359-bin-win-cuda-13.5-x64.zip",
+                "digest": "sha256:1de9ca1ff408d6e348ea0007c6880ad2393311a02e7799bcde26dc16daef03dd",
+                "browser_download_url": "https://example.invalid/llama-b12359-cuda-13.5.zip",
+                "size": 179546112,
+            },
+        ],
+    }
+
+    verified = engine._verified_release_assets("cuda12", release)
+
+    assert engine.runtime_catalog["recommended"]["tag"] == "b12359"
+    assert engine.catalog["models"][0]["min_llama_cpp"] == "b12359"
+    assert verified is not None
+    assert [row["name"] for row in verified] == [
+        "llama-b12359-bin-win-cuda-12.4-x64.zip",
+        "cudart-llama-bin-win-cuda-12.4-x64.zip",
+    ]
+    assert [row["sha256"] for row in verified] == [
+        "e9c0abf442e8339c06728366c1ad2c711332f9939c0c00603fb75d85fd44c914",
+        "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
+    ]
+    assert [row["size_bytes"] for row in verified] == [318976332, 391443627]
+    assert "llama-b12359-bin-win-cuda-13.5-x64.zip" not in {row["name"] for row in verified}
 
 
 def test_runtime_selection_updates_config_and_rollback_restores_it(tmp_path):
@@ -597,15 +652,15 @@ def test_runtime_selection_updates_config_and_rollback_restores_it(tmp_path):
     engine._atomic_json(
         engine.manifest_path,
         {
-            "runtime": {"tag": "b9999", "backend": "cpu", "binary": str(new_binary)},
-            "previous_runtime": {"tag": "b9987", "backend": "cpu", "binary": str(old_binary)},
+            "runtime": {"tag": "b12400", "backend": "cpu", "binary": str(new_binary)},
+            "previous_runtime": {"tag": "b12359", "backend": "cpu", "binary": str(old_binary)},
         },
     )
 
     restored = engine.rollback()
 
     config = yaml.safe_load(engine.config_path.read_text(encoding="utf-8"))
-    assert restored["tag"] == "b9987"
+    assert restored["tag"] == "b12359"
     assert config["global"]["llama_cpp_path"] == str(old_binary.parent)
 
 

@@ -78,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     update = sub.add_parser("update", help="check or install the latest stable managed llama.cpp runtime")
     update.add_argument("--check", action="store_true", help="check without installing")
     update.add_argument("--yes", action="store_true", help="confirm the runtime download and activation")
-    update.add_argument("--tag", help="install one rolling build, for example b12110")
+    update.add_argument("--tag", help="install one rolling build, for example b12359")
     sub.add_parser("rollback", help="switch back to the previous managed llama.cpp runtime")
 
     return parser

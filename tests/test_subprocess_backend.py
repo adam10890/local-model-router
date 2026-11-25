@@ -606,3 +606,88 @@ def test_manager_restarts_crashed_subprocess_up_to_limit():
 
     assert backend.starts == 2
     assert manager._restart_attempts == {"chat": 2}
+
+
+def test_build_command_locks_ornith_v1_flag_contract(tmp_path):
+    model = tmp_path / "Ornith.gguf"
+    model.touch()
+    backend = SubprocessBackend({"server_binary": "llama-server.exe"})
+    ornith_extra = [
+        "--cache-type-k",
+        "q8_0",
+        "--cache-type-v",
+        "q8_0",
+        "-ub",
+        "512",
+        "--fit-ctx",
+        "65536",
+        "--cont-batching",
+        "--kv-unified",
+        "--cache-reuse",
+        "256",
+        "--load-mode",
+        "mmap+mlock",
+        "--spec-default",
+        "--spec-type",
+        "draft-mtp",
+        "--spec-draft-n-max",
+        "2",
+        "--temp",
+        "0.6",
+        "--top-p",
+        "0.95",
+        "--top-k",
+        "20",
+    ]
+
+    cmd = backend._build_command(
+        {
+            "model_path": str(model),
+            "model_id": "ornith",
+            "port": 8080,
+            "host": "127.0.0.1",
+            "context_size": 131072,
+            "gpu_layers": -1,
+            "batch_size": 2048,
+            "threads": 8,
+            "parallel_slots": 1,
+            "flash_attention": True,
+            "fit": True,
+            "fit_target_mib": 1024,
+            "jinja": True,
+            "router_mode": False,
+            "extra_args": ornith_extra,
+        }
+    )
+
+    pairs = set(zip(cmd, cmd[1:]))
+    for expected_pair in (
+        ("--flash-attn", "on"),
+        ("--fit", "on"),
+        ("--fit-target", "1024"),
+        ("--cache-type-k", "q8_0"),
+        ("--cache-type-v", "q8_0"),
+        ("--fit-ctx", "65536"),
+        ("--spec-type", "draft-mtp"),
+        ("--spec-draft-n-max", "2"),
+        ("--host", "127.0.0.1"),
+    ):
+        assert expected_pair in pairs
+    assert "--no-reasoning-preserve" in cmd
+    assert "--jinja" in cmd
+
+    for forbidden in (
+        "--defrag-thold",
+        "--allow-unauthenticated-tools",
+        "--media-allow-private-urls",
+        "--moe-cache-mib",
+        "--moe-cache-cpu-share",
+        "--sleep-idle-seconds",
+        "-ctk",
+        "--shard",
+        "--ple",
+    ):
+        assert forbidden not in cmd
+    assert ("--cache-type-k", "f8_e4m3") not in pairs
+    assert ("--cache-type-v", "f8_e4m3") not in pairs
+    assert all("cuda-13.5" not in token for token in cmd)

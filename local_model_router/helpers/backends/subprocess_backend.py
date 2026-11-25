@@ -610,7 +610,7 @@ class SubprocessBackend(InferenceBackend):
         if rf:
             cmd.extend(["--reasoning-format", rf])
 
-        # b12110 enables preserve_reasoning when this flag is omitted.
+        # b12359 enables preserve_reasoning when this flag is omitted.
         extra = [str(item) for item in config.get("extra_args") or []]
         if "--reasoning-preserve" not in extra and "--no-reasoning-preserve" not in extra:
             cmd.append(

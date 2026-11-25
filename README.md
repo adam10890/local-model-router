@@ -39,7 +39,7 @@ Decision records: [`docs/adr/`](docs/adr/).
 
 ## Status
 
-**0.16.4 - Measured models, task disclosure, honest readiness, and recovery guarantees.** Product outcomes and
+**0.16.5 - Measured models, task disclosure, honest readiness, and llama.cpp v1.0.0 (`b12359`) runtime pin.** Product outcomes and
 1.0 beta exit gates live in [`GOALS.md`](GOALS.md). Recorded gate evidence
 lives in [`docs/1.0-beta-evidence.md`](docs/1.0-beta-evidence.md). Sequence
 of accepted work: [`docs/1.0-beta-roadmap.html`](docs/1.0-beta-roadmap.html).

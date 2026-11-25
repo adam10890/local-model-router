@@ -1014,6 +1014,8 @@ class SetupEngine:
         )
 
     def _tagged_runtime_release(self, backend: str, tag: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        if tag == "v1.0.0":
+            raise SetupError("invalid_release", "v1.0.0 is a source release; install rolling build b12359")
         if not re.fullmatch(r"b\d+", tag):
             raise SetupError("invalid_release", "A pinned runtime tag must be a rolling build id")
         root = str(self.runtime_catalog["releases_api"]).split("?", 1)[0].rstrip("/")
