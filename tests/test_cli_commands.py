@@ -479,3 +479,22 @@ def test_rollback_maps_setup_error(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_setup_engine", Engine)
     assert cli.main(["rollback"]) == 1
     assert json.loads(capsys.readouterr().out)["error"] == "rollback_unavailable"
+
+
+def test_shutdown_distinguishes_stopped_confirmed_from_outcome_unknown(tmp_path, monkeypatch, capsys):
+    state_file = tmp_path / "router-process.json"
+    monkeypatch.setattr(
+        "local_model_router.service.__main__.router_process_state_path",
+        lambda: state_file,
+    )
+    monkeypatch.setattr(cli, "_probe", lambda _url: False)
+    assert cli.main(["shutdown"]) == 0
+    already = json.loads(capsys.readouterr().out)
+    assert already["already_stopped"] is True
+    assert already["stop_state"] == "stopped_confirmed"
+
+    monkeypatch.setattr(cli, "_probe", lambda _url: True)
+    assert cli.main(["shutdown"]) == 1
+    unverified = json.loads(capsys.readouterr().out)
+    assert unverified["error"] == "router_ownership_unverified"
+    assert unverified["stop_state"] == "outcome_unknown"

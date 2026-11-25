@@ -168,16 +168,24 @@ def cmd_shutdown(_args: argparse.Namespace) -> int:
     port = int(os.environ.get("OBSERVER_PORT", "9000"))
     if not state_path.is_file():
         if _probe(f"http://127.0.0.1:{port}/health"):
-            print(json.dumps({"ok": False, "error": "router_ownership_unverified"}))
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": "router_ownership_unverified",
+                        "stop_state": "outcome_unknown",
+                    }
+                )
+            )
             return 1
-        print(json.dumps({"ok": True, "already_stopped": True}))
+        print(json.dumps({"ok": True, "already_stopped": True, "stop_state": "stopped_confirmed"}))
         return 0
     try:
         state = json.loads(state_path.read_text(encoding="utf-8"))
         process = _verified_router_process(state)
         if process is None:
             state_path.unlink(missing_ok=True)
-            print(json.dumps({"ok": True, "already_stopped": True}))
+            print(json.dumps({"ok": True, "already_stopped": True, "stop_state": "stopped_confirmed"}))
             return 0
         process_pid = process.pid
 
@@ -188,7 +196,7 @@ def cmd_shutdown(_args: argparse.Namespace) -> int:
             headers["Authorization"] = f"Bearer {api_key}"
         request = urllib.request.Request(
             f"http://127.0.0.1:{port}/fleet/prepare-shutdown",
-            data=b"{}",
+            data=json.dumps({"cause": "cli_shutdown", "actor": "cli"}).encode("utf-8"),
             headers=headers,
             method="POST",
         )
@@ -211,17 +219,44 @@ def cmd_shutdown(_args: argparse.Namespace) -> int:
         except psutil.NoSuchProcess:
             pass
         state_path.unlink(missing_ok=True)
-        print(json.dumps({"ok": True, "stopped": True, "pid": process_pid}))
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "stopped": True,
+                    "pid": process_pid,
+                    "stop_state": "stopped_confirmed",
+                    "cause": "cli_shutdown",
+                }
+            )
+        )
         return 0
     except urllib.error.HTTPError as exc:
-        print(json.dumps({"ok": False, "error": "router_drain_failed", "status": exc.code}))
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": "router_drain_failed",
+                    "status": exc.code,
+                    "stop_state": "outcome_unknown",
+                }
+            )
+        )
         return 1
     except TimeoutError:
-        print(json.dumps({"ok": False, "error": "router_drain_timeout"}))
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": "router_drain_timeout",
+                    "stop_state": "outcome_unknown",
+                }
+            )
+        )
         return 1
     except (OSError, ValueError, TypeError, json.JSONDecodeError, RuntimeError) as exc:
         code = str(exc) if str(exc) in {"router_ownership_unverified", "router_drain_failed"} else "router_shutdown_failed"
-        print(json.dumps({"ok": False, "error": code}))
+        print(json.dumps({"ok": False, "error": code, "stop_state": "outcome_unknown"}))
         return 1
 
 

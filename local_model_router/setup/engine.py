@@ -47,6 +47,29 @@ RELEASE_LOOKUP_MAX_BACKOFF_SECONDS = 8.0
 RELEASE_RETRYABLE_STATUSES = frozenset({403, 429})
 _EMBED_NAME_HINTS = ("embed", "bge-", "nomic", "minilm", "gte-", "e5-")
 _PARAMS_FROM_NAME = re.compile(r"(?i)(\d+(?:\.\d+)?)\s*b\b")
+_STOP_TOKEN_RE = re.compile(r"^[a-z0-9_.-]{1,48}$")
+_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+_SECRET_PREFIXES = ("sk-", "ghp_", "gho_", "github_pat_", "xox", "eyj", "bearer")
+
+
+def safe_stop_token(value: Any, fallback: str) -> str:
+    """Validate a safe, content-free stop cause or actor identifier."""
+    candidate = str(value or "").strip().lower()
+    if not candidate or not _STOP_TOKEN_RE.match(candidate):
+        return fallback
+    if candidate.startswith(_SECRET_PREFIXES):
+        return fallback
+    return candidate
+
+
+def safe_stop_request_id(value: Any) -> str | None:
+    """Validate an optional request ID without admitting secrets, paths, or prompts."""
+    candidate = str(value or "").strip()
+    if not candidate or not _REQUEST_ID_RE.match(candidate):
+        return None
+    if candidate.lower().startswith(_SECRET_PREFIXES):
+        return None
+    return candidate
 
 
 class SetupError(RuntimeError):
@@ -121,6 +144,7 @@ class SetupEngine:
         self._events: deque[dict[str, Any]] = deque(maxlen=self._EVENT_RETENTION)
         self._next_event_id: int = 1
         self._cancel = threading.Event()
+        self._stop_info: dict[str, Any] | None = None
         self._lock = threading.Lock()
         self._apply_lock = threading.Lock()
         self._runtime_backend: Any = None
@@ -154,12 +178,14 @@ class SetupEngine:
             latest_id = self._next_event_id - 1
             retained = list(self._events)
             cancelled = self._cancel.is_set()
+            stop_snapshot = dict(self._stop_info) if self._stop_info is not None else None
         oldest_id = int(retained[0]["id"]) if retained else None
         if latest_id == 0 or oldest_id is None:
             resync_required = cursor_in > 0
             return {
                 "events": [],
                 "cancelled": cancelled,
+                "stop": stop_snapshot,
                 "history": "lost" if resync_required else "empty",
                 "resync_required": resync_required,
                 "cursor": 0,
@@ -170,6 +196,7 @@ class SetupEngine:
             return {
                 "events": retained,
                 "cancelled": cancelled,
+                "stop": stop_snapshot,
                 "history": "retained",
                 "resync_required": False,
                 "cursor": latest_id,
@@ -180,6 +207,7 @@ class SetupEngine:
             return {
                 "events": retained,
                 "cancelled": cancelled,
+                "stop": stop_snapshot,
                 "history": "lost",
                 "resync_required": True,
                 "cursor": latest_id,
@@ -190,6 +218,7 @@ class SetupEngine:
         return {
             "events": rows,
             "cancelled": cancelled,
+            "stop": stop_snapshot,
             "history": "retained",
             "resync_required": False,
             "cursor": latest_id,
@@ -197,12 +226,72 @@ class SetupEngine:
             "latest_id": latest_id,
         }
 
-    def cancel(self) -> None:
-        self._cancel.set()
-        self._emit("setup", "cancelled", "Cancellation requested")
+    def stop_info(self) -> dict[str, Any] | None:
+        with self._lock:
+            return dict(self._stop_info) if self._stop_info is not None else None
+
+    def cancel(
+        self,
+        *,
+        cause: str = "operator_cancel",
+        actor: str = "local_operator",
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            first = self._stop_info is None
+            if first:
+                self._stop_info = {
+                    "cause": safe_stop_token(cause, "operator_cancel"),
+                    "actor": safe_stop_token(actor, "local_operator"),
+                    "request_id": safe_stop_request_id(request_id),
+                    "state": "cancel_requested",
+                    "requested_at": time.time(),
+                    "confirmed_at": None,
+                }
+            self._cancel.set()
+            snapshot = dict(self._stop_info)
+        if first:
+            self._emit("setup", "cancelled", "Cancellation requested")
+        return snapshot
+
+    def note_transport_lost(self) -> dict[str, Any]:
+        """Record client SSE disconnect without cancelling or marking setup stopped."""
+        with self._lock:
+            return {
+                "state": "transport_lost",
+                "cancelled": self._cancel.is_set(),
+                "stop": dict(self._stop_info) if self._stop_info is not None else None,
+            }
+
+    def _record_stop_outcome(
+        self,
+        state: str,
+        *,
+        default_cause: str = "runtime_stop",
+        default_actor: str = "local_operator",
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        now = time.time()
+        with self._lock:
+            if self._stop_info is None:
+                self._stop_info = {
+                    "cause": safe_stop_token(default_cause, "runtime_stop"),
+                    "actor": safe_stop_token(default_actor, "local_operator"),
+                    "request_id": safe_stop_request_id(request_id),
+                    "state": state,
+                    "requested_at": now,
+                    "confirmed_at": now if state == "stopped_confirmed" else None,
+                }
+            else:
+                self._stop_info["state"] = state
+                if state == "stopped_confirmed":
+                    self._stop_info["confirmed_at"] = now
+            return dict(self._stop_info)
 
     def reset_cancel(self) -> None:
-        self._cancel.clear()
+        with self._lock:
+            self._cancel.clear()
+            self._stop_info = None
 
     def _managed_runtime(self) -> dict[str, Any] | None:
         manifest = self._read_json(self.manifest_path)
@@ -1003,6 +1092,7 @@ class SetupEngine:
                 with partial.open(mode) as output:
                     while True:
                         if self._cancel.is_set():
+                            self._record_stop_outcome("stopped_confirmed")
                             raise SetupError("cancelled", "Setup was cancelled")
                         chunk = response.read(1024 * 1024)
                         if not chunk:
@@ -1323,23 +1413,38 @@ class SetupEngine:
         self._emit("runtime_start", "complete", f"llama-server is listening on port {port}", 1.0)
         return {"ok": True, **process_state}
 
-    def stop_managed(self) -> dict[str, Any]:
+    def stop_managed(
+        self,
+        *,
+        cause: str = "runtime_stop",
+        actor: str = "local_operator",
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
         process_state = self._read_json(self.process_path)
         pid = process_state.get("pid")
         if not isinstance(pid, int) or pid <= 0:
-            return {"ok": True, "already_stopped": True}
+            stop = self._record_stop_outcome(
+                "stopped_confirmed", default_cause=cause, default_actor=actor, request_id=request_id
+            )
+            return {"ok": True, "already_stopped": True, "stop": stop}
         if self._runtime_backend is not None:
             stopped = asyncio.run(self._runtime_backend.stop_slot("local_default"))
             if stopped:
                 self.process_path.unlink(missing_ok=True)
+                stop = self._record_stop_outcome(
+                    "stopped_confirmed", default_cause=cause, default_actor=actor, request_id=request_id
+                )
                 self._emit("runtime_stop", "complete", "Managed llama-server stopped", 1.0)
-                return {"ok": True, "pid": pid}
+                return {"ok": True, "pid": pid, "stop": stop}
         try:
             process = psutil.Process(pid)
             expected_executable = str(process_state.get("process_executable") or "").strip()
             expected_created_at = process_state.get("process_created_at")
             expected_model = str(process_state.get("model") or "").strip()
             if not expected_executable or not isinstance(expected_created_at, (int, float)):
+                self._record_stop_outcome(
+                    "outcome_unknown", default_cause=cause, default_actor=actor, request_id=request_id
+                )
                 raise SetupError(
                     "runtime_ownership_unverified",
                     "The saved runtime state predates process ownership checks; refusing to stop this PID",
@@ -1350,6 +1455,9 @@ class SetupEngine:
             command = {str(Path(arg).resolve(strict=False)).casefold() for arg in process.cmdline() if arg}
             recorded_model = str(Path(expected_model).resolve(strict=False)).casefold() if expected_model else ""
             if actual_executable != recorded_executable or not same_start or (recorded_model and recorded_model not in command):
+                self._record_stop_outcome(
+                    "outcome_unknown", default_cause=cause, default_actor=actor, request_id=request_id
+                )
                 raise SetupError(
                     "runtime_ownership_unverified",
                     "The saved PID no longer matches the Imperium-managed llama-server",
@@ -1365,10 +1473,16 @@ class SetupEngine:
         except SetupError:
             raise
         except psutil.Error as exc:
+            self._record_stop_outcome(
+                "outcome_unknown", default_cause=cause, default_actor=actor, request_id=request_id
+            )
             raise SetupError("runtime_stop_failed", f"Could not stop managed llama-server: {exc}") from exc
         self.process_path.unlink(missing_ok=True)
+        stop = self._record_stop_outcome(
+            "stopped_confirmed", default_cause=cause, default_actor=actor, request_id=request_id
+        )
         self._emit("runtime_stop", "complete", "Managed llama-server stopped", 1.0)
-        return {"ok": True, "pid": pid}
+        return {"ok": True, "pid": pid, "stop": stop}
 
     def apply(self, payload: dict[str, Any]) -> dict[str, Any]:
         if payload.get("confirm_download") is not True or payload.get("confirm_write") is not True:
@@ -1387,6 +1501,9 @@ class SetupEngine:
             runtime_started = False
             try:
                 for step in plan["steps"]:
+                    if self._cancel.is_set():
+                        self._record_stop_outcome("stopped_confirmed")
+                        raise SetupError("cancelled", "Setup was cancelled")
                     action = step["action"]
                     if action == "install_runtime":
                         results.append({"action": action, "result": self.install_runtime(backend, channel=channel)})

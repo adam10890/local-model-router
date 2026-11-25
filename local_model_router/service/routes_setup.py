@@ -318,13 +318,30 @@ async def setup_events(ctx: RouterContext, request: Request) -> Response:
             if await request.is_disconnected():
                 break
             await asyncio.sleep(0.5)
+        note_lost = getattr(ctx.setup_engine, "note_transport_lost", None)
+        if callable(note_lost):
+            note_lost()
 
     return StreamingResponse(stream_events(), media_type="text/event-stream")
 
 
 async def setup_cancel(ctx: RouterContext, request: Request) -> JSONResponse:
-    await asyncio.to_thread(ctx.setup_engine.cancel)
-    return JSONResponse({"ok": True})
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    cause = str(body.get("cause") or "ui_cancel")
+    actor = str(body.get("actor") or "dashboard")
+    req_id = request.headers.get("x-request-id")
+    stop = await asyncio.to_thread(
+        ctx.setup_engine.cancel,
+        cause=cause,
+        actor=actor,
+        request_id=req_id,
+    )
+    return JSONResponse({"ok": True, "stop": stop})
 
 
 async def setup_smoke(ctx: RouterContext, request: Request) -> JSONResponse:

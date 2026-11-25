@@ -8,7 +8,7 @@ This is a repository development checklist, not Personal Dashboard commitments o
 
 ## Next proposed slices
 
-Recommended review order: **P05 stop cause → P10 recovery gaps** (`P01` verified in `0.16.2`; `P03` and `P02` draft/focus maintenance verified in `0.16.3`). These can be implemented independently in isolated slices; P05 does not wait for a journal, native app, global framework or Herdr trial. Reorder a concrete security/configuration defect ahead of UI polish if one is found.
+Recommended review order: Phase A existing-path slices (`P01` in `0.16.2`, `P03` and `P02` draft/focus maintenance in `0.16.3`, `P05` stop attribution and `P10` installer recovery in `0.16.4`) are now **verified**; remaining Phase B–E packages stay parked behind their client-selection, post-beta Chat V2, and WB0 gates. Reorder a concrete security/configuration defect ahead of UI polish if one is found.
 
 Each package section records its primary proposal IDs, delivery state, first bounded implementation and measurable completion. Future checks named here are acceptance work, not tests run by this documentation change.
 
@@ -59,13 +59,13 @@ Each package section records its primary proposal IDs, delivery state, first bou
 <a id="p05"></a>
 ## P05 - Explain stops and distinguish disconnect from stopped
 
-- **State:** candidate - gap review and selection required. **Proposals:** R34 R46. **Effort:** Short attribution; Medium cancellation reconciliation; **simplicity:** Moderate; **urgency/value:** U0 / Very high.
+- **State:** verified (`0.16.4`, attribution slice; durable job cancellation gated on future execution surface). **Proposals:** R34 R46. **Effort:** Short attribution; Medium cancellation reconciliation; **simplicity:** Moderate; **urgency/value:** U0 / Very high.
 - **Depends on:** Existing lifecycle ownership and request IDs. **Gate:** Attribution now; durable job cancellation extends it later.
-- [ ] Recheck exact affected baseline and existing coverage; record selected scope, owner and missing behavior before implementation.
-- [ ] Record the first stop cause and safe initiating actor/request. Separate cancel requested, transport lost, stopped confirmed and outcome unknown.
-- [ ] Verify: A second stop cannot overwrite the first recorded cause. A disconnected browser cannot mark a still-running operation stopped. Exclude prompts, secret-bearing arguments and terminal text.
-- **Code/check owners:** local_model_router/cli.py; local_model_router/setup/engine.py; local_model_router/service/app.py; tests/test_cli_commands.py; tests/test_setup_engine.py.
-- **Evidence:** no implementation PR, runtime proof or completion receipt recorded.
+- [x] Recheck exact affected baseline and existing coverage; record selected scope, owner and missing behavior before implementation.
+- [x] Record the first stop cause and safe initiating actor/request. Separate cancel requested, transport lost, stopped confirmed and outcome unknown.
+- [x] Verify: A second stop cannot overwrite the first recorded cause. A disconnected browser cannot mark a still-running operation stopped. Exclude prompts, secret-bearing arguments and terminal text.
+- **Code/check owners:** local_model_router/cli.py; local_model_router/setup/engine.py; local_model_router/service/routes_setup.py; local_model_router/service/routes_fleet.py; tests/test_cli_commands.py; tests/test_setup_engine.py; tests/test_setup_api.py.
+- **Evidence:** Implemented and verified in `0.16.4` (`dev/herdr`); covered by first-stop-wins, secret-scrubbing, SSE disconnect preservation, and shutdown outcome tests.
 
 <a id="p06"></a>
 ## P06 - Preserve valid configuration and personal customizations
@@ -114,13 +114,13 @@ Each package section records its primary proposal IDs, delivery state, first bou
 <a id="p10"></a>
 ## P10 - Exercise the actual Windows installer recovery path
 
-- **State:** candidate - gap review and selection required. **Proposals:** R47 R48 R51. **Effort:** Medium; **simplicity:** Moderate; **urgency/value:** U1 / Very high.
+- **State:** verified (`0.16.4`). **Proposals:** R47 R48 R51. **Effort:** Medium; **simplicity:** Moderate; **urgency/value:** U1 / Very high.
 - **Depends on:** Existing Windows cleanroom harness and disposable fixture directories. **Gate:** Add missing cases rather than a second installer.
-- [ ] Recheck exact affected baseline and existing coverage; record selected scope, owner and missing behavior before implementation.
-- [ ] Inject promotion and rollback failures, preserve recoverable backups and literal PATH/registry types, and test the entrypoint actually shipped.
-- [ ] Verify: Failed promotion restores the old install; failed rollback preserves its backup and reports the real recovery path. Raw PATH representation and unrelated entries remain intact.
-- **Code/check owners:** scripts/test_windows_cleanroom.ps1; tests/test_windows_packaging.py; Windows installer/distribution entrypoints selected in gap review.
-- **Evidence:** no implementation PR, runtime proof or completion receipt recorded.
+- [x] Recheck exact affected baseline and existing coverage; record selected scope, owner and missing behavior before implementation.
+- [x] Inject promotion and rollback failures, preserve recoverable backups and literal PATH/registry types, and test the entrypoint actually shipped.
+- [x] Verify: Failed promotion restores the old install; failed rollback preserves its backup and reports the real recovery path. Raw PATH representation and unrelated entries remain intact.
+- **Code/check owners:** installer/windows/Install-Imperium.ps1; installer/windows/Rollback-Imperium.ps1; scripts/test_windows_cleanroom.ps1; tests/test_windows_packaging.py.
+- **Evidence:** Implemented and verified in `0.16.4` (`dev/herdr`); shipped `.bat`/`.ps1` entrypoints exercised under injected promotion and rollback failures alongside local + CI Windows cleanroom runs and raw `HKCU\Environment\Path` preservation checks.
 
 <a id="p11"></a>
 ## P11 - Verify staged updates and interrupted-update recovery

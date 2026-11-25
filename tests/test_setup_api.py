@@ -287,3 +287,75 @@ def test_setup_events_sse_resync_transition_and_unavailable(tmp_path, monkeypatc
         "history": "unavailable",
         "resync_required": True,
     }
+
+
+def test_sse_disconnect_preserves_running_setup_and_first_stop_cause_wins(tmp_path, monkeypatch):
+    monkeypatch.delenv("A0_LMM_ROUTER_API_KEY", raising=False)
+    app = create_app(
+        str(tmp_path / "missing.yaml"),
+        setup_home=str(tmp_path / "home"),
+        upstreams_path=str(tmp_path / "upstreams.yaml"),
+        apps_path=str(tmp_path / "apps.yaml"),
+        harnesses_path=str(tmp_path / "harnesses.yaml"),
+    )
+    app.state.setup_engine._emit("download", "running", "in-progress", progress=0.4)
+
+    class DisconnectingRequest:
+        query_params = {"after": "0"}
+        headers = {"accept": "text/event-stream"}
+
+        def __init__(self):
+            self._calls = 0
+
+        async def is_disconnected(self) -> bool:
+            self._calls += 1
+            return self._calls > 1
+
+    async def consume_then_disconnect() -> None:
+        ctx = SimpleNamespace(setup_engine=app.state.setup_engine)
+        response = await routes_setup.setup_events(ctx, DisconnectingRequest())
+        async for _chunk in response.body_iterator:
+            pass
+
+    asyncio.run(consume_then_disconnect())
+    state_after_disconnect = app.state.setup_engine.events(0)
+    assert state_after_disconnect["cancelled"] is False
+    assert state_after_disconnect["stop"] is None
+
+    client = TestClient(app)
+    headers = {"X-Setup-Token": app.state.setup_token, "X-Request-Id": "req-stop-1"}
+    first = client.post(
+        "/setup/cancel",
+        headers=headers,
+        json={"cause": "ui_cancel", "actor": "dashboard"},
+    )
+    assert first.status_code == 200
+    assert first.json()["stop"]["cause"] == "ui_cancel"
+    assert first.json()["stop"]["actor"] == "dashboard"
+    assert first.json()["stop"]["request_id"] == "req-stop-1"
+    assert first.json()["stop"]["state"] == "cancel_requested"
+
+    second = client.post(
+        "/setup/cancel",
+        headers={"X-Setup-Token": app.state.setup_token, "X-Request-Id": "req-stop-2"},
+        json={"cause": "late_override", "actor": "cli"},
+    )
+    assert second.status_code == 200
+    assert second.json()["stop"]["cause"] == "ui_cancel"
+    assert second.json()["stop"]["actor"] == "dashboard"
+    assert second.json()["stop"]["request_id"] == "req-stop-1"
+
+    shut_one = client.post(
+        "/fleet/prepare-shutdown",
+        headers={"X-Request-Id": "shut-1"},
+        json={"cause": "cli_shutdown", "actor": "cli"},
+    )
+    shut_two = client.post(
+        "/fleet/prepare-shutdown",
+        headers={"X-Request-Id": "shut-2"},
+        json={"cause": "other_cause", "actor": "other"},
+    )
+    assert shut_one.status_code == 200
+    assert shut_one.json()["stop"]["cause"] == "cli_shutdown"
+    assert shut_two.json()["stop"]["cause"] == "cli_shutdown"
+    assert shut_two.json()["stop"]["request_id"] == "shut-1"

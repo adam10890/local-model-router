@@ -3,9 +3,11 @@ param([switch]$NoShortcut)
 $ErrorActionPreference = "Stop"
 
 function Test-StrictChildPath([string]$Parent, [string]$Child) {
-    $Relative = [IO.Path]::GetRelativePath([IO.Path]::GetFullPath($Parent), [IO.Path]::GetFullPath($Child))
-    return $Relative -ne "." -and -not [IO.Path]::IsPathRooted($Relative) -and
-        $Relative -ne ".." -and -not $Relative.StartsWith("..$([IO.Path]::DirectorySeparatorChar)")
+    $Sep = [IO.Path]::DirectorySeparatorChar
+    $FullParent = [IO.Path]::GetFullPath($Parent).TrimEnd($Sep, [IO.Path]::AltDirectorySeparatorChar) + $Sep
+    $FullChild = [IO.Path]::GetFullPath($Child).TrimEnd($Sep, [IO.Path]::AltDirectorySeparatorChar)
+    $Cmp = $(if ($env:OS -eq "Windows_NT") { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal })
+    return $FullChild.Length -gt $FullParent.Length -and $FullChild.StartsWith($FullParent, $Cmp)
 }
 
 $Programs = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Programs"))

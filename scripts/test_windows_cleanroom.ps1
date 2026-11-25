@@ -15,9 +15,11 @@ $Repo = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $BuildRoot = [IO.Path]::GetFullPath((Join-Path $Repo "build"))
 
 function Test-StrictChildPath([string]$Parent, [string]$Child) {
-    $Relative = [IO.Path]::GetRelativePath([IO.Path]::GetFullPath($Parent), [IO.Path]::GetFullPath($Child))
-    return $Relative -ne "." -and -not [IO.Path]::IsPathRooted($Relative) -and
-        $Relative -ne ".." -and -not $Relative.StartsWith("..$([IO.Path]::DirectorySeparatorChar)")
+    $Sep = [IO.Path]::DirectorySeparatorChar
+    $FullParent = [IO.Path]::GetFullPath($Parent).TrimEnd($Sep, [IO.Path]::AltDirectorySeparatorChar) + $Sep
+    $FullChild = [IO.Path]::GetFullPath($Child).TrimEnd($Sep, [IO.Path]::AltDirectorySeparatorChar)
+    $Cmp = $(if ($env:OS -eq "Windows_NT") { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal })
+    return $FullChild.Length -gt $FullParent.Length -and $FullChild.StartsWith($FullParent, $Cmp)
 }
 
 function Write-FailurePayload($Payload, [string]$Label) {
@@ -237,6 +239,26 @@ if ($FullOfflineSetup) {
     if ($LASTEXITCODE -ne 0) { throw "The managed runtime did not stop cleanly." }
 }
 
+$PromotionRecoveryVerified = $false
+$env:IMPERIUM_TEST_FAIL_PROMOTE = "1"
+$FailedPromoteExit = 0
+try {
+    & (Join-Path $BundleRoot "Install-Imperium.ps1") -NoShortcut -NoLaunch *> $null
+    $FailedPromoteExit = 0
+} catch {
+    $FailedPromoteExit = 1
+} finally {
+    Remove-Item Env:IMPERIUM_TEST_FAIL_PROMOTE -ErrorAction SilentlyContinue
+}
+if ($FailedPromoteExit -eq 0) { throw "Injected promotion failure unexpectedly succeeded." }
+if (-not (Test-Path -LiteralPath (Join-Path $Target "runtime\python\python.exe"))) {
+    throw "Failed promotion did not restore the existing Imperium installation."
+}
+if (@(Get-ChildItem -LiteralPath (Join-Path $LocalAppData "Programs") -Filter "Imperium.staging-*" -ErrorAction SilentlyContinue).Count -gt 0) {
+    throw "Failed promotion left staging directories behind."
+}
+$PromotionRecoveryVerified = $true
+
 $ApplicationRollbackVerified = $false
 if ($Lifecycle) {
     if (-not (Test-Path -LiteralPath (Join-Path $LocalAppData "Programs\Imperium.previous"))) {
@@ -292,6 +314,7 @@ $Result = [ordered]@{
         repair = $(if ($FullOfflineSetup) { $RepairVerified } else { $null })
         update_check = $(if ($Lifecycle) { $UpdateChecked } else { $null })
         runtime_rollback = $(if ($Lifecycle) { $RuntimeRollbackVerified } else { $null })
+        promotion_recovery = $PromotionRecoveryVerified
         application_rollback = $(if ($Lifecycle) { $ApplicationRollbackVerified } else { $null })
         uninstall = $UninstallVerified
         preserved_data = ((Test-Path -LiteralPath $DataSentinel) -and (Test-Path -LiteralPath $OutsideSentinel))

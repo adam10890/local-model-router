@@ -293,6 +293,29 @@ async def fleet_stop_all(ctx: RouterContext, request: Request) -> Response:
 
 
 async def fleet_prepare_shutdown(ctx: RouterContext, request: Request) -> Response:
+    from local_model_router.setup.engine import safe_stop_request_id, safe_stop_token
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    attributed = bool(body.get("cause") or body.get("actor") or request.headers.get("x-request-id"))
+    if ctx.shutdown_info.get("first") is None:
+        ctx.shutdown_info["first"] = {
+            "cause": safe_stop_token(body.get("cause"), "prepare_shutdown"),
+            "actor": safe_stop_token(body.get("actor") or request.headers.get("x-app-id"), "local_operator"),
+            "request_id": safe_stop_request_id(request.headers.get("x-request-id")),
+            "state": "stopped_confirmed",
+            "requested_at": time.time(),
+        }
+    stop_meta = dict(ctx.shutdown_info["first"])
+    stop_headers = {
+        "x-imperium-stop-cause": str(stop_meta["cause"]),
+        "x-imperium-stop-actor": str(stop_meta["actor"]),
+        "x-imperium-stop-state": str(stop_meta["state"]),
+    }
     watcher_task = ctx.watcher_task_ref.get("task")
     if watcher_task is not None and not watcher_task.done():
         watcher_task.cancel()
@@ -301,10 +324,22 @@ async def fleet_prepare_shutdown(ctx: RouterContext, request: Request) -> Respon
     if ctx.hermes_watcher is not None:
         await ctx.hermes_watcher.stop()
     if not ctx.control_enabled or not ctx.supports_start_stop:
-        return JSONResponse(
-            {"ok": True, "action": "prepare_shutdown", "results": {}}
-        )
-    return await _run_control(ctx, request, "stop_all")
+        out: dict[str, Any] = {"ok": True, "action": "prepare_shutdown", "results": {}}
+        if attributed:
+            out["stop"] = stop_meta
+        return JSONResponse(out, headers=stop_headers)
+    resp = await _run_control(ctx, request, "stop_all")
+    if attributed and isinstance(resp, JSONResponse) and resp.status_code == 200:
+        try:
+            payload = json.loads(bytes(resp.body).decode("utf-8"))
+            if isinstance(payload, dict):
+                payload["stop"] = stop_meta
+                return JSONResponse(payload, status_code=resp.status_code, headers=stop_headers)
+        except Exception:
+            pass
+    for hdr_k, hdr_v in stop_headers.items():
+        resp.headers[hdr_k] = hdr_v
+    return resp
 
 
 async def fleet_agents(ctx: RouterContext, request: Request) -> JSONResponse:

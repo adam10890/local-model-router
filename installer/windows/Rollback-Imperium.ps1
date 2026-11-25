@@ -1,9 +1,11 @@
 $ErrorActionPreference = "Stop"
 
 function Test-StrictChildPath([string]$Parent, [string]$Child) {
-    $Relative = [IO.Path]::GetRelativePath([IO.Path]::GetFullPath($Parent), [IO.Path]::GetFullPath($Child))
-    return $Relative -ne "." -and -not [IO.Path]::IsPathRooted($Relative) -and
-        $Relative -ne ".." -and -not $Relative.StartsWith("..$([IO.Path]::DirectorySeparatorChar)")
+    $Sep = [IO.Path]::DirectorySeparatorChar
+    $FullParent = [IO.Path]::GetFullPath($Parent).TrimEnd($Sep, [IO.Path]::AltDirectorySeparatorChar) + $Sep
+    $FullChild = [IO.Path]::GetFullPath($Child).TrimEnd($Sep, [IO.Path]::AltDirectorySeparatorChar)
+    $Cmp = $(if ($env:OS -eq "Windows_NT") { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal })
+    return $FullChild.Length -gt $FullParent.Length -and $FullChild.StartsWith($FullParent, $Cmp)
 }
 
 $Programs = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Programs"))
@@ -36,18 +38,31 @@ Set-Location -LiteralPath $Programs
 
 try {
     if (Test-Path -LiteralPath $Target) { Move-Item -LiteralPath $Target -Destination $Swap }
+    if ($env:IMPERIUM_TEST_FAIL_ROLLBACK -eq "1") {
+        throw "Simulated rollback failure."
+    }
     Move-Item -LiteralPath $Previous -Destination $Target
     if (Test-Path -LiteralPath $Swap) { Move-Item -LiteralPath $Swap -Destination $Previous }
 } catch {
-    if (-not (Test-Path -LiteralPath $Target)) {
-        if (Test-Path -LiteralPath $Swap) {
-            Move-Item -LiteralPath $Swap -Destination $Target
-        } elseif (Test-Path -LiteralPath $Previous) {
-            Move-Item -LiteralPath $Previous -Destination $Target
+    $RollbackError = $_
+    try {
+        if (-not (Test-Path -LiteralPath $Target)) {
+            if ($env:IMPERIUM_TEST_FAIL_ROLLBACK_RESTORE -eq "1") {
+                throw "Simulated rollback restore failure."
+            }
+            if (Test-Path -LiteralPath $Swap) {
+                Move-Item -LiteralPath $Swap -Destination $Target
+            } elseif (Test-Path -LiteralPath $Previous) {
+                Move-Item -LiteralPath $Previous -Destination $Target
+            }
         }
-    }
-    if ((Test-Path -LiteralPath $Swap) -and -not (Test-Path -LiteralPath $Previous)) {
-        Move-Item -LiteralPath $Swap -Destination $Previous
+        if ((Test-Path -LiteralPath $Swap) -and -not (Test-Path -LiteralPath $Previous)) {
+            Move-Item -LiteralPath $Swap -Destination $Previous
+        }
+    } catch {
+        $Surviving = $(if (Test-Path -LiteralPath $Previous) { $Previous } elseif (Test-Path -LiteralPath $Swap) { $Swap } else { $Programs })
+        Write-Output "Recoverable backup preserved at: $Surviving"
+        throw "Rollback failed ($($RollbackError.Exception.Message)) and restore failed ($($_.Exception.Message)). Recoverable backup preserved at: $Surviving"
     }
     throw
 }
