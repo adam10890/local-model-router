@@ -23,7 +23,7 @@
       "estimated_kv_cache_gb": 0.375,
       "context": 16384,
       "runtime_context": 4096,
-      "min_llama_cpp": "b9987",
+      "min_llama_cpp": "b12359",
       "capabilities": ["chat", "code", "tools", "json", "multilingual"],
       "roles": ["auto", "chat", "fast", "coder"],
       "first_run_default": true,

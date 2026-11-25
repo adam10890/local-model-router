@@ -168,38 +168,6 @@ owns renderer attempts, and Imperium owns admission and GPU ownership.
   are gated on beta stability and the Proposed ADRs for the standby route.
 - **Slug:** `hermes-chat-during-studio`
 
-### Q8 — llama.cpp v1.0.0 runtime pin (`b12359`)
-
-Move the managed Windows runtime from nightly `b12110` to `b12359`, the binary
-build named by the llama.cpp `v1.0.0` source release. Keep the current server
-arguments, smoke on the live RTX machine, and roll back on any failed probe.
-New flags (FP8 KV cache, MoE cache, sharding, audio) are follow-ups that each
-need a measured profile change.
-
-- **Detail:** [`superpowers/plans/2026-11-16-llama-cpp-v1.md`](superpowers/plans/2026-11-16-llama-cpp-v1.md)
-- **Status:** queued — Task 5 needs the live machine and Adam's approval
-- **Slug:** `llama-cpp-v1`
-- **Update every version reference in the same change.** Before merging, run
-  `git grep -n -E "b9987|b12110|min_llama_cpp"` and resolve every hit:
-  - Change to `b12359`: `local_model_router/setup/runtime_catalog.json`
-    (`recommended` tag, source, commit, and every asset name, URL, sha256 and
-    size), `local_model_router/setup/model_catalog.json` `min_llama_cpp`, the
-    `--tag` help example in `local_model_router/cli.py`, the `b12110`
-    comments in `helpers/backends/docker_backend.py` and
-    `subprocess_backend.py` (re-check the behavior they describe), and the
-    tests that hard-code the recommended tag (`tests/test_setup_engine.py`,
-    `tests/test_cli_commands.py`).
-  - Decide explicitly: the Docker images
-    (`ghcr.io/ggml-org/llama.cpp:server-cuda` / `:server` in
-    `docker_backend.py` and `conf/llama_cpp_servers.example.yaml`) use
-    floating tags. Pin them to the `b12359` build or document that Docker
-    stays unpinned.
-  - Leave unchanged, because they record history: `docs/evidence/*.json`,
-    `docs/1.0-beta-evidence.md`, `changes/`, and the PR #24 notes in
-    `scripts/branch_guard.py` and `tests/test_branch_guard.py`.
-  - The live machine: `imperium update --tag b12359 --yes`, then confirm the
-    manifest shows `runtime.tag` `b12359` and `previous_runtime.tag` `b12110`.
-
 ## Open questions
 
 These are contradictions between accepted documents, not ideas. They are the
@@ -254,6 +222,20 @@ entry. Listed so `scripts/branch_guard.py --queue` can see the slug.
 ## Shipped
 
 Newest first. An entry here is traceable to the version that carries it.
+
+- **llama.cpp v1.0.0 managed Windows runtime pin (`b12359`, Q8)** (0.16.5) —
+  retargeted `runtime_catalog.json` (`cpu`, `vulkan`, `cuda12`) and
+  `model_catalog.json` (`min_llama_cpp`) to rolling build `b12359` after live
+  RTX 4090 verification, added `v1.0.0` source-tag guidance and subprocess flag
+  locks, and documented that optional Docker images remain on upstream floating
+  tags unless operator-pinned.
+  [`superpowers/plans/2026-11-16-llama-cpp-v1.md`](superpowers/plans/2026-11-16-llama-cpp-v1.md).
+- **Herdr Phase A existing-path reliability slices (`P01`, `P02` maintenance, `P03`, `P05`, `P10`)** (0.16.2–0.16.4) —
+  monotonic `/setup/events` cursors and `resync` recovery, `/ui/status` freshness
+  generation fences and harness evidence tiers, chat draft/focus/scroll
+  continuity, first-stop-wins cause/actor/request-id attribution, and Windows
+  installer `Imperium.previous` promotion/rollback recovery (`powershell.exe` 5.1
+  compatible). [`herdr-todo.md`](herdr-todo.md).
 
 - **Pin-drift alert, MCP harness resources, and OpenAPI 3.1.0 schema** (0.16.0) —
   optional `harness_pin_drift` alert in `GET /ui/status`, read-only MCP
