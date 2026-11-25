@@ -73,6 +73,10 @@ def test_dashboard_ships_en_he_and_light_dark_theme_hooks(tmp_path, monkeypatch)
     assert 'data-action="export-diagnostics"' in html
     assert 'exportDiagnostics:"Export sanitized diagnostics"' in html
     assert 'exportDiagnostics:"ייצוא אבחון מסונן"' in html
+    assert 'staleStatus:"Status stale"' in html
+    assert 'staleStatus:"מצב לא עדכני"' in html
+    assert "function fetchStatus()" in html
+    assert "chatDraft" in html
     assert "127.0.0.1:7440" not in html
 
 
@@ -83,6 +87,8 @@ def test_ui_status_exposes_actionable_readiness_fields(tmp_path, monkeypatch):
     assert "next_action" in body
     assert "blocking_issues" in body
     assert isinstance(body["blocking_issues"], list)
+    assert body["freshness"]["generation"] >= 1
+    assert body["freshness"]["checked_at"]
     action = body["next_action"] or {}
     assert action.get("code") or action.get("label")
     assert "traceback" not in str(body).lower()

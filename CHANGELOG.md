@@ -6,6 +6,21 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- Readiness freshness, generation fences, and chat draft continuity (Herdr P03
+  and P02 maintenance slice; R02, R19–R21):
+  - `GET /ui/status` (`routes_setup.py`, `readiness.py`) emits monotonic
+    `freshness.generation`, `checked_at`, `last_ready_at`, and
+    `stale_after_seconds`.
+  - Harness connection readiness (`harnesses/setup.py`, `routes_harnesses.py`)
+    separates `configured`, `reachable`, `completion_verified`, and
+    `client_verified` (`evidence_level`), keeping `/models` from claiming
+    completion verification, preventing subsequent `/models` polls from
+    downgrading verified state, and clearing stale verification on repin.
+  - Dashboard (`dashboard/assets/app.js`, `i18n.js`) fences `/ui/status`
+    replies by request and server generation so late replies cannot overwrite
+    newer/disconnected state, surfaces stale/unavailable status on disconnect
+    and wake (`visibilitychange`/`focus`/`online`), and preserves composer
+    drafts, active input focus/caret selection, and chat scroll across updates.
 - Setup event stream and polling cursor regression (Herdr P01 / R16–R18):
   `SetupEngine` (`local_model_router/setup/engine.py`) now assigns monotonic
   event IDs across the 200-item retention window and reports `history`

@@ -182,6 +182,10 @@ def build_ui_status(
     process_models: dict[int, str] | None = None,
     live_ids: list[str] | None = None,
     harnesses: list[dict[str, Any]] | None = None,
+    generation: int | None = None,
+    checked_at: str | None = None,
+    last_ready_at: str | None = None,
+    stale_after_seconds: int = 30,
 ) -> dict[str, Any]:
     discovery = setup_state.get("discovery") or {}
     hardware = setup_state.get("hardware") or {}
@@ -405,4 +409,10 @@ def build_ui_status(
             {"code": "model", "complete": model_ready, "label": _text("Model", "מודל")},
             {"code": "server", "complete": server_ready, "label": _text("Ready", "מוכן")},
         ],
+        "freshness": {
+            "generation": int(generation or 0),
+            "checked_at": checked_at,
+            "last_ready_at": last_ready_at,
+            "stale_after_seconds": int(stale_after_seconds),
+        },
     }

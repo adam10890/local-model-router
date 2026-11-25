@@ -73,11 +73,36 @@ def resolve_harness_request(ctx: RouterContext, request: Request) -> tuple[Any, 
     return profile, connection
 
 
-def mark_harness_activity(ctx: RouterContext, profile: Any, connection: Any, state: str) -> None:
-    ctx.harness_activity[f"{profile.harness_id}/{connection.name}"] = {
-        "state": state,
-        "last_seen": datetime.now(timezone.utc).isoformat(),
+def mark_harness_activity(
+    ctx: RouterContext,
+    profile: Any,
+    connection: Any,
+    state: str,
+    *,
+    client_verified: bool = False,
+) -> None:
+    key = f"{profile.harness_id}/{connection.name}"
+    now = datetime.now(timezone.utc).isoformat()
+    prev = dict(ctx.harness_activity.get(key) or {})
+    prev_state = str(prev.get("state") or "not_seen")
+    effective_state = (
+        prev_state
+        if prev_state in {"verified", "client_verified"} and state in {"connected", "seen"}
+        else state
+    )
+    record: Dict[str, Any] = {
+        **prev,
+        "state": effective_state,
+        "last_seen": now,
     }
+    if state in {"connected", "seen", "verified", "client_verified"}:
+        record["reachable_at"] = now
+    if state in {"verified", "client_verified"}:
+        record["completion_verified_at"] = now
+    if client_verified or state == "client_verified":
+        record["client_verified"] = True
+        record["client_verified_at"] = now
+    ctx.harness_activity[key] = record
 
 
 async def harnesses_list(ctx: RouterContext, request: Request) -> JSONResponse:
@@ -163,6 +188,7 @@ async def harness_pin(ctx: RouterContext, request: Request) -> JSONResponse:
         ctx.harness_profiles, _backup = ctx.harness_profiles.set_connection_model(
             harness_id, connection_name, model
         )
+        ctx.harness_activity.pop(f"{harness_id}/{connection_name}", None)
         profile = ctx.harness_profiles.get(harness_id)
     except HarnessConfigError as exc:
         return JSONResponse(
@@ -244,7 +270,14 @@ async def harness_chat(ctx: RouterContext, request: Request) -> Response:
     mark_harness_activity(ctx, profile, connection, "seen")
     response = await handle_chat_completions(ctx, request)
     if getattr(response, "status_code", 500) < 400:
-        mark_harness_activity(ctx, profile, connection, "verified")
+        app_id = str(request.headers.get("x-app-id") or "").strip().lower()
+        identified_client = bool(app_id) and app_id in {
+            str(profile.harness_id).lower(),
+            str(profile.kind).lower(),
+        }
+        mark_harness_activity(
+            ctx, profile, connection, "verified", client_verified=identified_client
+        )
     return response
 
 
