@@ -54,9 +54,9 @@
     theme: localStorage.getItem("imperium.theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
     mode: localStorage.getItem("imperium.mode") || "simple",
     route: "home", status: null, setup: null, fleet: null, modelsList: [], harnesses: [], configWritesEnabled: false, cookbook: null, evaluations: null, config: null, budget: null, diagnostics: null, diagnosticsBusy: false,
-    modelTab: "recommended", messages: loadChat(), chatModel: localStorage.getItem("imperium.chatModel") || "auto", busy: false, aborter: null,
+    modelTab: "recommended", messages: loadChat(), chatDraft: "", renderedMsgCount: 0, chatModel: localStorage.getItem("imperium.chatModel") || "auto", busy: false, aborter: null,
     wizardStep: savedSetup.step, wizard: {runtime:"native", launch:"background", backend:"", channel:"recommended", modelId:"", existingUrl:"", confirmDownloads:false, confirmConfig:false, preferLocal:false, scanned:false,...savedSetup.wizard}, setupPlan: savedSetup.plan, setupFailure: null, setupRunning: false, events: [], eventCursor: 0, progress: 0,
-    apiKey: loadApiKey(), fleetQuery: "", routingRole: "chat", routingStrategy: "balanced_local", routingDecision: null, error: ""
+    apiKey: loadApiKey(), fleetQuery: "", routingRole: "chat", routingStrategy: "balanced_local", routingDecision: null, error: "", statusSeq: 0, appliedStatusSeq: 0, appliedServerGen: 0, lastStatusOkAt: 0, statusStale: false
   };
   function saveSetup() { try { localStorage.setItem("imperium.setup",JSON.stringify({step:state.wizardStep,wizard:state.wizard,plan:state.setupPlan})); } catch (_) {} }
   function setWizardStep(step) {
@@ -86,10 +86,41 @@
       return payload;
     });
   }
+  function isStatusStale() {
+    if (state.error || state.statusStale) return true;
+    if (!state.lastStatusOkAt) return false;
+    const ttlMs = Math.max(5, Number(state.status?.freshness?.stale_after_seconds || 30)) * 1000;
+    return (Date.now() - state.lastStatusOkAt) > ttlMs;
+  }
+  async function fetchStatus() {
+    const seq = ++state.statusSeq;
+    try {
+      const status = await request("/ui/status");
+      if (seq < state.appliedStatusSeq) return { applied: false, status: state.status };
+      const serverGen = Number(status?.freshness?.generation || 0);
+      if (serverGen > 0 && state.appliedServerGen > 0 && serverGen < state.appliedServerGen && seq <= state.appliedStatusSeq) return { applied: false, status: state.status };
+      const prevChanged = gpuRenderKey(status) !== gpuRenderKey(state.status) || Boolean(state.error) || state.statusStale || status?.overall !== state.status?.overall;
+      state.appliedStatusSeq = seq;
+      if (serverGen > 0) state.appliedServerGen = serverGen;
+      state.status = status;
+      state.setup = status?.setup || state.setup;
+      state.lastStatusOkAt = Date.now();
+      state.statusStale = false;
+      state.error = "";
+      return { applied: true, changed: prevChanged, status };
+    } catch (error) {
+      if (seq < state.appliedStatusSeq) return { applied: false, error };
+      const hadError = Boolean(state.error);
+      state.appliedStatusSeq = seq;
+      state.error = error.message || t("statusUnavailable");
+      state.statusStale = state.lastStatusOkAt > 0;
+      return { applied: true, changed: !hadError || state.statusStale, error };
+    }
+  }
   async function loadData() {
     state.configWritesEnabled=false;
+    const statusPromise = fetchStatus();
     const jobs = [
-      ["status",()=>request("/ui/status")],
       ["modelsList",()=>request("/v1/models").then(x=>x.data||[])],
       ["harnesses",()=>request("/harnesses").then(x=>{state.configWritesEnabled=x.config_writes_enabled===true;return x.harnesses||x.items||[];})], ["fleet",()=>request("/fleet/status")],
       ["config",()=>request("/config/preview")], ["cookbook",()=>request("/cookbook")],
@@ -97,7 +128,7 @@
       ["evaluations",()=>request("/routing/evaluations")]
     ];
     const loadMeta={};
-    await Promise.all(jobs.map(async ([key,job]) => { try { state[key] = await job(); loadMeta[key]="ok"; if(key==="status")state.error=""; } catch (error) { loadMeta[key]=`fail:${error.status||""}:${error.message}`; if(key==="status")state.error=error.message; } }));
+    await Promise.all([statusPromise, ...jobs.map(async ([key,job]) => { try { state[key] = await job(); loadMeta[key]="ok"; } catch (error) { loadMeta[key]=`fail:${error.status||""}:${error.message}`; } })]);
     state.setup=state.status?.setup||state.setup;
     if (!state.wizard.backend && state.setup?.recommended_backend) state.wizard.backend = state.setup.recommended_backend;
     if (state.setup?.platform_support?.status !== "supported" && state.wizard.runtime === "native") state.wizard.runtime = "existing";
@@ -116,10 +147,10 @@
     const gpu=status?.hermes_gpu;if(!gpu)return "";
     return JSON.stringify([gpu.desired,gpu.loaded,gpu.phase,gpu.attempt,gpu.next_attempt_at,gpu.failure_code,gpu.warning,gpu.effective_n_ctx,gpu.context_source,gpuActionActive(gpu)?Math.floor((gpu.duration_ms||0)/5000):0]);
   }
-  async function pollGpuStatus() {
-    if(gpuPollBusy)return;gpuPollBusy=true;
-    try { const status=await request("/ui/status");const changed=gpuRenderKey(status)!==gpuRenderKey(state.status);state.status=status;state.setup=status?.setup||state.setup;if(changed)render(); }
-    catch (_) {}
+  async function pollGpuStatus(force=false) {
+    if(gpuPollBusy&&!force)return;
+    gpuPollBusy=true;
+    try { const outcome=await fetchStatus(); if(outcome.applied&&(outcome.changed||force))render(); }
     finally { gpuPollBusy=false; }
   }
   function toast(message) {
@@ -128,7 +159,9 @@
   }
   function announce(message) { document.getElementById("live").textContent=message; }
   function statusLabel() {
+    if (state.error) return state.statusStale ? t("staleStatus") : t("offline");
     if (!state.status) return t("loading");
+    if (isStatusStale()) return t("staleStatus");
     return state.status.overall === "ready" ? t("ready") : state.status.overall === "needs_attention" ? t("needsAttention") : t("setupRequired");
   }
   function navButton([route,icon,label]) {
@@ -243,11 +276,14 @@
     return `<div class="facts">${facts.map(([icon,label,value])=>`<div class="fact">${I(icon)}<div><strong>${t(label)}</strong><span title="${esc(value)}">${esc(value)}</span></div></div>`).join("")}</div>`;
   }
   function homePage() {
-    const overall=state.status?.overall||"setup_required"; const ready=overall==="ready"; const attention=overall==="needs_attention";
-    const title=ready?t("readyTitle"):attention?t("attentionTitle"):t("setupTitle"); const copy=ready?t("readySubtitle"):attention?t("attentionSubtitle"):t("setupSubtitle");
+    const stale=isStatusStale();
+    const overall=state.status?.overall||"setup_required"; const ready=!stale&&overall==="ready"; const attention=stale||overall==="needs_attention";
+    const title=ready?t("readyTitle"):attention?t("attentionTitle"):t("setupTitle"); const copy=ready?t("readySubtitle"):stale?t("statusUnavailable"):attention?t("attentionSubtitle"):t("setupSubtitle");
     const next=state.status?.next_action||{href:"#/setup",label:{en:"Continue setup",he:"המשך ההגדרה"}};
+    const primaryBtn=stale?`<button class="button primary" data-action="refresh">${I("arrow-clockwise")} ${t("refresh")}</button>`:`<button class="button primary" data-route="${esc((next.href||"#/setup").replace(/^#\//,""))}">${localized(next.label)} ${I("arrow-right")}</button>`;
+    const staleBanner=stale?`<div class="status-banner warning" data-status-freshness="${state.error?"unavailable":"stale"}">${I("warning-circle")}<div><strong>${esc(statusLabel())}</strong><div class="muted">${esc(t("statusUnavailable"))}${state.lastStatusOkAt?` · ${t("lastVerifiedAt")}: ${esc(new Intl.DateTimeFormat(state.lang==="he"?"he-IL":"en-US",{timeStyle:"medium"}).format(new Date(state.lastStatusOkAt)))}`:""}</div></div></div>`:"";
     const optional=state.status?.optional_issues||[];
-    return `<div class="page">${pageHeader(title,copy,`<button class="button primary" data-route="${esc((next.href||"#/setup").replace(/^#\//,""))}">${localized(next.label)} ${I("arrow-right")}</button>`,statusLabel())}${readinessHtml()}${hermesGpuPanel()}${modelCardHome()}${factsHtml()}<div class="quick-actions">${(state.status?.quick_actions||[]).map(action=>`<button class="button small" data-route="${esc((action.href||"").replace(/^#\//,""))}">${localized(action.label)}</button>`).join("")}</div>${optional.length?`<section class="additional"><h3>${t("additional")}</h3>${optional.map(issue=>`<div class="issue-row"><span>${localized(issue.message)}</span><button class="button small" data-route="${esc((issue.action?.href||"advanced/diagnostics").replace(/^#\//,""))}">${localized(issue.action?.label)}</button></div>`).join("")}</section>`:""}</div>`;
+    return `<div class="page">${pageHeader(title,copy,primaryBtn,statusLabel())}${staleBanner}${readinessHtml()}${hermesGpuPanel()}${modelCardHome()}${factsHtml()}<div class="quick-actions">${(state.status?.quick_actions||[]).map(action=>`<button class="button small" data-route="${esc((action.href||"").replace(/^#\//,""))}">${localized(action.label)}</button>`).join("")}</div>${optional.length?`<section class="additional"><h3>${t("additional")}</h3>${optional.map(issue=>`<div class="issue-row"><span>${localized(issue.message)}</span><button class="button small" data-route="${esc((issue.action?.href||"advanced/diagnostics").replace(/^#\//,""))}">${localized(issue.action?.label)}</button></div>`).join("")}</section>`:""}</div>`;
   }
   function localModelDetails(row) { const file=(row.path||"").split(/[\\/]/).at(-1);const report=(state.cookbook?.models||[]).find(item=>item.path===row.path||item.file===file)||{};return {...row,...report,id:row.id,name:row.name||report.file,installed:true,quant:report.quant||"GGUF",context:report.max_ctx_fit||report.n_ctx_train||"—",license:row.license||"—",fit:report.fit||"local"}; }
   function modelDetails(id) { const local=(state.setup?.discovery?.local_models||[]).find(row=>row.id===id);return local?localModelDetails(local):(state.setup?.models||[]).find(row=>row.id===id); }
@@ -270,8 +306,9 @@
   function chatPage() {
     const options=chatModelOptions();
     const blocked=gpuChatBlocked();
+    const canSend=Boolean((state.chatDraft||"").trim())&&!state.busy&&!blocked;
     const messages=state.messages.length?state.messages.map(message=>`<div class="message ${message.role}">${esc(message.content)}${message.truncated?`<div class="status-banner warning" style="margin:10px 0 0">${I("warning-circle")}<div>${t("outputTruncated")}</div></div>`:""}${message.routing?`<details class="routing-detail"><summary>${t("routing")}</summary>${esc(message.routing)}</details>`:""}${message.error?`<div style="margin-top:10px"><button class="button small" data-action="retry-chat">${I("arrow-clockwise")} ${t("retry")}</button></div>`:""}</div>`).join(""):`<div class="empty">${I("chat-circle-dots")}<div><h3>${t("emptyChat")}</h3><p>${t("emptyChatCopy")}</p><div class="prompt-chips">${["prompt1","prompt2","prompt3"].map(key=>`<button class="prompt-chip" data-prompt="${esc(t(key))}" ${blocked?"disabled":""}>${t(key)}</button>`).join("")}</div></div></div>`;
-    return `<div class="page chat-layout"><div><div class="chat-toolbar"><div><h2>${t("chatPage")}</h2><span class="muted">${t("chatPageCopy")}</span></div><div style="display:flex;gap:8px"><label class="sr-only" for="chat-model">${t("chooseModel")}</label><select class="select" id="chat-model" style="width:auto">${options.map(row=>`<option value="${esc(row.id)}" ${state.chatModel===row.id?"selected":""}>${esc(state.mode==="advanced"?row.id:chatModelLabel(row.id))}</option>`).join("")}</select><button class="button small" data-action="clear-chat">${I("trash")} ${t("clear")}</button></div></div>${hermesGpuPanel()}</div><div class="chat-messages" id="chat-messages">${messages}</div><div class="composer"><form class="composer-box" id="chat-form"><label class="sr-only" for="chat-input">${t("chatPage")}</label><textarea id="chat-input" placeholder="${esc(blocked?t("sendBlockedLoading"):t("emptyChat"))}" ${state.busy||blocked?"disabled":""}></textarea><button class="icon-button" id="chat-send" type="${state.busy?"button":"submit"}" ${state.busy?'data-action="stop-chat"':"disabled"} aria-label="${state.busy?t("stopGeneration"):t("send")}">${I(state.busy?"stop":"paper-plane-tilt")}</button></form></div></div>`;
+    return `<div class="page chat-layout"><div><div class="chat-toolbar"><div><h2>${t("chatPage")}</h2><span class="muted">${t("chatPageCopy")}</span></div><div style="display:flex;gap:8px"><label class="sr-only" for="chat-model">${t("chooseModel")}</label><select class="select" id="chat-model" style="width:auto">${options.map(row=>`<option value="${esc(row.id)}" ${state.chatModel===row.id?"selected":""}>${esc(state.mode==="advanced"?row.id:chatModelLabel(row.id))}</option>`).join("")}</select><button class="button small" data-action="clear-chat">${I("trash")} ${t("clear")}</button></div></div>${hermesGpuPanel()}</div><div class="chat-messages" id="chat-messages">${messages}</div><div class="composer"><form class="composer-box" id="chat-form"><label class="sr-only" for="chat-input">${t("chatPage")}</label><textarea id="chat-input" placeholder="${esc(blocked?t("sendBlockedLoading"):t("emptyChat"))}" ${state.busy||blocked?"disabled":""}>${esc(state.chatDraft||"")}</textarea><button class="icon-button" id="chat-send" type="${state.busy?"button":"submit"}" ${state.busy?'data-action="stop-chat"':canSend?"":"disabled"} aria-label="${state.busy?t("stopGeneration"):t("send")}">${I(state.busy?"stop":"paper-plane-tilt")}</button></form></div></div>`;
   }
   const integrations=[
     {id:"openai",name:"OpenAI SDK",icon:"code",model:"auto",copy:{en:"Python and JavaScript clients using a custom base URL.",he:"לקוחות Python ו־JavaScript עם כתובת בסיס מותאמת."}},
@@ -284,7 +321,7 @@
     {id:"generic",name:"Generic API",icon:"plugs-connected",model:"auto",copy:{en:"For any OpenAI-compatible application.",he:"לכל אפליקציה שתואמת ל־OpenAI."}}
   ];
   function laneCards() { const lanes=Object.entries(state.fleet?.queues||{});return lanes.length?`<div class="cards">${lanes.map(([name,lane])=>`<article class="card"><h3 class="mono">${esc(name)}</h3><div class="meta-line"><span>${esc(lane.mode)}</span><span>${lane.active??"—"} active</span><span>${lane.queued??"—"} queued</span></div><p class="muted">limit ${lane.max_active??"delegated"} / queue ${lane.max_queue??"delegated"}</p></article>`).join("")}</div>`:""; }
-  function harnessRows() { return state.harnesses.flatMap(item=>(item.connections||[]).map(connection=>{const lane=connection.model?.includes("/")?`upstream:${connection.model.split("/")[0]}`:"local";const capacity=state.fleet?.queues?.[lane];return [`${item.display_name||item.harness_id} · ${connection.name}`,connection.model,lane,capacity?.mode||"unknown",connection.verification?.state||item.verification?.state||"not_seen"];})); }
+  function harnessRows() { return state.harnesses.flatMap(item=>(item.connections||[]).map(connection=>{const lane=connection.model?.includes("/")?`upstream:${connection.model.split("/")[0]}`:"local";const capacity=state.fleet?.queues?.[lane];const evidence=connection.readiness?.evidence_level||connection.verification?.state||item.verification?.state||"not_seen";return [`${item.display_name||item.harness_id} · ${connection.name}`,connection.model,lane,capacity?.mode||"unknown",evidence];})); }
   function hermesHarness() { return state.harnesses.find(item=>(item.kind||item.harness_id)==="hermes"); }
   function hermesConnection() { const rows=hermesHarness()?.connections||[];return rows.find(item=>item.name==="default")||rows[0]; }
   function hermesPinTargets() {
@@ -408,12 +445,49 @@
     const confirmed=state.wizardStep!==5||((!setupNeedsDownload()||state.wizard.confirmDownloads)&&state.wizard.confirmConfig);
     return `<div class="page"><div class="wizard-shell">${wizardSidebar()}<section class="wizard-body"><div class="wizard-content">${wizardContent()}</div>${state.wizardStep<6?`<div class="wizard-actions"><button class="button ghost" data-action="wizard-${state.wizardStep===1?"exit":"back"}">${state.wizardStep===1?t("exit"):t("back")}</button><button class="button primary" data-action="${state.wizardStep===5?"apply-setup":"wizard-next"}" ${canNext&&runtimeReady&&modelReady&&confirmed?"":"disabled"}>${state.wizardStep===5?t("installNow"):t("continue")} ${I("arrow-right")}</button></div>`:""}</section></div></div>`;
   }
-  function render() {
+  function render(opts={}) {
+    const routeChanged=Boolean(opts.routeChanged);
+    const mainEl=document.getElementById("main");
+    const active=!routeChanged&&mainEl?.contains(document.activeElement)?document.activeElement:null;
+    const focusSnap=active?.id?{id:active.id,value:"value" in active?active.value:null,start:typeof active.selectionStart==="number"?active.selectionStart:null,end:typeof active.selectionEnd==="number"?active.selectionEnd:null}:null;
+    const prevComposer=!routeChanged?document.getElementById("chat-input"):null;
+    const composerSel=prevComposer&&typeof prevComposer.selectionStart==="number"?[prevComposer.selectionStart,prevComposer.selectionEnd]:null;
+    const prevWinY=!routeChanged?window.scrollY:0;
+    const docEl=document.documentElement;
+    const winAtBottom=routeChanged||(docEl.scrollHeight-window.scrollY-window.innerHeight<48);
+    const prevMessages=!routeChanged?document.getElementById("chat-messages"):null;
+    const wasAtBottom=!prevMessages||(prevMessages.scrollHeight-prevMessages.scrollTop-prevMessages.clientHeight<24);
+    const prevScrollTop=prevMessages?prevMessages.scrollTop:0;
+    const prevMsgCount=state.renderedMsgCount||0;
     renderNav(); applyPreferences(); renderAlerts();
     let html;
     if (state.route.startsWith("setup")) html=wizardPage(); else if (state.route==="home") html=homePage(); else if (state.route==="chat") html=chatPage(); else if (state.route.startsWith("models")) html=modelsPage(); else if (state.route==="connections") html=connectionsPage(); else if (state.route==="advanced/fleet") html=fleetPage(); else if (state.route==="advanced/routing") html=routingPage(); else if (state.route==="advanced/providers") html=providersView(); else if (state.route==="advanced/configuration") html=configurationPage(); else html=diagnosticsPage();
-    document.getElementById("main").innerHTML=html; document.getElementById("main").focus({preventScroll:true});
-    requestAnimationFrame(()=>{ const messages=document.getElementById("chat-messages"); if(messages) messages.scrollTop=messages.scrollHeight; });
+    mainEl.innerHTML=html;
+    const msgAdded=state.messages.length>prevMsgCount;
+    state.renderedMsgCount=state.messages.length;
+    window.scrollTo(0,routeChanged?0:prevWinY);
+    const nextComposer=document.getElementById("chat-input");
+    if (nextComposer&&composerSel) { try { nextComposer.setSelectionRange(composerSel[0],composerSel[1]??composerSel[0]); } catch(_){} }
+    if (focusSnap) {
+      const nextEl=document.getElementById(focusSnap.id);
+      if (nextEl&&!nextEl.disabled) {
+        if (focusSnap.value!==null&&"value" in nextEl&&focusSnap.id!=="chat-input"&&nextEl.value!==focusSnap.value) nextEl.value=focusSnap.value;
+        nextEl.focus({preventScroll:true});
+        if (focusSnap.start!==null&&typeof nextEl.setSelectionRange==="function") { try { nextEl.setSelectionRange(focusSnap.start,focusSnap.end??focusSnap.start); } catch(_){} }
+      }
+    } else if (routeChanged) {
+      mainEl.focus({preventScroll:true});
+    }
+    requestAnimationFrame(()=>{
+      const messages=document.getElementById("chat-messages");
+      if(state.route==="chat"&&(routeChanged||(msgAdded&&(winAtBottom&&wasAtBottom)))){
+        if(messages)messages.scrollTop=messages.scrollHeight;
+        if(msgAdded)window.scrollTo(0,document.documentElement.scrollHeight);
+      } else {
+        if(messages&&messages.scrollHeight>messages.clientHeight)messages.scrollTop=prevScrollTop;
+        if(!routeChanged)window.scrollTo(0,prevWinY);
+      }
+    });
   }
   function routeTo(route) {
     closeDrawer();
@@ -425,7 +499,7 @@
     document.getElementById("sidebar").classList.remove("open");
     document.getElementById("mobile-menu").setAttribute("aria-expanded","false");
     if (route.startsWith("setup")) saveSetup();
-    render();
+    render({routeChanged:true});
   }
   function openDrawer(title,body) { const drawer=document.getElementById("drawer");if(!drawer.classList.contains("open"))drawerReturnFocus=document.activeElement;document.getElementById("drawer-title").textContent=title;document.getElementById("drawer-body").innerHTML=body;drawer.classList.add("open");requestAnimationFrame(()=>drawer.querySelector('[data-action="close-drawer"]')?.focus()); }
   function closeDrawer() { const drawer=document.getElementById("drawer");const wasOpen=drawer.classList.contains("open");drawer.classList.remove("open");if(wasOpen&&drawerReturnFocus?.isConnected)drawerReturnFocus.focus();drawerReturnFocus=null; }
@@ -436,7 +510,7 @@
   async function preparePlan() { try { state.setupPlan=await request("/setup/plan",{method:"POST",body:JSON.stringify(setupPayload())});setWizardStep(5);render(); } catch(error){toast(error.message);} }
   async function pollEvents() { try { const payload=await request(`/setup/events?after=${state.eventCursor||0}`); if(payload.resync_required){ state.events=(payload.events||[]).slice(-50); state.eventCursor=Number(payload.cursor??state.events.at(-1)?.id??0); const progress=state.events.filter(e=>typeof e.progress==="number").at(-1)?.progress; if(typeof progress==="number")state.progress=progress; render(); return; } if(payload.events?.length){ for(const event of payload.events){ if(Number(event.id||0)<=(state.eventCursor||0))continue; const last=state.events.at(-1);if(last&&last.stage===event.stage&&last.status===event.status&&last.detail===event.detail)state.events[state.events.length-1]=event;else state.events.push(event);}state.events=state.events.slice(-50);state.eventCursor=Math.max(state.eventCursor||0,Number(payload.cursor??payload.events.at(-1)?.id??0));const progress=payload.events.filter(e=>typeof e.progress==="number").at(-1)?.progress;if(typeof progress==="number")state.progress=progress;render(); } else if(typeof payload.cursor==="number"){ state.eventCursor=Math.max(state.eventCursor||0,payload.cursor); } } catch(_){} }
   async function applySetup() { if(state.setupRunning)return;state.setupRunning=true;setWizardStep(6);state.setupFailure=null;state.events=[];state.eventCursor=0;state.progress=.02;render();const timer=setInterval(pollEvents,700);try{const result=await request("/setup/apply",{method:"POST",body:JSON.stringify(setupPayload(true))});clearInterval(timer);state.setup=result.state||state.setup;state.progress=1;announce(t("setupComplete"));await loadData();}catch(error){state.setupFailure={code:error.payload?.error,message:error.message,remediation:error.payload?.remediation||[]};state.events.push({status:"error",detail:error.message});}finally{state.setupRunning=false;clearInterval(timer);saveSetup();render();} }
-  async function sendChat(prompt) { const content=(prompt||document.getElementById("chat-input")?.value||"").trim(); if(!content||state.busy)return;if(gpuChatBlocked()){toast(t("sendBlockedLoading"));await loadData();return;} state.messages.push({role:"user",content});saveChat();state.busy=true; state.aborter=new AbortController(); render(); try { const response=await request("/v1/chat/completions",{method:"POST",signal:state.aborter.signal,body:JSON.stringify({model:state.chatModel||"auto",messages:state.messages.filter(m=>!m.error).map(({role,content})=>({role,content})),stream:false,max_tokens:1024})}); const choice=response.choices?.[0]||{};const message=choice.message||{}; const answer=(message.content||message.reasoning_content||choice.text||"").trim(); state.messages.push({role:"assistant",content:answer||"—",routing:response.model||"",truncated:choice.finish_reason==="length"}); } catch(error){ if(error.name!=="AbortError"){const loading=["gpu_swap_in_progress","gpu_model_changed","gpu_swap_failed","gpu_slot_stopped"].includes(error.code);state.messages.push({role:"assistant",content:loading?t("sendBlockedLoading"):`${t("chatFailed")} ${error.message}`,error:true});if(loading)await loadData();} } finally { saveChat();state.busy=false;state.aborter=null;render(); } }
+  async function sendChat(prompt) { const fromInput=prompt===undefined; const raw=fromInput?(document.getElementById("chat-input")?.value??state.chatDraft):prompt; const content=String(raw||"").trim(); if(!content||state.busy)return;if(gpuChatBlocked()){toast(t("sendBlockedLoading"));await loadData();return;} if(fromInput)state.chatDraft=""; state.messages.push({role:"user",content});saveChat();state.busy=true; state.aborter=new AbortController(); render(); try { const response=await request("/v1/chat/completions",{method:"POST",signal:state.aborter.signal,body:JSON.stringify({model:state.chatModel||"auto",messages:state.messages.filter(m=>!m.error).map(({role,content})=>({role,content})),stream:false,max_tokens:1024})}); const choice=response.choices?.[0]||{};const message=choice.message||{}; const answer=(message.content||message.reasoning_content||choice.text||"").trim(); state.messages.push({role:"assistant",content:answer||"—",routing:response.model||"",truncated:choice.finish_reason==="length"}); } catch(error){ if(error.name!=="AbortError"){const loading=["gpu_swap_in_progress","gpu_model_changed","gpu_swap_failed","gpu_slot_stopped"].includes(error.code);state.messages.push({role:"assistant",content:loading?t("sendBlockedLoading"):`${t("chatFailed")} ${error.message}`,error:true});if(loading)await loadData();} } finally { saveChat();state.busy=false;state.aborter=null;render(); } }
   async function verifyConnection(model="auto") { try { await request("/v1/models"); toast(t("connectionOk")+` · ${model}`); } catch(error){ toast(`${t("connectionFailed")}: ${error.message}`); } }
   function downloadDiagnostics(report) { const stamp=String(report.generated_at||new Date().toISOString()).replace(/\.\d{3}(?=Z$)/,"").replace(/[-:]/g,"");const blob=new Blob([JSON.stringify(report,null,2)+"\n"],{type:"application/json"});const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download=`imperium-diagnostics-${stamp}.json`;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),0); }
   async function runDiagnostics(exportReport=false) { if(state.diagnosticsBusy)return;state.diagnosticsBusy=true;render();try{const report=await request("/diagnostics/report");state.diagnostics=report;if(exportReport){downloadDiagnostics(report);toast(t("diagnosticsExported"));}else toast(t("checksComplete"));}catch(error){toast(error.message);}finally{state.diagnosticsBusy=false;render();} }
@@ -496,7 +570,7 @@
     if(event.target.id==="routing-strategy"){state.routingStrategy=event.target.value;testRouting(false);}
   });
   document.addEventListener("submit", event => { if(event.target.id==="chat-form"){event.preventDefault();sendChat();} });
-  document.addEventListener("input", event => { if(event.target.id==="chat-input")document.getElementById("chat-send").disabled=!event.target.value.trim()||gpuChatBlocked();if(event.target.id==="fleet-search"){state.fleetQuery=event.target.value;render();document.getElementById("fleet-search")?.focus();} });
+  document.addEventListener("input", event => { if(event.target.id==="chat-input"){state.chatDraft=event.target.value;const btn=document.getElementById("chat-send");if(btn)btn.disabled=!state.chatDraft.trim()||gpuChatBlocked();}if(event.target.id==="fleet-search"){state.fleetQuery=event.target.value;render();} });
   document.addEventListener("click", event => { const copy=event.target.closest("[data-copy]")?.dataset.copy;if(copy)navigator.clipboard.writeText(copy).then(()=>toast(t("copied")));const verify=event.target.closest("[data-verify]")?.dataset.verify;if(verify)verifyConnection(verify);const prompt=event.target.closest("[data-prompt]")?.dataset.prompt;if(prompt)sendChat(prompt);const tab=event.target.closest("[data-model-tab]")?.dataset.modelTab;if(tab){state.modelTab=tab;render();} });
   document.getElementById("theme-control").addEventListener("click",()=>{state.theme=state.theme==="light"?"dark":"light";localStorage.setItem("imperium.theme",state.theme);render();});
   document.getElementById("language-control").addEventListener("click",()=>{state.lang=state.lang==="en"?"he":"en";localStorage.setItem("imperium.lang",state.lang);render();});
@@ -504,7 +578,10 @@
   document.getElementById("mobile-menu").addEventListener("click",event=>{const open=document.getElementById("sidebar").classList.toggle("open");event.currentTarget.setAttribute("aria-expanded",String(open));});
   document.getElementById("drawer").addEventListener("click",event=>{if(event.target.id==="drawer")closeDrawer();});
   document.addEventListener("keydown",event=>{if(event.key==="Escape"){closeDrawer();document.getElementById("sidebar").classList.remove("open");document.getElementById("mobile-menu").setAttribute("aria-expanded","false");}});
-  function tick(){document.getElementById("clock").textContent=new Intl.DateTimeFormat(state.lang==="he"?"he-IL":"en-US",{dateStyle:"medium",timeStyle:"short"}).format(new Date());}
+  document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")pollGpuStatus(true);});
+  window.addEventListener("focus",()=>pollGpuStatus(true));
+  window.addEventListener("online",()=>pollGpuStatus(true));
+  function tick(){document.getElementById("clock").textContent=new Intl.DateTimeFormat(state.lang==="he"?"he-IL":"en-US",{dateStyle:"medium",timeStyle:"short"}).format(new Date());if(isStatusStale())render();}
   tick();setInterval(tick,30000);setInterval(pollGpuStatus,3000);
-  const initial=location.hash.replace(/^#\//,"");state.route=initial||"home";if(setupStepByRoute[state.route])state.wizardStep=setupStepByRoute[state.route];if(state.route==="setup"&&savedSetup.step>1)state.route=setupRoutes[savedSetup.step-1];applyPreferences();renderNav();render();loadData();
+  const initial=location.hash.replace(/^#\//,"");state.route=initial||"home";if(setupStepByRoute[state.route])state.wizardStep=setupStepByRoute[state.route];if(state.route==="setup"&&savedSetup.step>1)state.route=setupRoutes[savedSetup.step-1];applyPreferences();renderNav();render({routeChanged:true});loadData();
 })();

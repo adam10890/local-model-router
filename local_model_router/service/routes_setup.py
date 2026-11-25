@@ -129,9 +129,20 @@ async def _collect_readiness(
 
 
 async def ui_status(ctx: RouterContext, request: Request) -> JSONResponse:
+    gen = int(ctx.status_seq.get("generation") or 0) + 1
+    ctx.status_seq["generation"] = gen
     payload, setup_state_payload, _slot_rows, _compute, _errors = await _collect_readiness(ctx, 
         str(request.base_url).rstrip("/")
     )
+    checked_at = datetime.now(timezone.utc).isoformat()
+    if payload.get("overall") == "ready":
+        ctx.status_seq["last_ready_at"] = checked_at
+    payload["freshness"] = {
+        "generation": gen,
+        "checked_at": checked_at,
+        "last_ready_at": ctx.status_seq.get("last_ready_at"),
+        "stale_after_seconds": 30,
+    }
     payload["setup"] = setup_state_payload
     payload["setup_api_active"] = ctx.setup_api_active["value"]
     if ctx.hermes_watcher is not None:

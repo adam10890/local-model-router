@@ -111,12 +111,40 @@ def _readiness_for_connection(
 ) -> Dict[str, Any]:
     caps = connection.get("capabilities") or {}
     state = str(verification.get("state") or "not_seen")
-    pinned = str(connection.get("model") or "")
+    pinned = str(connection.get("model") or "").strip()
     unmanaged_upstream = "/" in pinned and not pinned.startswith("alias:")
+    configured = bool(pinned)
+    reachable = state in {"connected", "seen", "verified", "client_verified", "text_ready"} or bool(
+        verification.get("reachable_at")
+    )
+    completion_verified = state in {"verified", "client_verified", "text_ready"} or bool(
+        verification.get("completion_verified_at")
+    )
+    client_verified = (
+        state == "client_verified"
+        or bool(verification.get("client_verified"))
+        or bool(verification.get("client_verified_at"))
+    )
+    evidence_level = (
+        "client_verified"
+        if client_verified
+        else "completion_verified"
+        if completion_verified
+        else "reachable"
+        if reachable
+        else "configured"
+        if configured
+        else "unconfigured"
+    )
     return {
         "service_alive": True,
-        "upstream_connected": state in {"connected", "seen", "verified", "text_ready"},
-        "model_ready": state in {"verified", "text_ready"},
+        "configured": configured,
+        "reachable": reachable,
+        "completion_verified": completion_verified,
+        "client_verified": client_verified,
+        "evidence_level": evidence_level,
+        "upstream_connected": reachable,
+        "model_ready": completion_verified,
         "vision_ready": bool(caps.get("vision")),
         "lifecycle_managed": not unmanaged_upstream,
         "repair_hint": (

@@ -8,7 +8,7 @@ This is a repository development checklist, not Personal Dashboard commitments o
 
 ## Next proposed slices
 
-Recommended review order: **P03 honest readiness → P02 draft/focus → P05 stop cause → P10 recovery gaps** (`P01` verified in `0.16.2`). These can be implemented independently in isolated slices; P03 does not wait for a journal, native app, global framework or Herdr trial. Reorder a concrete security/configuration defect ahead of UI polish if one is found.
+Recommended review order: **P05 stop cause → P10 recovery gaps** (`P01` verified in `0.16.2`; `P03` and `P02` draft/focus maintenance verified in `0.16.3`). These can be implemented independently in isolated slices; P05 does not wait for a journal, native app, global framework or Herdr trial. Reorder a concrete security/configuration defect ahead of UI polish if one is found.
 
 Each package section records its primary proposal IDs, delivery state, first bounded implementation and measurable completion. Future checks named here are acceptance work, not tests run by this documentation change.
 
@@ -26,24 +26,24 @@ Each package section records its primary proposal IDs, delivery state, first bou
 <a id="p02"></a>
 ## P02 - Preserve chat continuity and consume existing streaming
 
-- **State:** candidate - gap review and selection required. **Proposals:** R02. **Effort:** Medium; **simplicity:** Moderate; **urgency/value:** U0 / Very high.
+- **State:** partial - draft/focus/scroll maintenance verified (`0.16.3`); streaming/queue expansion gated on post-beta Chat V2 (`Q4`). **Proposals:** R02. **Effort:** Medium; **simplicity:** Moderate; **urgency/value:** U0 / Very high.
 - **Depends on:** Existing gateway streaming; no Workbench storage dependency. **Gate:** Draft/focus maintenance now; streaming/queue expansion follows existing post-beta Chat V2 gate.
-- [ ] Recheck exact affected baseline and existing coverage; record selected scope, owner and missing behavior before implementation.
-- [ ] Preserve draft/caret/focus/scroll across updates, then render partial answers through the existing streaming contract. Avoid a frontend rewrite.
-- [ ] Verify: Type a draft, trigger theme/language/readiness updates and keep it intact. For the gated streaming slice, partial output survives interruption and a reconnect never resubmits automatically.
-- **Code/check owners:** local_model_router/dashboard/index.html; tests/test_dashboard_static_contract.py; tests_e2e/dashboard/test_dashboard.py; tests/test_openai_chat_completions.py.
-- **Evidence:** no implementation PR, runtime proof or completion receipt recorded.
+- [x] Recheck exact affected baseline and existing coverage; record selected scope, owner and missing behavior before implementation.
+- [x] Preserve draft/caret/focus/scroll across updates (verified in `0.16.3`); post-beta Chat V2 streaming/queue slice remains gated under `Q4`.
+- [x] Verify (maintenance slice): Type a draft, trigger theme/language/readiness updates and keep draft, caret, focus, and scroll intact (`tests_e2e/dashboard/test_dashboard.py`). For the gated Chat V2 streaming slice, partial output survival across interruption remains tracked in `Q4`.
+- **Code/check owners:** local_model_router/dashboard/assets/app.js; tests/test_dashboard_static_contract.py; tests_e2e/dashboard/test_dashboard.py; tests/test_openai_chat_completions.py.
+- **Evidence:** Draft/caret/focus/scroll continuity implemented and verified in `0.16.3` (`dev/herdr`); Playwright E2E exercises composer draft, selection range, focus, and scroll retention across theme, language, and status poll updates.
 
 <a id="p03"></a>
 ## P03 - Make readiness fresh and reject obsolete results
 
-- **State:** candidate - gap review and selection required. **Proposals:** R19 R20 R21. **Effort:** Medium; **simplicity:** Moderate; **urgency/value:** U0 / Very high.
+- **State:** verified (`0.16.3`). **Proposals:** R19 R20 R21. **Effort:** Medium; **simplicity:** Moderate; **urgency/value:** U0 / Very high.
 - **Depends on:** Existing readiness and connection evidence. **Gate:** Existing-path maintenance now.
-- [ ] Recheck exact affected baseline and existing coverage; record selected scope, owner and missing behavior before implementation.
-- [ ] Add last-success/freshness and generation fences; revalidate on visibility/wake. Surface configured, reachable, completion-verified and client-verified evidence accurately.
-- [ ] Verify: After an online check, disconnect and show stale/unavailable. A late older reply cannot restore ready. A models-list response alone does not establish client completion success.
-- **Code/check owners:** local_model_router/service/readiness.py; local_model_router/harnesses/setup.py; local_model_router/dashboard/index.html; tests/test_harness_api.py; tests_e2e/dashboard/test_dashboard.py.
-- **Evidence:** no implementation PR, runtime proof or completion receipt recorded.
+- [x] Recheck exact affected baseline and existing coverage; record selected scope, owner and missing behavior before implementation.
+- [x] Add last-success/freshness and generation fences; revalidate on visibility/wake. Surface configured, reachable, completion-verified and client-verified evidence accurately.
+- [x] Verify: After an online check, disconnect and show stale/unavailable. A late older reply cannot restore ready. A models-list response alone does not establish client completion success.
+- **Code/check owners:** local_model_router/service/readiness.py; local_model_router/service/routes_setup.py; local_model_router/harnesses/setup.py; local_model_router/service/routes_harnesses.py; local_model_router/dashboard/assets/app.js; tests/test_harness_api.py; tests_e2e/dashboard/test_dashboard.py.
+- **Evidence:** Implemented and verified in `0.16.3` (`dev/herdr`); covered by harness evidence-tier tests (`tests/test_harness_api.py`) and Chromium disconnect/late-reply fence E2E (`tests_e2e/dashboard/test_dashboard.py`).
 
 <a id="p04"></a>
 ## P04 - Bound retries and deadlines independently per target

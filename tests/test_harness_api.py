@@ -430,3 +430,89 @@ def test_harness_create_requires_configured_auth_and_writes_atomically(tmp_path,
         "/harnesses/new_harness", headers={"Authorization": "Bearer secret"}
     ).status_code == 200
     assert list((tmp_path / "with-auth").glob("harnesses.yaml.*.bak"))
+
+
+def test_harness_readiness_distinguishes_configured_reachable_completion_and_client_verified(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("A0_LMM_ROUTER_ENABLE_CONFIG_WRITES", "1")
+    client = _client(tmp_path, monkeypatch, api_key="secret")
+    headers = {"Authorization": "Bearer secret"}
+    _patch_forward(monkeypatch)
+
+    initial = client.get("/harnesses/hermes", headers=headers).json()["connections"][0]["readiness"]
+    assert initial["configured"] is True
+    assert initial["reachable"] is False
+    assert initial["completion_verified"] is False
+    assert initial["client_verified"] is False
+    assert initial["model_ready"] is False
+    assert initial["evidence_level"] == "configured"
+
+    assert client.get("/harnesses/hermes/v1/models", headers=headers).status_code == 200
+    after_models = client.get("/harnesses/hermes", headers=headers).json()["connections"][0]["readiness"]
+    assert after_models["reachable"] is True
+    assert after_models["completion_verified"] is False
+    assert after_models["client_verified"] is False
+    assert after_models["model_ready"] is False
+    assert after_models["evidence_level"] == "reachable"
+
+    assert (
+        client.post(
+            "/harnesses/hermes/v1/chat/completions",
+            headers=headers,
+            json={"model": "local", "messages": [{"role": "user", "content": "ping"}]},
+        ).status_code
+        == 200
+    )
+    after_chat = client.get("/harnesses/hermes", headers=headers).json()["connections"][0]["readiness"]
+    assert after_chat["completion_verified"] is True
+    assert after_chat["client_verified"] is False
+    assert after_chat["model_ready"] is True
+    assert after_chat["evidence_level"] == "completion_verified"
+
+    # Subsequent /models check must not downgrade completion_verified back to reachable.
+    assert client.get("/harnesses/hermes/v1/models", headers=headers).status_code == 200
+    after_relist = client.get("/harnesses/hermes", headers=headers).json()["connections"][0]["readiness"]
+    assert after_relist["completion_verified"] is True
+    assert after_relist["evidence_level"] == "completion_verified"
+
+    # Identified client completion promotes evidence_level to client_verified.
+    assert (
+        client.post(
+            "/harnesses/hermes/v1/chat/completions",
+            headers={**headers, "X-App-Id": "hermes"},
+            json={"model": "local", "messages": [{"role": "user", "content": "ping"}]},
+        ).status_code
+        == 200
+    )
+    after_client = client.get("/harnesses/hermes", headers=headers).json()["connections"][0]["readiness"]
+    assert after_client["client_verified"] is True
+    assert after_client["evidence_level"] == "client_verified"
+
+    # Repinning to a different model resets prior verification back to configured.
+    assert (
+        client.patch(
+            "/harnesses/hermes/connections/default",
+            headers=headers,
+            json={"model": "utility_cpu"},
+        ).status_code
+        == 200
+    )
+    after_repin = client.get("/harnesses/hermes", headers=headers).json()["connections"][0]["readiness"]
+    assert after_repin["configured"] is True
+    assert after_repin["reachable"] is False
+    assert after_repin["completion_verified"] is False
+    assert after_repin["client_verified"] is False
+    assert after_repin["evidence_level"] == "configured"
+
+
+def test_ui_status_emits_monotonic_generation_and_freshness_metadata(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    first = client.get("/ui/status").json()
+    second = client.get("/ui/status").json()
+
+    assert first["freshness"]["generation"] == 1
+    assert second["freshness"]["generation"] == 2
+    assert first["freshness"]["checked_at"]
+    assert second["freshness"]["checked_at"] >= first["freshness"]["checked_at"]
+    assert second["freshness"]["stale_after_seconds"] == 30

@@ -349,3 +349,192 @@ def test_local_storage_language_theme_and_chat_never_send_chat_or_foreign_reques
     assert not [call for call in dashboard.calls if call["path"] == "/v1/chat/completions"]
     assert "[redacted test message]" not in str(dashboard.calls)
     dashboard.assert_guards_clean()
+
+
+def test_chat_draft_caret_focus_and_scroll_survive_theme_language_and_status_updates(dashboard):
+    dashboard.set_ready()
+    page = dashboard.page
+    dashboard.goto()
+    page.evaluate(
+        """
+        () => {
+          const rows = Array.from({length: 30}, (_, i) => ({
+            role: i % 2 === 0 ? 'user' : 'assistant',
+            content: 'Historical line ' + i + ' — ' + 'x'.repeat(120)
+          }));
+          localStorage.setItem('imperium.chat', JSON.stringify(rows));
+        }
+        """
+    )
+    page.reload(wait_until="networkidle")
+    page.locator('#simple-nav [data-route="chat"]').click()
+    page.locator("#chat-input").wait_for(state="visible")
+
+    composer = page.locator("#chat-input")
+    composer.focus()
+    composer.fill("שלום עולם")
+    page.evaluate("() => document.getElementById('chat-input').setSelectionRange(4, 4)")
+
+    scroll_meta = page.evaluate(
+        """
+        () => {
+          window.scrollTo(0, 240);
+          return {
+            docHeight: document.documentElement.scrollHeight,
+            winHeight: window.innerHeight,
+            scrollY: window.scrollY,
+          };
+        }
+        """
+    )
+    assert scroll_meta["docHeight"] > scroll_meta["winHeight"]
+    assert scroll_meta["scrollY"] == 240
+
+    page.locator("#theme-control").click()
+    page.locator("#language-control").click()
+    page.evaluate("() => window.dispatchEvent(new Event('focus'))")
+    page.wait_for_timeout(150)
+
+    after = page.evaluate(
+        """
+        () => {
+          const input = document.getElementById('chat-input');
+          return {
+            value: input.value,
+            selectionStart: input.selectionStart,
+            selectionEnd: input.selectionEnd,
+            scrollY: window.scrollY,
+            sendDisabled: document.getElementById('chat-send').disabled,
+          };
+        }
+        """
+    )
+    assert after["value"] == "שלום עולם"
+    assert after["selectionStart"] == 4
+    assert after["selectionEnd"] == 4
+    assert after["scrollY"] == 240
+    assert after["sendDisabled"] is False
+
+    # Focusing input directly and triggering background focus poll preserves activeElement too.
+    page.evaluate(
+        """
+        () => {
+          const input = document.getElementById('chat-input');
+          input.focus();
+          input.setSelectionRange(2, 5);
+          window.dispatchEvent(new Event('focus'));
+        }
+        """
+    )
+    page.wait_for_timeout(150)
+    focused = page.evaluate(
+        """
+        () => {
+          const input = document.getElementById('chat-input');
+          return {
+            activeId: document.activeElement?.id,
+            start: input.selectionStart,
+            end: input.selectionEnd,
+          };
+        }
+        """
+    )
+    assert focused == {"activeId": "chat-input", "start": 2, "end": 5}
+    dashboard.assert_guards_clean()
+
+
+def test_disconnect_marks_status_stale_and_late_older_reply_cannot_restore_ready(dashboard):
+    import threading
+    import time
+
+    dashboard.set_ready()
+    dashboard.goto()
+    page = dashboard.page
+    assert "Your local AI is ready" in page.locator("h1").inner_text()
+
+    ready_body = dict(dashboard.responses["/ui/status"].body)
+    ready_body["freshness"] = {"generation": 1, "checked_at": "2026-11-25T08:00:00Z", "stale_after_seconds": 30}
+    counter = {"n": 0}
+    lock = threading.Lock()
+
+    def raced_status(route, _request):
+        with lock:
+            counter["n"] += 1
+            idx = counter["n"]
+        if idx == 1:
+            time.sleep(0.35)
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(ready_body),
+            )
+            return
+        route.fulfill(
+            status=503,
+            content_type="application/json",
+            body=json.dumps({"error": "status_unavailable"}),
+        )
+
+    page.route(f"{dashboard.base_url}/ui/status", raced_status)
+    dashboard.expect_http_failure()
+
+    # Fire slow check #1, then 40ms later fire wake check #2 which fails with 503 first.
+    page.evaluate(
+        """
+        () => {
+          window.dispatchEvent(new Event('focus'));
+          setTimeout(() => window.dispatchEvent(new Event('focus')), 40);
+        }
+        """
+    )
+    page.locator('[data-status-freshness="unavailable"]').wait_for(state="visible")
+    # Wait past check #1's 350ms completion to prove the late 200 ready reply is ignored.
+    page.wait_for_timeout(450)
+    assert page.locator('[data-status-freshness="unavailable"]').is_visible()
+    assert "Your model server needs attention" in page.locator("h1").inner_text()
+    assert "Status stale" in page.locator("#main").inner_text()
+    dashboard.assert_guards_clean()
+
+
+def test_setup_events_sse_eventsource_receives_resync_and_monotonic_events_in_browser(dashboard):
+    page = dashboard.page
+    sse_body = (
+        'event: resync\n'
+        'data: {"history":"lost","resync_required":true,"cursor":205,"oldest_id":6,"latest_id":205,"cancelled":false}\n\n'
+        'event: setup\n'
+        'data: {"id":205,"stage":"download","status":"running","detail":"chunk-205","progress":0.95}\n\n'
+        'event: setup\n'
+        'data: {"id":206,"stage":"download","status":"complete","detail":"chunk-206","progress":1.0}\n\n'
+    )
+    page.route(
+        f"{dashboard.base_url}/setup/events*",
+        lambda route, _req: route.fulfill(
+            status=200,
+            headers={"Content-Type": "text/event-stream", "Cache-Control": "no-cache"},
+            body=sse_body,
+        ),
+    )
+    dashboard.goto()
+    received = page.evaluate(
+        """
+        () => new Promise((resolve, reject) => {
+          const resyncs = [];
+          const setups = [];
+          const es = new EventSource('/setup/events?after=1');
+          const timer = setTimeout(() => { es.close(); reject(new Error('sse timeout')); }, 4000);
+          es.addEventListener('resync', ev => resyncs.push(JSON.parse(ev.data)));
+          es.addEventListener('setup', ev => {
+            setups.push(JSON.parse(ev.data));
+            if (setups.length >= 2) {
+              clearTimeout(timer);
+              es.close();
+              resolve({resyncs, ids: setups.map(x => x.id)});
+            }
+          });
+        })
+        """
+    )
+    assert received["resyncs"][0]["resync_required"] is True
+    assert received["resyncs"][0]["cursor"] == 205
+    assert received["ids"] == [205, 206]
+    dashboard.assert_guards_clean()

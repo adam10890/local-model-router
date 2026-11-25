@@ -672,6 +672,7 @@ class RouterContext:
     compute_cache: Optional[tuple[float, dict[str, Any], dict[str, Any]]] = None
     last_observer_snapshot: Dict[str, Optional[str]] = field(default_factory=lambda: {"json": None})
     cookbook_cache: Dict[str, Any] = field(default_factory=lambda: {"key": None, "at": 0.0, "report": None})
+    status_seq: Dict[str, Any] = field(default_factory=lambda: {"generation": 0, "last_ready_at": None})
 
     def bind(
         self,
