@@ -6,6 +6,18 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- Stop attribution and Windows installer recovery hardening (Herdr P05 and P10;
+  R34, R46, R47, R48, R51):
+  - `SetupEngine`, `POST /setup/cancel`, `POST /fleet/prepare-shutdown`, and
+    `imperium shutdown` record the first safe stop cause/actor/request ID
+    without letting a second stop overwrite it, scrub secret/prompt-like values,
+    and distinguish `cancel_requested`, `transport_lost` (SSE disconnect never
+    cancels a running setup), `stopped_confirmed`, and `outcome_unknown`.
+  - `installer/windows/Install-Imperium.ps1` and `Rollback-Imperium.ps1`
+    enforce strict child-path checks, preserve `Imperium.previous` across
+    repeated failed promotions when `Imperium` is absent, restore the prior
+    install on promotion failure, and preserve/report the surviving backup path
+    when rollback itself fails while leaving raw user `PATH` entries untouched.
 - Readiness freshness, generation fences, and chat draft continuity (Herdr P03
   and P02 maintenance slice; R02, R19–R21):
   - `GET /ui/status` (`routes_setup.py`, `readiness.py`) emits monotonic

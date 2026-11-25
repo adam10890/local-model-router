@@ -1217,6 +1217,7 @@ def test_setup_events_distinguish_empty_lost_and_ahead_cursors(tmp_path):
     assert empty == {
         "events": [],
         "cancelled": False,
+        "stop": None,
         "history": "empty",
         "resync_required": False,
         "cursor": 0,
@@ -1238,3 +1239,50 @@ def test_setup_events_distinguish_empty_lost_and_ahead_cursors(tmp_path):
     assert ahead["cursor"] == 2
     assert ahead["latest_id"] == 2
     assert [ev["id"] for ev in ahead["events"]] == [1, 2]
+
+
+def test_first_stop_cause_cannot_be_overwritten_and_excludes_secrets_and_disconnect(tmp_path):
+    engine = _engine(tmp_path)
+
+    lost = engine.note_transport_lost()
+    assert lost == {"state": "transport_lost", "cancelled": False, "stop": None}
+    assert engine.events(0)["cancelled"] is False
+    assert engine.events(0)["stop"] is None
+
+    first = engine.cancel(cause="ui_cancel", actor="dashboard", request_id="req-alpha-1")
+    second = engine.cancel(cause="cli_shutdown", actor="cli", request_id="req-beta-2")
+    assert first["cause"] == "ui_cancel"
+    assert first["actor"] == "dashboard"
+    assert first["request_id"] == "req-alpha-1"
+    assert first["state"] == "cancel_requested"
+    assert second["cause"] == "ui_cancel"
+    assert second["actor"] == "dashboard"
+    assert second["request_id"] == "req-alpha-1"
+    assert len([ev for ev in engine.events(0)["events"] if ev["status"] == "cancelled"]) == 1
+
+    engine.reset_cancel()
+    scrubbed = engine.cancel(
+        cause="sk-live-secret-12345",
+        actor="prompt: tell me a secret",
+        request_id="Bearer secret-token-value",
+    )
+    assert scrubbed["cause"] == "operator_cancel"
+    assert scrubbed["actor"] == "local_operator"
+    assert scrubbed["request_id"] is None
+    serialized = json.dumps(engine.events(0)).lower()
+    assert "sk-live" not in serialized
+    assert "tell me a secret" not in serialized
+    assert "secret-token" not in serialized
+
+    # Unverified runtime PID records outcome_unknown rather than claiming stopped_confirmed.
+    import os
+
+    engine.reset_cancel()
+    engine._atomic_json(engine.process_path, {"pid": os.getpid()})
+    with pytest.raises(SetupError) as exc_info:
+        engine.stop_managed(cause="operator_stop", actor="cli")
+    assert exc_info.value.code == "runtime_ownership_unverified"
+    stop = engine.stop_info()
+    assert stop is not None
+    assert stop["state"] == "outcome_unknown"
+    assert stop["cause"] == "operator_stop"

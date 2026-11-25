@@ -673,6 +673,7 @@ class RouterContext:
     last_observer_snapshot: Dict[str, Optional[str]] = field(default_factory=lambda: {"json": None})
     cookbook_cache: Dict[str, Any] = field(default_factory=lambda: {"key": None, "at": 0.0, "report": None})
     status_seq: Dict[str, Any] = field(default_factory=lambda: {"generation": 0, "last_ready_at": None})
+    shutdown_info: Dict[str, Optional[Dict[str, Any]]] = field(default_factory=lambda: {"first": None})
 
     def bind(
         self,

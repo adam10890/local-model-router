@@ -68,10 +68,11 @@ invisible to the routing decision.
 ### Q3 — Herdr-inspired reliability slices
 
 Sixty pinned source observations grouped into twenty-four bounded packages.
-`P01` (monotonic setup event cursors and resync) shipped in `0.16.2`, and `P03`
-(honest readiness, freshness, and generation fences) plus the `P02` draft/focus
-maintenance slice shipped in `0.16.3`; the recommended next slices are `P05`
-(stop attribution) and `P10` (Windows installer recovery).
+All Phase A existing-path reliability slices are shipped (`P01` event cursors
+and resync in `0.16.2`; `P03` honest readiness + `P02` draft/focus continuity in
+`0.16.3`; `P05` stop attribution + `P10` Windows installer recovery in
+`0.16.4`). Remaining Phase B–E packages stay parked behind explicit client-hook,
+post-beta Chat V2 (`Q4`), and `WB0` Workbench boundary gates.
 
 - **Detail:** [`herdr-development.md`](herdr-development.md) (R01–R60),
   [`herdr-todo.md`](herdr-todo.md) (P01–P24 and their evidence),

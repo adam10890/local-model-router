@@ -5,6 +5,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Test-StrictChildPath([string]$Parent, [string]$Child) {
+    $Sep = [IO.Path]::DirectorySeparatorChar
+    $FullParent = [IO.Path]::GetFullPath($Parent).TrimEnd($Sep, [IO.Path]::AltDirectorySeparatorChar) + $Sep
+    $FullChild = [IO.Path]::GetFullPath($Child).TrimEnd($Sep, [IO.Path]::AltDirectorySeparatorChar)
+    $Cmp = $(if ($env:OS -eq "Windows_NT") { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal })
+    return $FullChild.Length -gt $FullParent.Length -and $FullChild.StartsWith($FullParent, $Cmp)
+}
+
 $Source = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 if (-not (Test-Path (Join-Path $Source "bundle-manifest.json"))) {
     $Source = [IO.Path]::GetFullPath($PSScriptRoot)
@@ -12,10 +20,12 @@ if (-not (Test-Path (Join-Path $Source "bundle-manifest.json"))) {
 $Programs = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Programs"))
 $Target = [IO.Path]::GetFullPath((Join-Path $Programs "Imperium"))
 $Previous = [IO.Path]::GetFullPath((Join-Path $Programs "Imperium.previous"))
-$Staging = [IO.Path]::GetFullPath((Join-Path $Programs ("Imperium.staging-" + [guid]::NewGuid().ToString("N"))))
+$RunId = [guid]::NewGuid().ToString("N")
+$Staging = [IO.Path]::GetFullPath((Join-Path $Programs ("Imperium.staging-" + $RunId)))
+$RetiredPrevious = [IO.Path]::GetFullPath((Join-Path $Programs ("Imperium.previous.retired-" + $RunId)))
 
-foreach ($Path in @($Target, $Previous, $Staging)) {
-    if (-not $Path.StartsWith($Programs, [StringComparison]::OrdinalIgnoreCase)) {
+foreach ($Path in @($Target, $Previous, $Staging, $RetiredPrevious)) {
+    if (-not (Test-StrictChildPath $Programs $Path)) {
         throw "Refusing to install outside the current user's Programs directory."
     }
 }
@@ -39,12 +49,46 @@ if (-not $BundleManifest.version -or $BundleManifest.version -ne $PackageVersion
 }
 
 try {
-    if (Test-Path $Previous) { Remove-Item -LiteralPath $Previous -Recurse -Force }
-    if (Test-Path $Target) { Move-Item -LiteralPath $Target -Destination $Previous }
+    if ((Test-Path -LiteralPath $Target) -and (Test-Path -LiteralPath $Previous)) {
+        Move-Item -LiteralPath $Previous -Destination $RetiredPrevious
+    }
+    if (Test-Path -LiteralPath $Target) {
+        Move-Item -LiteralPath $Target -Destination $Previous
+    }
+    if ($env:IMPERIUM_TEST_FAIL_PROMOTE -eq "1") {
+        throw "Simulated promotion failure."
+    }
     Move-Item -LiteralPath $Staging -Destination $Target
+    if (Test-Path -LiteralPath $RetiredPrevious) {
+        Remove-Item -LiteralPath $RetiredPrevious -Recurse -Force
+    }
 } catch {
-    if ((-not (Test-Path $Target)) -and (Test-Path $Previous)) {
-        Move-Item -LiteralPath $Previous -Destination $Target
+    $PromotionError = $_
+    if (Test-Path -LiteralPath $Staging) {
+        Remove-Item -LiteralPath $Staging -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if ((-not (Test-Path -LiteralPath $Target)) -and (Test-Path -LiteralPath $Previous)) {
+        try {
+            if ($env:IMPERIUM_TEST_FAIL_ROLLBACK -eq "1") {
+                throw "Simulated rollback failure."
+            }
+            Move-Item -LiteralPath $Previous -Destination $Target
+            if (Test-Path -LiteralPath $RetiredPrevious) {
+                Move-Item -LiteralPath $RetiredPrevious -Destination $Previous
+            }
+        } catch {
+            if ((Test-Path -LiteralPath $Previous) -and (Test-Path -LiteralPath $RetiredPrevious)) {
+                Remove-Item -LiteralPath $RetiredPrevious -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            Write-Output "Recoverable backup preserved at: $Previous"
+            throw "Promotion failed ($($PromotionError.Exception.Message)) and automatic rollback failed ($($_.Exception.Message)). Recoverable backup preserved at: $Previous"
+        }
+    } elseif (Test-Path -LiteralPath $RetiredPrevious) {
+        if (-not (Test-Path -LiteralPath $Previous)) {
+            Move-Item -LiteralPath $RetiredPrevious -Destination $Previous -ErrorAction SilentlyContinue
+        } else {
+            Remove-Item -LiteralPath $RetiredPrevious -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
     throw
 }
