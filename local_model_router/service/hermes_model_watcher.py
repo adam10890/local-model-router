@@ -25,6 +25,17 @@ STUDIO_LEASE_RETRY_AFTER = 120
 _SWAP_WAIT_ENV = "IMPERIUM_SWAP_WAIT_SECONDS"
 _SWAP_WAIT_LEGACY_ENV = "A0_LMM_ROUTER_SWAP_WAIT_SECONDS"
 _MAX_SWAP_WAIT_SECONDS = 60.0
+_LEASE_WAIT_ENV = "IMPERIUM_LEASE_WAIT_SECONDS"
+# Below Hermes local TTFB watchdog (900s): a held request must not be killed client-side.
+_MAX_LEASE_WAIT_SECONDS = 840.0
+_LEASE_POLL_SECONDS = 1.0
+
+
+def _clamp_lease_wait(raw: Any) -> float:
+    try:
+        return max(0.0, min(_MAX_LEASE_WAIT_SECONDS, float(raw)))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _clamp_swap_wait(raw: Any) -> float:
@@ -183,6 +194,7 @@ class HermesGpuConfig:
     retry_backoff_seconds: tuple[float, ...] = (15.0, 60.0)
     default_profile: str = "ornith"
     swap_wait_seconds: float = 0.0
+    lease_wait_seconds: float = 0.0
 
     @property
     def state_path(self) -> Path:
@@ -260,6 +272,9 @@ def load_hermes_gpu_config(path: Path, fleet_config_path: str | os.PathLike[str]
         retry_backoff_seconds=backoff,
         default_profile=default_profile,
         swap_wait_seconds=_clamp_swap_wait(raw_wait),
+        lease_wait_seconds=_clamp_lease_wait(
+            os.environ.get(_LEASE_WAIT_ENV) or data.get("lease_wait_seconds", 0.0)
+        ),
         hermes_home=home,
         profiles={str(key): dict(value) for key, value in profiles.items() if isinstance(value, dict)},
         path=path,
@@ -453,6 +468,26 @@ class HermesModelWatcher:
                 1, self.snapshot()["retry_after_seconds"] or 5
             )
         return None
+
+    async def wait_while_leased(
+        self,
+        max_wait_seconds: Optional[float] = None,
+    ) -> tuple[Optional[tuple[str, int]], int]:
+        """Hold a request while Studio borrows the slot; return the moment the lease ends."""
+        budget = _clamp_lease_wait(
+            self.cfg.lease_wait_seconds if max_wait_seconds is None else max_wait_seconds
+        )
+        retry = self.retry_response()
+        if retry is None or budget <= 0 or retry[0] != "gpu_leased_by_studio":
+            return retry, 0
+        started = time.monotonic()
+        # ponytail: 1s poll; the lease end is a fleet start call, not an event here.
+        while retry is not None and retry[0] == "gpu_leased_by_studio":
+            if time.monotonic() - started >= budget:
+                break
+            await asyncio.sleep(_LEASE_POLL_SECONDS)
+            retry = self.retry_response()
+        return retry, max(1, int((time.monotonic() - started) * 1000))
 
     async def wait_while_swapping(
         self,
