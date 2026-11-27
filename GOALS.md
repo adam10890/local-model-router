@@ -2,7 +2,7 @@
 
 **Status:** Active product contract
 **Current milestone:** 1.0 beta readiness
-**Last reviewed:** 2026-08-02
+**Last reviewed:** 2026-11-27
 **Owner:** Product/founder
 
 This file defines the outcomes Imperium must achieve. It is intentionally
@@ -89,7 +89,22 @@ When goals compete, decide in this order:
 5. New capability.
 
 Until the 1.0 beta gates pass, stability and release integrity take precedence
-over major new features.
+over major new features, subject to the scope decision below.
+
+## Scope decision (2026-11-27): owner-first, beta deferred
+
+Imperium has one real operator today. Until a first external user commits to
+installing it (for example a kibbutz pilot), the founder decided:
+
+- **Kept as a merge gate:** real-client canaries for the clients the owner uses
+  daily (Hermes, Pi). Every feature change must leave them passing.
+- **Deferred, not dropped:** AMD and Intel clean-machine evidence, packaged
+  lifecycle walkthroughs, the manual light-theme matrix, and the explicit RC
+  tag. They become blocking again the day an external user is committed.
+- **Feature work resumes** from the owner's own ideas, ordered by the decision
+  order above. Privacy, safety, and the AGENTS.md invariants are unchanged.
+
+The 1.0 beta exit gates above are unchanged; this only postpones chasing them.
 
 ## Audit protocol
 
