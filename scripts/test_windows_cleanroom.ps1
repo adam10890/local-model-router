@@ -7,10 +7,12 @@ param(
     [switch]$Launch,
     [switch]$FullOfflineSetup,
     [switch]$Lifecycle,
+    [switch]$HarnessCanary,
     [switch]$KeepInstalled
 )
 
 $ErrorActionPreference = "Stop"
+if ($HarnessCanary -and -not $FullOfflineSetup) { throw "-HarnessCanary needs -FullOfflineSetup for a live model." }
 $Repo = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $BuildRoot = [IO.Path]::GetFullPath((Join-Path $Repo "build"))
 
@@ -188,6 +190,23 @@ if ($FullOfflineSetup) {
 $env:OBSERVER_HOST = "127.0.0.1"
 $env:OBSERVER_PORT = "9100"
 $env:A0_LMM_ROUTER_AGENT_BASE_URL = "http://127.0.0.1:9100/v1"
+$HarnessResult = Join-Path $Root "harness-smoke.json"
+if ($HarnessCanary) {
+    # Pin only Pi to the offline model so the real Pi client can run against it (Q4, G2).
+    $HarnessConfig = Join-Path $Root "harnesses.canary.yaml"
+    @"
+harnesses:
+  pi:
+    display_name: Pi
+    kind: pi
+    protocol: openai
+    location: host
+    connections:
+      default:
+        model: qwen3-1.7b-q8
+"@ | Set-Content -LiteralPath $HarnessConfig -Encoding UTF8
+    $env:A0_LMM_ROUTER_HARNESSES_CONFIG = $HarnessConfig
+}
 $RouterOut = Join-Path $Root "router.stdout.log"
 $RouterErr = Join-Path $Root "router.stderr.log"
 $RouterProcess = Start-Process -FilePath $Python -ArgumentList "-m", "local_model_router", "serve" `
@@ -218,6 +237,11 @@ try {
     if ($FullOfflineSetup) { $SmokeArgs.RequireLive = $true }
     & (Join-Path $Repo "scripts\smoke_provider.ps1") @SmokeArgs | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "The installed provider smoke failed." }
+    if ($HarnessCanary) {
+        & $Python (Join-Path $Repo "scripts\smoke_harnesses.py") --rc --harness pi `
+            --base-url "http://127.0.0.1:9100" --json-output $HarnessResult --timeout 300 --max-tokens 512
+        if ($LASTEXITCODE -ne 0) { throw "The Pi harness canary failed." }
+    }
     if ($FullOfflineSetup) {
         $AgentRun = Invoke-RestMethod "http://127.0.0.1:9100/agents/code-review/runs" -Method Post `
             -ContentType "application/json" -Body (@{ input = "Review: def add(a, b): return a + b" } | ConvertTo-Json) `
@@ -311,6 +335,7 @@ $Result = [ordered]@{
         models = ($null -ne $Models.data)
         provider = [bool]$Provider.ok
         provider_live = [bool]$Provider.live
+        harness_canary = $(if ($HarnessCanary) { [bool](Get-Content -LiteralPath $HarnessResult -Raw | ConvertFrom-Json).ok } else { $null })
         repair = $(if ($FullOfflineSetup) { $RepairVerified } else { $null })
         update_check = $(if ($Lifecycle) { $UpdateChecked } else { $null })
         runtime_rollback = $(if ($Lifecycle) { $RuntimeRollbackVerified } else { $null })
