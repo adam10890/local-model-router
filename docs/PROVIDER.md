@@ -346,6 +346,9 @@ the watcher in a stable failed state until the target/profile changes or an
 explicit Start resets the budget. Between swaps, a valid change to the profile
 file is reloaded and resets that budget; unchanged polling does not.
 
+Startup and swap logs use **local** for the primary profile and report the
+verified GGUF name separately as **loaded_model**.
+
 The dashboard combines the `/ui/status` GPU state with the `/harnesses`
 connection pin. It shows `desired`, pin, `loaded`, phase, elapsed time,
 attempt, next-attempt time, retry delay, and failure code. `loaded` comes from

@@ -202,10 +202,19 @@ async def _free_port(*_args, **_kwargs):
     return True
 
 
-def test_tick_is_noop_when_verified_model_is_loaded(tmp_path):
+def test_tick_reports_model_when_adopting_an_existing_process(tmp_path, caplog):
     watcher, manager = _watcher(tmp_path)
+    model = tmp_path / "test-chat-30b.gguf"
+    model.touch()
+    watcher.cfg.profiles["ornith"]["model_path"] = str(model)
     watcher.read_desired = lambda: "ornith"  # type: ignore[method-assign]
-    assert asyncio.run(watcher.tick()) == "idle"
+
+    with caplog.at_level(logging.INFO, logger="uvicorn.error.imperium.hermes_gpu"):
+        assert asyncio.run(watcher.tick()) == "idle"
+        assert asyncio.run(watcher.tick()) == "idle"
+
+    message = "Hermes GPU verified loaded_profile=local loaded_model='test-chat-30b'"
+    assert caplog.messages.count(message) == 1
     assert manager.stops == []
     assert watcher.snapshot()["effective_n_ctx"] == 65536
 
@@ -232,29 +241,31 @@ def test_swap_stop_start_pin_and_atomic_state(tmp_path, monkeypatch):
     assert state["load_generation"] == 1
 
 
-def test_success_log_has_desired_loaded_duration_and_result_code(
+def test_startup_log_distinguishes_default_profile_and_loaded_model(
     tmp_path, monkeypatch, caplog
 ):
     monkeypatch.setattr(
         "local_model_router.service.hermes_model_watcher._wait_port_free", _free_port
     )
-    watcher, _manager = _watcher(tmp_path)
-    watcher.read_desired = lambda: "qwen38_27b"  # type: ignore[method-assign]
+    watcher, _manager = _watcher(tmp_path, runtime=None)
+    model = tmp_path / "test-chat-30b.gguf"
+    model.touch()
+    watcher.cfg.profiles["ornith"]["model_path"] = str(model)
+    watcher.read_desired = lambda: "ornith"  # type: ignore[method-assign]
 
     async def run():
         await watcher.tick()
         await watcher._task
 
-    with caplog.at_level(
-        logging.INFO, logger="uvicorn.error.imperium.hermes_gpu"
-    ):
+    with caplog.at_level(logging.INFO, logger="uvicorn.error.imperium.hermes_gpu"):
         asyncio.run(run())
 
     messages = "\n".join(caplog.messages)
-    assert "phase=loading desired=qwen38_27b" in messages
-    assert "loaded=qwen38_27b" in messages
+    assert "phase=loading desired_profile=local loaded_profile=none" in messages
+    assert "ready desired_profile=local loaded_profile=local loaded_model='test-chat-30b'" in messages
     assert "duration_ms=" in messages
     assert "result_code=ok" in messages
+    assert watcher.snapshot()["loaded"] == "ornith"
 
 
 def test_failed_mtp_attempt_retries_without_speculative_flags(tmp_path, monkeypatch):
@@ -338,7 +349,7 @@ def test_target_change_during_backoff_restarts_serially_with_fresh_budget(
     assert watcher.attempt == 1
 
 
-def test_three_failures_restore_once_and_block_same_target(tmp_path, monkeypatch):
+def test_three_failures_restore_once_and_block_same_target(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr("local_model_router.service.hermes_model_watcher._wait_port_free", _free_port)
     sleeps: list[float] = []
     failed = {"running": False, "healthy": False, "failure_code": "process_exited", "error": "failed"}
@@ -347,13 +358,22 @@ def test_three_failures_restore_once_and_block_same_target(tmp_path, monkeypatch
         outcomes=[failed, failed, failed, {"running": True, "healthy": True}],
         sleeps=sleeps,
     )
+    model = tmp_path / "test-chat-30b.gguf"
+    model.touch()
+    watcher.cfg.profiles["ornith"]["model_path"] = str(model)
     watcher.read_desired = lambda: "qwen38_27b"  # type: ignore[method-assign]
 
     async def run():
         await watcher.tick()
         await watcher._task
 
-    asyncio.run(run())
+    with caplog.at_level(logging.INFO, logger="uvicorn.error.imperium.hermes_gpu"):
+        asyncio.run(run())
+
+    assert (
+        "phase=failed desired_profile=uncensored loaded_profile=local loaded_model='test-chat-30b'"
+        in "\n".join(caplog.messages)
+    )
     assert [row["hermes_gpu_profile"] for row in manager.starts] == [
         "qwen38_27b", "qwen38_27b", "qwen38_27b", "ornith"
     ]
