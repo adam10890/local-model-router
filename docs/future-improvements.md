@@ -153,6 +153,12 @@ until one of them is picked up and earns its own.
   or role alias (touches G3 "a pinned harness never silently changes its model"
   and is the founder's call; slot-id pin `slot_chat` already covers this
   today).
+- Fleet mode switch (`GET/POST /fleet/mode`: `balanced` vs
+  `a0_uncensored_strong`). Swaps the GPU slot to an uncensored strong profile
+  for Agent Zero, moves Hermes to `utility_cpu`, and repins harnesses in memory.
+  Draft code with one test was set aside on 2026-11-27 as git stash
+  `fleet-mode-2026-11-27` (on top of `dev/startup-model-identity`). Open: it
+  overlaps Q7's standby route, and repinning Hermes in memory touches G3.
 
 ### Q7 — Hermes availability during Studio work
 

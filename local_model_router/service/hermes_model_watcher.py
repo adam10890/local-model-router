@@ -18,6 +18,8 @@ from typing import Any, Awaitable, Callable, Optional
 import aiohttp
 import yaml
 
+from local_model_router.service.readiness import display_model_stem
+
 logger = logging.getLogger("uvicorn.error").getChild("imperium.hermes_gpu")
 
 STUDIO_LEASE_REASON = "studio_lease"
@@ -25,6 +27,17 @@ STUDIO_LEASE_RETRY_AFTER = 120
 _SWAP_WAIT_ENV = "IMPERIUM_SWAP_WAIT_SECONDS"
 _SWAP_WAIT_LEGACY_ENV = "A0_LMM_ROUTER_SWAP_WAIT_SECONDS"
 _MAX_SWAP_WAIT_SECONDS = 60.0
+_LEASE_WAIT_ENV = "IMPERIUM_LEASE_WAIT_SECONDS"
+# Below Hermes local TTFB watchdog (900s): a held request must not be killed client-side.
+_MAX_LEASE_WAIT_SECONDS = 840.0
+_LEASE_POLL_SECONDS = 1.0
+
+
+def _clamp_lease_wait(raw: Any) -> float:
+    try:
+        return max(0.0, min(_MAX_LEASE_WAIT_SECONDS, float(raw)))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _clamp_swap_wait(raw: Any) -> float:
@@ -58,6 +71,13 @@ ProbeFn = Callable[[int], dict[str, Any] | Awaitable[dict[str, Any]]]
 PublishFn = Callable[[str, str, Optional[int]], None]
 ClearFn = Callable[[str], None]
 SleepFn = Callable[[float], Awaitable[None]]
+
+
+def _log_profile_name(profile_id: Optional[str]) -> str:
+    for name in ("local", "uncensored"):
+        if profile_id == _HERMES_TO_PROFILE[name]:
+            return name
+    return profile_id or "none"
 
 
 def normalize_hermes_model(name: str) -> Optional[str]:
@@ -183,6 +203,7 @@ class HermesGpuConfig:
     retry_backoff_seconds: tuple[float, ...] = (15.0, 60.0)
     default_profile: str = "ornith"
     swap_wait_seconds: float = 0.0
+    lease_wait_seconds: float = 0.0
 
     @property
     def state_path(self) -> Path:
@@ -260,6 +281,9 @@ def load_hermes_gpu_config(path: Path, fleet_config_path: str | os.PathLike[str]
         retry_backoff_seconds=backoff,
         default_profile=default_profile,
         swap_wait_seconds=_clamp_swap_wait(raw_wait),
+        lease_wait_seconds=_clamp_lease_wait(
+            os.environ.get(_LEASE_WAIT_ENV) or data.get("lease_wait_seconds", 0.0)
+        ),
         hermes_home=home,
         profiles={str(key): dict(value) for key, value in profiles.items() if isinstance(value, dict)},
         path=path,
@@ -358,6 +382,7 @@ class HermesModelWatcher:
     _last_working_config: Optional[dict[str, Any]] = field(default=None, init=False, repr=False)
     _blocked_target: Optional[str] = field(default=None, init=False, repr=False)
     _profile_source: Optional[bytes] = field(default=None, init=False, repr=False)
+    _observed_model: Optional[str] = field(default=None, init=False, repr=False)
     _operation_started: Optional[float] = field(default=None, init=False, repr=False)
     _published_profile: Optional[str] = field(default=None, init=False, repr=False)
     _published_context: tuple[Optional[int], Optional[str]] = field(
@@ -393,10 +418,12 @@ class HermesModelWatcher:
             duration_ms = int((now - self._operation_started) * 1000) if self._operation_started else 0
             self._phase_started = time.monotonic()
             logger.info(
-                "Hermes GPU phase=%s desired=%s loaded=%s attempt=%s duration_ms=%s result_code=%s",
+                "Hermes GPU phase=%s desired_profile=%s loaded_profile=%s loaded_model=%r "
+                "attempt=%s duration_ms=%s result_code=%s",
                 phase,
-                self.desired or "none",
-                self.loaded or "none",
+                _log_profile_name(self.desired),
+                _log_profile_name(self.loaded),
+                self._observed_model if self.loaded else None,
                 self.attempt,
                 duration_ms,
                 code or "none",
@@ -453,6 +480,26 @@ class HermesModelWatcher:
                 1, self.snapshot()["retry_after_seconds"] or 5
             )
         return None
+
+    async def wait_while_leased(
+        self,
+        max_wait_seconds: Optional[float] = None,
+    ) -> tuple[Optional[tuple[str, int]], int]:
+        """Hold a request while Studio borrows the slot; return the moment the lease ends."""
+        budget = _clamp_lease_wait(
+            self.cfg.lease_wait_seconds if max_wait_seconds is None else max_wait_seconds
+        )
+        retry = self.retry_response()
+        if retry is None or budget <= 0 or retry[0] != "gpu_leased_by_studio":
+            return retry, 0
+        started = time.monotonic()
+        # ponytail: 1s poll; the lease end is a fleet start call, not an event here.
+        while retry is not None and retry[0] == "gpu_leased_by_studio":
+            if time.monotonic() - started >= budget:
+                break
+            await asyncio.sleep(_LEASE_POLL_SECONDS)
+            retry = self.retry_response()
+        return retry, max(1, int((time.monotonic() - started) * 1000))
 
     async def wait_while_swapping(
         self,
@@ -662,6 +709,7 @@ class HermesModelWatcher:
         if not matched:
             self._clear_loaded_runtime()
             return None
+        self._observed_model = display_model_stem(process_hint) or None
         profile = self.cfg.profiles[matched]
         self.configured_n_ctx = _positive_int(profile.get("context_size"))
         self.effective_n_ctx = _positive_int(result.get("effective_n_ctx"))
@@ -699,6 +747,7 @@ class HermesModelWatcher:
         # swap task owns loaded-state verification until it releases the slot.
         self._refresh_profile_config()
         if probe_loaded or (self.loaded is None and not self.swapping):
+            previous_model = self._observed_model
             self.loaded = await self.read_loaded()
             if self.loaded:
                 self.last_working = self.loaded
@@ -712,6 +761,12 @@ class HermesModelWatcher:
                 )
                 manager.set_slot_config(self.cfg.slot_id, self._last_working_config)
                 self._publish_loaded(self.loaded)
+                if self._observed_model != previous_model:
+                    logger.info(
+                        "Hermes GPU verified loaded_profile=%s loaded_model=%r",
+                        _log_profile_name(self.loaded),
+                        self._observed_model,
+                    )
         coordination = self._manager().slot_operation_snapshot(self.cfg.slot_id)
         if coordination.get("manual_stop"):
             self.desired = self.read_desired()
@@ -840,9 +895,11 @@ class HermesModelWatcher:
                     self._publish_loaded(target)
                     self._set_phase("idle")
                     logger.info(
-                        "Hermes GPU ready desired=%s loaded=%s attempts=%s effective_n_ctx=%s duration_ms=%s result_code=ok",
-                        self.desired,
-                        self.loaded,
+                        "Hermes GPU ready desired_profile=%s loaded_profile=%s loaded_model=%r "
+                        "attempts=%s effective_n_ctx=%s duration_ms=%s result_code=ok",
+                        _log_profile_name(self.desired),
+                        _log_profile_name(self.loaded),
+                        self._observed_model,
                         self.attempt,
                         self.effective_n_ctx or "unknown",
                         int((time.monotonic() - self._operation_started) * 1000),
@@ -966,6 +1023,7 @@ class HermesModelWatcher:
         self._published_context = published_context
 
     def _clear_loaded_runtime(self) -> None:
+        self._observed_model = None
         self.configured_n_ctx = None
         self.effective_n_ctx = None
         self.context_source = None

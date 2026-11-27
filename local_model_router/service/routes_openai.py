@@ -1038,6 +1038,9 @@ async def handle_chat_completions(ctx: RouterContext, request: Request) -> Respo
                 type(exc).__name__,
             )
         retry = ctx.hermes_watcher.retry_response()
+        if retry is not None and retry[0] == "gpu_leased_by_studio":
+            retry, waited_ms = await ctx.hermes_watcher.wait_while_leased()
+            swap_wait_state["ms"] += waited_ms
         if retry is not None and retry[0] == "gpu_swap_in_progress":
             retry, waited_ms = await ctx.hermes_watcher.wait_while_swapping()
             swap_wait_state["ms"] += waited_ms
