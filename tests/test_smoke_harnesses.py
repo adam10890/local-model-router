@@ -409,7 +409,7 @@ def test_rc_report_fails_closed_when_client_evidence_is_unknown(tmp_path, monkey
 
     def request(_method, url, _api_key, payload=None, **_kwargs):
         if url.endswith("/harnesses"):
-            return {"harnesses": [{"harness_id": "pi", "kind": "pi", "connections": [{"name": "default"}]}]}
+            return {"harnesses": [{"harness_id": "claude_code_local", "kind": "claude_code", "connections": [{"name": "default"}]}]}
         if payload and payload.get("tools"):
             return {"choices": [{"message": {"tool_calls": [{"function": {"name": "imperium_ping"}}]}}]}
         return {"choices": [{"message": {"content": "OK"}}]}
@@ -423,15 +423,101 @@ def test_rc_report_fails_closed_when_client_evidence_is_unknown(tmp_path, monkey
         module.smoke(
             "http://router:9000",
             check_tools=True,
-            harness_ids={"pi"},
+            harness_ids={"claude_code_local"},
             json_output=output,
             collect_evidence=True,
-            client_canary_ids={"pi"},
+            client_canary_ids={"claude_code_local"},
             require_complete_evidence=True,
         )
 
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["endpoint_ok"] is True
     assert report["ok"] is False
-    assert report["incomplete_harnesses"] == ["pi"]
-    assert report["evidence"]["pi"]["client_canary"]["reason_code"] == "client_canary_not_implemented"
+    assert report["incomplete_harnesses"] == ["claude_code_local"]
+    assert report["evidence"]["claude_code_local"]["client_canary"]["reason_code"] == "client_canary_not_implemented"
+
+
+def test_pi_canary_is_isolated_tool_free_and_sanitized(monkeypatch):
+    module = _script_module()
+    monkeypatch.setenv("OPENAI_API_KEY", "cloud-secret")
+    observed = {}
+
+    def run(args, **kwargs):
+        observed.update({"args": args, **kwargs})
+        agent_dir = Path(kwargs["env"]["PI_CODING_AGENT_DIR"])
+        provider = json.loads((agent_dir / "models.json").read_text())["providers"]["imperium"]
+        assert provider["baseUrl"] == "http://127.0.0.1:9001/harnesses/pi/v1"
+        assert provider["apiKey"] == "ROUTER_API_KEY"
+        assert kwargs["shell"] is False
+        return subprocess.CompletedProcess(args, 0, "IMPERIUM_CANARY_OK\n", "private stderr")
+
+    counts = iter([7, 8])
+    result = module._run_pi_canary(
+        "http://127.0.0.1:9001/harnesses/pi/v1",
+        "http://127.0.0.1:9001",
+        "router-secret",
+        30,
+        which=lambda _name: r"C:\private\pi.cmd",
+        run=run,
+        request_count=lambda *_args: next(counts),
+    )
+
+    assert result == {"status": "pass", "evidence": "tested", "routing": "verified"}
+    args = observed["args"]
+    assert args[1:3] == ["-p", module._HERMES_CANARY_PROMPT]
+    for flag in ("--no-tools", "--no-session", "--no-extensions", "--no-mcp", "--no-context-files"):
+        assert flag in args
+    env = observed["env"]
+    assert "OPENAI_API_KEY" not in env
+    assert "HERMES_HOME" not in env
+    assert env["ROUTER_API_KEY"] == "router-secret"
+    assert env["PI_OFFLINE"] == "1"
+    assert not Path(observed["cwd"]).exists()
+    assert not Path(env["PI_CODING_AGENT_DIR"]).exists()
+    assert "router-secret" not in json.dumps(result)
+
+
+def test_pi_canary_failures_stay_content_free():
+    module = _script_module()
+    missing = module._run_pi_canary(
+        "u", "r", "k", 1,
+        which=lambda _name: None,
+        run=lambda *_a, **_k: pytest.fail("client must not run"),
+        request_count=lambda *_a: pytest.fail("counter must not run"),
+    )
+    assert missing["reason_code"] == "executable_not_found"
+
+    failed = module._run_pi_canary(
+        "u", "r", "router-secret", 1,
+        which=lambda _name: "pi",
+        run=lambda args, **_k: subprocess.CompletedProcess(args, 1, "", '503: {"code":"private"}'),
+        request_count=lambda *_a: 3,
+    )
+    assert failed["reason_code"] == "client_canary_failed"
+    assert "private" not in json.dumps(failed)
+
+
+def test_smoke_dispatches_pi_canary(monkeypatch):
+    module = _script_module()
+
+    def request(_method, url, _api_key, payload=None, **_kwargs):
+        if url.endswith("/harnesses"):
+            return {"harnesses": [{"harness_id": "pi", "kind": "pi", "connections": [{"name": "default"}]}]}
+        return {"choices": [{"message": {"content": "OK"}}]}
+
+    seen = []
+    monkeypatch.setattr(module, "_request", request)
+    monkeypatch.setattr(module, "_probe_installed", lambda _kind: {"status": "pass", "evidence": "observed"})
+    monkeypatch.setattr(module, "_probe_stable", lambda _kind: module._unknown("stable_lookup_failed"))
+    monkeypatch.setattr(
+        module, "_run_pi_canary",
+        lambda url, *_args: seen.append(url) or {"status": "pass", "evidence": "tested"},
+    )
+
+    report = module.smoke(
+        "http://router:9000", check_stream=False, harness_ids={"pi"},
+        collect_evidence=True, client_canary_ids={"pi"},
+    )
+
+    assert seen == ["http://router:9000/harnesses/pi/v1"]
+    assert report["evidence"]["pi"]["client_canary"]["status"] == "pass"

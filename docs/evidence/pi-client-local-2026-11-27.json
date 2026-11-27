@@ -1,0 +1,51 @@
+{
+  "connections": [
+    {
+      "checks": {
+        "chat": "pass",
+        "models": "pass",
+        "stream": "pass",
+        "tools": "pass"
+      },
+      "connection": "default",
+      "harness": "pi"
+    }
+  ],
+  "endpoint_ok": true,
+  "evidence": {
+    "pi": {
+      "client_canary": {
+        "evidence": "tested",
+        "routing": "verified",
+        "status": "pass"
+      },
+      "endpoint": {
+        "connections": [
+          "default"
+        ],
+        "evidence": "tested",
+        "status": "pass"
+      },
+      "installed": {
+        "evidence": "observed",
+        "status": "pass",
+        "version": "1.5.2"
+      },
+      "overall": "pass",
+      "stable": {
+        "alignment": "behind",
+        "evidence": "documented",
+        "installed_version": "1.5.2",
+        "source_url": "https://www.npmjs.com/package/@earendil-works/pi-coding-agent",
+        "status": "pass",
+        "version": "1.6.1"
+      }
+    }
+  },
+  "kind": "harness_smoke",
+  "ok": true,
+  "required_harnesses": [
+    "pi"
+  ],
+  "schema_version": 2
+}
