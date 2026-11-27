@@ -82,6 +82,10 @@ $env:TEMP = $Temp
 $env:TMP = $Temp
 $env:IMPERIUM_HOME = Join-Path $LocalAppData "Imperium"
 $env:A0_LMM_ROUTER_CONFIG = Join-Path $env:IMPERIUM_HOME "conf\llama_cpp_servers.yaml"
+# Resolve the canary client before PATH is narrowed; only the canary call gets it back.
+$CanaryClientPath = $(if ($HarnessCanary) {
+    (@("pi", "node") | ForEach-Object { Split-Path -Parent (Get-Command $_ -ErrorAction Stop).Source } | Select-Object -Unique) -join ";"
+} else { "" })
 $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
 if ($FullOfflineSetup) { $env:IMPERIUM_OFFLINE = "1" }
 if ($Launch) { $KeepInstalled = $true }
@@ -238,9 +242,15 @@ try {
     & (Join-Path $Repo "scripts\smoke_provider.ps1") @SmokeArgs | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "The installed provider smoke failed." }
     if ($HarnessCanary) {
-        & $Python (Join-Path $Repo "scripts\smoke_harnesses.py") --rc --harness pi `
-            --base-url "http://127.0.0.1:9100" --json-output $HarnessResult --timeout 300 --max-tokens 512
-        if ($LASTEXITCODE -ne 0) { throw "The Pi harness canary failed." }
+        $CleanPath = $env:PATH
+        $env:PATH = "$CanaryClientPath;$CleanPath"
+        try {
+            & $Python (Join-Path $Repo "scripts\smoke_harnesses.py") --rc --harness pi `
+                --base-url "http://127.0.0.1:9100" --json-output $HarnessResult --timeout 300 --max-tokens 512
+            if ($LASTEXITCODE -ne 0) { throw "The Pi harness canary failed." }
+        } finally {
+            $env:PATH = $CleanPath
+        }
     }
     if ($FullOfflineSetup) {
         $AgentRun = Invoke-RestMethod "http://127.0.0.1:9100/agents/code-review/runs" -Method Post `

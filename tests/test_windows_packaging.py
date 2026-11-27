@@ -151,6 +151,9 @@ def test_cleanroom_harness_canary_pins_only_pi_and_runs_rc_smoke():
     assert "$env:A0_LMM_ROUTER_HARNESSES_CONFIG = $HarnessConfig" in cleanroom
     assert "model: qwen3-1.7b-q8" in cleanroom
     assert "--rc --harness pi" in cleanroom
+    # The client is resolved before the clean-room PATH narrowing and restored after the call.
+    assert cleanroom.index("$CanaryClientPath = ") < cleanroom.index('$env:PATH = "$env:SystemRoot')
+    assert "$env:PATH = $CleanPath" in cleanroom
     # The config must be in place before the router reads it at startup.
     assert cleanroom.index("A0_LMM_ROUTER_HARNESSES_CONFIG") < cleanroom.index('"local_model_router", "serve"')
 
