@@ -151,14 +151,21 @@ request counter increased. A correct token without routing evidence remains
 `Unknown` with `routing_unverified`. Prompt, response, API key, executable
 path, and temporary paths are not written to the artifact.
 
+`--client-canary pi` runs Pi in print mode (`pi -p`) with a temporary
+`PI_CODING_AGENT_DIR` holding only an `imperium` provider that points at the
+selected router's Pi connection, plus `PI_OFFLINE=1` and every tool, session,
+extension, skill, MCP, and context-file loader turned off. It uses the same
+verdict as Hermes: exit code, exact reply token, and the router's `pi` request
+counter.
+
 The JSON schema is version 2. It preserves `connections` for existing readers
 and separates `endpoint`, `installed`, `stable`, and `client_canary` evidence.
 RC evidence must use `--rc`, explicit required harness IDs, and
 `--json-output <path>`. RC mode requires endpoint, installed-version, and
 client-canary evidence for every requested harness; the stable lookup is
-reported but deliberately not required. Hermes is the first implemented
-client canary; Agent Zero, Pi, and Claude Code therefore remain `Unknown` in
-RC mode even when their endpoint smoke succeeds.
+reported but deliberately not required. Hermes and Pi have client canaries;
+Agent Zero and Claude Code therefore remain `Unknown` in RC mode even when
+their endpoint smoke succeeds.
 
 ## Agent Zero 2.7
 

@@ -232,11 +232,18 @@ def _run_hermes_canary(
         return _unknown("client_canary_timeout")
     except OSError:
         return _unknown("client_canary_failed")
+    return _canary_outcome(
+        result, before_count, lambda: request_count(router_base_url, api_key, "hermes", timeout)
+    )
+
+
+def _canary_outcome(result, before_count, count_after) -> dict:
+    """Shared, content-free verdict: client exit, exact reply, router counter moved."""
     if result.returncode != 0:
         return _unknown("client_canary_failed")
     if _HERMES_CANARY_RESPONSE not in (result.stdout or ""):
         return _unknown("unexpected_response")
-    after_count = request_count(router_base_url, api_key, "hermes", timeout)
+    after_count = count_after()
     if before_count is None or after_count is None or after_count <= before_count:
         return {
             "status": "unknown",
@@ -245,6 +252,78 @@ def _run_hermes_canary(
             "client_status": "pass",
         }
     return {"status": "pass", "evidence": "tested", "routing": "verified"}
+
+
+def _run_pi_canary(
+    connection_url: str,
+    router_base_url: str,
+    api_key: str,
+    timeout: int,
+    *,
+    which=shutil.which,
+    run=subprocess.run,
+    request_count=_routing_request_count,
+) -> dict:
+    command = which("pi")
+    if not command:
+        return _unknown("executable_not_found")
+    before_count = request_count(router_base_url, api_key, "pi", timeout)
+    # Same provider shape as the Pi setup manifest; apiKey names the env var Pi reads.
+    models = {"providers": {"imperium": {
+        "baseUrl": connection_url,
+        "apiKey": "ROUTER_API_KEY",
+        "api": "openai-completions",
+        "models": [{"id": "local", "name": "Imperium canary"}],
+    }}}
+    try:
+        with tempfile.TemporaryDirectory(prefix="imperium-pi-canary-") as directory:
+            root = Path(directory)
+            agent_dir = root / "agent"
+            workspace = root / "workspace"
+            agent_dir.mkdir()
+            workspace.mkdir()
+            (agent_dir / "models.json").write_text(json.dumps(models), encoding="utf-8")
+            (agent_dir / "settings.json").write_text("{}", encoding="utf-8")
+            env = _canary_environment(agent_dir, api_key)
+            env.pop("HERMES_HOME", None)
+            env.update({"PI_CODING_AGENT_DIR": str(agent_dir), "PI_OFFLINE": "1", "PI_TELEMETRY": "0"})
+            result = run(
+                [
+                    command,
+                    "-p",
+                    _HERMES_CANARY_PROMPT,
+                    "--provider",
+                    "imperium",
+                    "--model",
+                    "local",
+                    "--thinking",
+                    "off",
+                    "--no-tools",
+                    "--no-session",
+                    "--no-extensions",
+                    "--no-skills",
+                    "--no-context-files",
+                    "--no-prompt-templates",
+                    "--no-themes",
+                    "--no-mcp",
+                    "--no-approve",
+                ],
+                shell=False,
+                cwd=workspace,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+                stdin=subprocess.DEVNULL,
+            )
+    except subprocess.TimeoutExpired:
+        return _unknown("client_canary_timeout")
+    except OSError:
+        return _unknown("client_canary_failed")
+    return _canary_outcome(
+        result, before_count, lambda: request_count(router_base_url, api_key, "pi", timeout)
+    )
 
 
 def _evidence_status(row: dict) -> str:
@@ -444,6 +523,13 @@ def smoke(
                         api_key,
                         timeout,
                     )
+                elif kind == "pi":
+                    evidence["client_canary"] = _run_pi_canary(
+                        _connection_url(base_url, harness_id, "default"),
+                        base_url,
+                        api_key,
+                        timeout,
+                    )
                 else:
                     evidence["client_canary"] = _unknown("client_canary_not_implemented")
             evidence["overall"] = _evidence_status(evidence)
@@ -481,7 +567,7 @@ def main() -> int:
         "--client-canary",
         action="append",
         default=[],
-        choices=["hermes"],
+        choices=["hermes", "pi"],
         help="run an isolated real-client canary (repeatable)",
     )
     parser.add_argument("--json-output", help="write a sanitized machine-readable result")
