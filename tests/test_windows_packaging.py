@@ -141,6 +141,8 @@ def test_windows_validation_separates_pr_nightly_and_nvidia_evidence():
     # Hermes: pinned git tag, editable install (git-derived version), .cmd shim only on PATH.
     assert "--branch v0.23.5 https://github.com/NousResearch/hermes-agent" in workflow
     assert "pip install --quiet -e $HermesSrc" in workflow
+    assert 'python-version: "3.14"' in workflow and "update-environment: false" in workflow
+    assert 'python.exe" -c "import hermes_cli.main"' in workflow
     assert "hermes.cmd" in workflow and "GITHUB_PATH -Value $HermesShim" in workflow
     assert "harness-smoke.json" in workflow
     assert "push:" not in release_workflow

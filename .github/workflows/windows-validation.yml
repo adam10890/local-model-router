@@ -95,18 +95,29 @@ jobs:
       - name: Install Pi client for the harness canary
         shell: pwsh
         run: npm install -g @earendil-works/pi-coding-agent@1.5.2
+      # Hermes declares its dependencies only for Python >= 3.14; keep the job itself on 3.12.
+      - id: hermes-python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          update-environment: false
       - name: Install Hermes client for the harness canary
         shell: pwsh
         # Git clone + editable install: Hermes derives its version from git. A .cmd shim keeps
         # the Hermes venv's python.exe off PATH for the remaining steps.
+        env:
+          HERMES_PYTHON: ${{ steps.hermes-python.outputs.python-path }}
         run: |
           $HermesSrc = Join-Path $env:RUNNER_TEMP "hermes-agent"
           $HermesVenv = Join-Path $env:RUNNER_TEMP "hermes-venv"
           $HermesShim = Join-Path $env:RUNNER_TEMP "hermes-shim"
           git clone --quiet --depth 1 --branch v0.23.5 https://github.com/NousResearch/hermes-agent $HermesSrc
-          python -m venv $HermesVenv
+          & $env:HERMES_PYTHON -m venv $HermesVenv
           & "$HermesVenv\Scripts\python.exe" -m pip install --quiet -e $HermesSrc
           if ($LASTEXITCODE -ne 0) { throw "Hermes install failed." }
+          # --version takes a fast path; importing the real entry point catches missing deps.
+          & "$HermesVenv\Scripts\python.exe" -c "import hermes_cli.main"
+          if ($LASTEXITCODE -ne 0) { throw "Hermes cannot import its entry point." }
           New-Item -ItemType Directory -Force $HermesShim | Out-Null
           Set-Content -LiteralPath "$HermesShim\hermes.cmd" -Value "@`"$HermesVenv\Scripts\hermes.exe`" %*" -Encoding ASCII
           Add-Content -LiteralPath $env:GITHUB_PATH -Value $HermesShim
