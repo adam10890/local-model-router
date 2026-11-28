@@ -92,6 +92,9 @@ jobs:
           coverage report --include="local_model_router/cli.py,local_model_router/setup/*" --fail-under=70
           python -m compileall -q local_model_router tests
           git diff --check
+      - name: Install Pi client for the harness canary
+        shell: pwsh
+        run: npm install -g @earendil-works/pi-coding-agent@1.5.2
       - name: Build CPU offline bundle
         shell: pwsh
         run: ./scripts/build_windows_bundle.ps1 -IncludeOfflineAssets -OfflineBackends cpu
@@ -103,7 +106,7 @@ jobs:
         # what intermittently failed this job (runs #52 and #81).
         env:
           IMPERIUM_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./scripts/test_windows_cleanroom.ps1 -FullOfflineSetup -Backend cpu -Lifecycle
+        run: ./scripts/test_windows_cleanroom.ps1 -FullOfflineSetup -Backend cpu -Lifecycle -HarnessCanary
       - name: Upload sanitized CPU evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -112,6 +115,7 @@ jobs:
           path: |
             build/cleanroom/cleanroom-result.json
             build/cleanroom/provider-smoke.json
+            build/cleanroom/harness-smoke.json
           if-no-files-found: warn
           retention-days: 30
 
