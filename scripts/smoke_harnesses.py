@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import urllib.error
 import urllib.request
@@ -239,6 +240,10 @@ def _run_hermes_canary(
 
 def _canary_outcome(result, before_count, count_after) -> dict:
     """Shared, content-free verdict: client exit, exact reply, router counter moved."""
+    if result.returncode != 0 and os.environ.get("IMPERIUM_CANARY_DEBUG") == "1":
+        # Console only (CI log), never the artifact: the fixed canary prompt carries no secrets.
+        tail = ((result.stdout or "")[-2000:] + "\n" + (result.stderr or "")[-4000:]).strip()
+        print(f"[DEBUG] client exit {result.returncode}:\n{tail}", file=sys.stderr)
     if result.returncode != 0:
         return _unknown("client_canary_failed")
     if _HERMES_CANARY_RESPONSE not in (result.stdout or ""):

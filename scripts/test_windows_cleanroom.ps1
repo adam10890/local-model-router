@@ -273,6 +273,7 @@ try {
     if ($HarnessCanary) {
         $CleanPath = $env:PATH
         $env:PATH = "$CanaryClientPath;$CleanPath"
+        $env:IMPERIUM_CANARY_DEBUG = "1"  # failed client output goes to the CI log, not the artifact
         try {
             & $Python (Join-Path $Repo "scripts\smoke_harnesses.py") --rc --harness pi --harness hermes `
                 --base-url "http://127.0.0.1:9100" --json-output $HarnessResult --timeout 600 --max-tokens 512

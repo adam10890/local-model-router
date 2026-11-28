@@ -521,3 +521,16 @@ def test_smoke_dispatches_pi_canary(monkeypatch):
 
     assert seen == ["http://router:9000/harnesses/pi/v1"]
     assert report["evidence"]["pi"]["client_canary"]["status"] == "pass"
+
+
+def test_canary_debug_prints_failed_client_output_to_console_only(monkeypatch, capsys):
+    module = _script_module()
+    failed = subprocess.CompletedProcess(["x"], 2, "", "ValueError: context too small")
+    monkeypatch.delenv("IMPERIUM_CANARY_DEBUG", raising=False)
+    module._canary_outcome(failed, 1, lambda: 1)
+    assert capsys.readouterr().err == ""
+    monkeypatch.setenv("IMPERIUM_CANARY_DEBUG", "1")
+    verdict = module._canary_outcome(failed, 1, lambda: 1)
+    assert "ValueError: context too small" in capsys.readouterr().err
+    assert verdict["reason_code"] == "client_canary_failed"
+    assert "context" not in json.dumps(verdict)
