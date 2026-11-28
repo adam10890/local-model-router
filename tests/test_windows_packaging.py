@@ -136,8 +136,26 @@ def test_windows_validation_separates_pr_nightly_and_nvidia_evidence():
     assert "-FullOfflineSetup -Backend cpu -Lifecycle" in workflow
     assert "self-hosted, windows, x64, nvidia" in workflow
     assert "cleanroom-result.json" in workflow and "provider-smoke.json" in workflow
+    assert "-Lifecycle -HarnessCanary" in workflow
+    assert "@earendil-works/pi-coding-agent@" in workflow
+    assert "harness-smoke.json" in workflow
     assert "push:" not in release_workflow
     assert "gh release create" not in release_workflow
+
+
+def test_cleanroom_harness_canary_pins_only_pi_and_runs_rc_smoke():
+    cleanroom = (ROOT / "scripts" / "test_windows_cleanroom.ps1").read_text(encoding="utf-8")
+
+    assert "[switch]$HarnessCanary" in cleanroom
+    assert "-HarnessCanary needs -FullOfflineSetup" in cleanroom
+    assert "$env:A0_LMM_ROUTER_HARNESSES_CONFIG = $HarnessConfig" in cleanroom
+    assert "model: qwen3-1.7b-q8" in cleanroom
+    assert "--rc --harness pi" in cleanroom
+    # The client is resolved before the clean-room PATH narrowing and restored after the call.
+    assert cleanroom.index("$CanaryClientPath = ") < cleanroom.index('$env:PATH = "$env:SystemRoot')
+    assert "$env:PATH = $CleanPath" in cleanroom
+    # The config must be in place before the router reads it at startup.
+    assert cleanroom.index("A0_LMM_ROUTER_HARNESSES_CONFIG") < cleanroom.index('"local_model_router", "serve"')
 
 
 def test_provider_smokes_are_machine_readable_and_rc_strict():

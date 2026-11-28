@@ -71,7 +71,7 @@ def _probe_installed(kind: str, *, which=shutil.which, run=subprocess.run) -> di
             shell=False,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=30,  # cold node/npm shims on CI runners exceed 5s
             check=False,
             stdin=subprocess.DEVNULL,
         )
