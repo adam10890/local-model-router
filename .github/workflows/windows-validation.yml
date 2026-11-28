@@ -95,6 +95,22 @@ jobs:
       - name: Install Pi client for the harness canary
         shell: pwsh
         run: npm install -g @earendil-works/pi-coding-agent@1.5.2
+      - name: Install Hermes client for the harness canary
+        shell: pwsh
+        # Git clone + editable install: Hermes derives its version from git. A .cmd shim keeps
+        # the Hermes venv's python.exe off PATH for the remaining steps.
+        run: |
+          $HermesSrc = Join-Path $env:RUNNER_TEMP "hermes-agent"
+          $HermesVenv = Join-Path $env:RUNNER_TEMP "hermes-venv"
+          $HermesShim = Join-Path $env:RUNNER_TEMP "hermes-shim"
+          git clone --quiet --depth 1 --branch v0.23.5 https://github.com/NousResearch/hermes-agent $HermesSrc
+          python -m venv $HermesVenv
+          & "$HermesVenv\Scripts\python.exe" -m pip install --quiet -e $HermesSrc
+          if ($LASTEXITCODE -ne 0) { throw "Hermes install failed." }
+          New-Item -ItemType Directory -Force $HermesShim | Out-Null
+          Set-Content -LiteralPath "$HermesShim\hermes.cmd" -Value "@`"$HermesVenv\Scripts\hermes.exe`" %*" -Encoding ASCII
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $HermesShim
+          & "$HermesShim\hermes.cmd" --version
       - name: Build CPU offline bundle
         shell: pwsh
         run: ./scripts/build_windows_bundle.ps1 -IncludeOfflineAssets -OfflineBackends cpu

@@ -84,7 +84,8 @@ $env:IMPERIUM_HOME = Join-Path $LocalAppData "Imperium"
 $env:A0_LMM_ROUTER_CONFIG = Join-Path $env:IMPERIUM_HOME "conf\llama_cpp_servers.yaml"
 # Resolve the canary client before PATH is narrowed; only the canary call gets it back.
 $CanaryClientPath = $(if ($HarnessCanary) {
-    (@("pi", "node") | ForEach-Object { Split-Path -Parent (Get-Command $_ -ErrorAction Stop).Source } | Select-Object -Unique) -join ";"
+    # git: Hermes reads its version from its git checkout.
+    (@("pi", "node", "hermes", "git") | ForEach-Object { Split-Path -Parent (Get-Command $_ -ErrorAction Stop).Source } | Select-Object -Unique) -join ";"
 } else { "" })
 $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
 if ($FullOfflineSetup) { $env:IMPERIUM_OFFLINE = "1" }
@@ -189,6 +190,26 @@ if ($FullOfflineSetup) {
         if ($LASTEXITCODE -ne 0) { throw "The updated managed runtime did not restart." }
         $RuntimeRollbackVerified = $true
     }
+    if ($HarnessCanary) {
+        # Hermes refuses windows below 64K, so serve a real 64K: Qwen3's native 32K with
+        # its documented YaRN factor 2, plus q8 KV to halve the cache (~3.7 GB).
+        & $Python -m local_model_router setup --stop-runtime | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "The managed runtime did not stop for the canary context." }
+        & $Python -c @"
+import os, yaml
+path = os.environ['A0_LMM_ROUTER_CONFIG']
+data = yaml.safe_load(open(path, encoding='utf-8'))
+slot = data['active_slots'][0]
+slot['context_size'] = 65536
+slot['flash_attention'] = True
+slot['extra_args'] = ['--rope-scaling', 'yarn', '--rope-scale', '2', '--yarn-orig-ctx', '32768',
+                      '--cache-type-k', 'q8_0', '--cache-type-v', 'q8_0']
+open(path, 'w', encoding='utf-8').write(yaml.safe_dump(data, sort_keys=False))
+"@
+        if ($LASTEXITCODE -ne 0) { throw "The canary context could not be configured." }
+        & $Python -m local_model_router setup --start-runtime | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "The managed runtime did not restart with the canary context." }
+    }
 }
 
 $env:OBSERVER_HOST = "127.0.0.1"
@@ -196,13 +217,21 @@ $env:OBSERVER_PORT = "9100"
 $env:A0_LMM_ROUTER_AGENT_BASE_URL = "http://127.0.0.1:9100/v1"
 $HarnessResult = Join-Path $Root "harness-smoke.json"
 if ($HarnessCanary) {
-    # Pin only Pi to the offline model so the real Pi client can run against it (Q4, G2).
+    # Pin only the canary clients to the offline model so the real clients can run (Q4, G2).
     $HarnessConfig = Join-Path $Root "harnesses.canary.yaml"
     @"
 harnesses:
   pi:
     display_name: Pi
     kind: pi
+    protocol: openai
+    location: host
+    connections:
+      default:
+        model: qwen3-1.7b-q8
+  hermes:
+    display_name: Hermes
+    kind: hermes
     protocol: openai
     location: host
     connections:
@@ -245,9 +274,9 @@ try {
         $CleanPath = $env:PATH
         $env:PATH = "$CanaryClientPath;$CleanPath"
         try {
-            & $Python (Join-Path $Repo "scripts\smoke_harnesses.py") --rc --harness pi `
-                --base-url "http://127.0.0.1:9100" --json-output $HarnessResult --timeout 300 --max-tokens 512
-            if ($LASTEXITCODE -ne 0) { throw "The Pi harness canary failed." }
+            & $Python (Join-Path $Repo "scripts\smoke_harnesses.py") --rc --harness pi --harness hermes `
+                --base-url "http://127.0.0.1:9100" --json-output $HarnessResult --timeout 600 --max-tokens 512
+            if ($LASTEXITCODE -ne 0) { throw "The harness canary failed." }
         } finally {
             $env:PATH = $CleanPath
         }
